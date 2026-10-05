@@ -24,8 +24,7 @@ extension Highlight: @retroactive FetchableRecord, @retroactive MutablePersistab
 
 // MARK: - 数据库
 
-/// 单一 SQLite 文件：~/Library/Containers/com.kongxiangrui.KongGlean/Data/Library/Application Support/KongGlean/glean.sqlite
-/// （启用沙盒后的实际路径；备份时复制整个 KongGlean 文件夹即可）
+/// 单一 SQLite 文件：~/Library/Application Support/KongGlean/glean.sqlite（未开沙盒；备份时复制整个 KongGlean 文件夹即可）
 final class AppDatabase {
     let writer: any DatabaseWriter
 

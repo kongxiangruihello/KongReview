@@ -47,9 +47,8 @@ targets:
     entitlements:
       path: KongGlean/KongGlean.entitlements
       properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.network.client: true
-        com.apple.security.files.user-selected.read-write: true
+        # 个人自用，不开沙盒：与 DMG 版（Tools/build-dmg.sh）共用同一个数据目录
+        com.apple.security.app-sandbox: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kongxiangrui.KongGlean

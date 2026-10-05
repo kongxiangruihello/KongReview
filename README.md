@@ -23,6 +23,18 @@
 
 ## 构建
 
+### 方式一：只打包 DMG（不需要安装 Xcode）
+
+只需要 Apple 命令行工具（`xcode-select --install`）：
+
+```bash
+./Tools/build-dmg.sh        # 产物在 build/KongGlean-<版本>.dmg
+```
+
+用的是本机 ad-hoc 签名，没有公证。第一次打开时，如果系统提示“无法验证开发者”，在访达中右键点 KongGlean →“打开”即可；或者到“系统设置 → 隐私与安全性”里点“仍要打开”。
+
+### 方式二：用 Xcode 开发
+
 需要 Xcode 16 或更新版本，系统要求 macOS 14 以上。
 
 ```bash
@@ -41,6 +53,10 @@ open KongGlean.xcodeproj
 ```bash
 cd Packages/KongGleanCore && swift test
 ```
+
+数据库层（表结构、全文检索、标签查询、捕获入库）和 `LibraryStore` 的测试在 `KongGleanTests/` 里，在 Xcode 中按 ⌘U 运行。
+
+> 开发状态：`KongGleanCore`、`AppDatabase`、`LibraryStore` 已用 Swift 6.0.3 + GRDB 7.8 编译，测试全部通过（Linux 环境）。SwiftUI 界面部分尚未在 Xcode 中编译过，第一次构建时可能需要修正少量编译问题。
 
 ## 目录结构
 
@@ -78,10 +94,10 @@ kongglean://add?text=学而时习之&title=论语&author=&url=&location=学而�
 
 ## 数据
 
-全部数据保存在一个 SQLite 文件中（应用开启了沙盒）：
+全部数据保存在一个 SQLite 文件中：
 
 ```
-~/Library/Containers/com.kongxiangrui.KongGlean/Data/Library/Application Support/KongGlean/glean.sqlite
+~/Library/Application Support/KongGlean/glean.sqlite
 ```
 
 在“设置 → 数据”里可以直接在访达中打开这个位置。备份时复制整个文件夹即可。
