@@ -17,3 +17,4 @@ KongGlean/KongGlean.entitlements
 
 # macOS
 .DS_Store
+build.log
