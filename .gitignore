@@ -1,0 +1,19 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+*.xcresult
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# 由 XcodeGen 生成
+KongGlean/Info.plist
+KongGlean/KongGlean.entitlements
+
+# macOS
+.DS_Store

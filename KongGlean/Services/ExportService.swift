@@ -1,0 +1,48 @@
+import AppKit
+import UniformTypeIdentifiers
+import KongGleanCore
+
+/// Markdown 导出（Obsidian 友好，带 YAML 头）
+@MainActor
+enum ExportService {
+
+    static func export(source: Source, store: LibraryStore) {
+        do {
+            let hs = try store.db.highlights(sourceId: source.id)
+            let md = MarkdownExporter.export(source: source, highlights: hs.reversed())
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = MarkdownExporter.fileName(for: source)
+            panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try md.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            store.report(error)
+        }
+    }
+
+    static func exportAll(store: LibraryStore) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "导出到此文件夹"
+        guard panel.runModal() == .OK, let dir = panel.url else { return }
+        do {
+            for source in store.sources {
+                let hs = try store.db.highlights(sourceId: source.id)
+                guard !hs.isEmpty else { continue }
+                let md = MarkdownExporter.export(source: source, highlights: hs.reversed())
+                try md.write(to: dir.appendingPathComponent(MarkdownExporter.fileName(for: source)),
+                             atomically: true, encoding: .utf8)
+            }
+            let unsorted = try store.db.highlights(unsortedOnly: true)
+            if !unsorted.isEmpty {
+                let md = MarkdownExporter.export(source: Source(title: "未归类"), highlights: unsorted.reversed())
+                try md.write(to: dir.appendingPathComponent("未归类.md"), atomically: true, encoding: .utf8)
+            }
+            NSWorkspace.shared.activateFileViewerSelecting([dir])
+        } catch {
+            store.report(error)
+        }
+    }
+}
