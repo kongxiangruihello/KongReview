@@ -29,6 +29,10 @@ final class LibraryStore {
     var editingSource: Source?
     var errorMessage: String?
 
+    /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
+    let review = ReviewState()
+    let list = ListState()
+
     /// 每次写入后递增，列表视图据此重新查询
     private(set) var revision = 0
 
@@ -152,6 +156,8 @@ struct HighlightDraft: Identifiable {
     var newSourceAuthor: String = ""
     var newSourceURL: String = ""
     var newSourceKind: SourceKind = .book
+    /// 是否展开“新建出处”表单
+    var showNewSource = false
 
     var isNew: Bool { highlight.id == nil }
 }

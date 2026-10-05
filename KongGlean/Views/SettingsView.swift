@@ -63,8 +63,6 @@ private struct ReviewSettings: View {
 }
 
 private struct CaptureSettings: View {
-    @State private var copied = false
-
     var body: some View {
         Form {
             Section("浏览器书签小程序") {
@@ -72,10 +70,9 @@ private struct CaptureSettings: View {
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Button(copied ? "已复制" : "复制书签代码") {
+                    Button("复制书签代码") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(CaptureRequest.bookmarklet, forType: .string)
-                        copied = true
                     }
                     Spacer()
                 }

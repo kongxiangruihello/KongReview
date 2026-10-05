@@ -7,10 +7,7 @@ struct DailyReviewView: View {
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
     @AppStorage(SettingsKeys.masteryLimit) private var masteryLimit = 5
 
-    /// 主题回顾：按标签限定范围；nil 为全库
-    @State private var theme: String?
-    @State private var cards: [ReviewCard] = []
-    @State private var position = 0
+    private var state: ReviewState { store.review }
 
     private var scheduler: ReviewScheduler {
         ReviewScheduler(config: .init(dailyCount: dailyCount, masteryLimit: masteryLimit))
@@ -20,28 +17,28 @@ struct DailyReviewView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if cards.isEmpty {
+            if state.cards.isEmpty {
                 ContentUnavailableView(
                     "暂无可回顾的摘录",
                     systemImage: "sun.max",
                     description: Text("先录入几条摘录，明天这里就会出现它们。")
                 )
-            } else if position >= cards.count {
+            } else if state.position >= state.cards.count {
                 finished
             } else {
                 ScrollView {
-                    ReviewCardView(card: cards[position], source: store.source(for: cards[position].highlight))
+                    ReviewCardView(card: state.cards[state.position], source: store.source(for: state.cards[state.position].highlight))
                         .padding(40)
                         .frame(maxWidth: 760)
                         .frame(maxWidth: .infinity)
                 }
                 Divider()
-                controls(for: cards[position])
+                controls(for: state.cards[state.position])
                     .padding()
             }
         }
-        .navigationTitle(theme.map { "主题回顾 · #\($0)" } ?? "今日回顾")
-        .task(id: theme) { loadSession(forceNew: false) }
+        .navigationTitle(state.theme.map { "主题回顾 · #\($0)" } ?? "今日回顾")
+        .task(id: state.theme) { loadSession(forceNew: false) }
         .onChange(of: store.revision) { refreshCards() }
     }
 
@@ -49,16 +46,16 @@ struct DailyReviewView: View {
 
     private var header: some View {
         HStack {
-            Picker("范围", selection: $theme) {
+            Picker("范围", selection: Bindable(store.review).theme) {
                 Text("全部").tag(String?.none)
                 ForEach(store.tags, id: \.self) { Text("#\($0)").tag(String?.some($0)) }
             }
             .frame(maxWidth: 220)
             Spacer()
-            if !cards.isEmpty {
-                ProgressView(value: Double(min(position, cards.count)), total: Double(cards.count))
+            if !state.cards.isEmpty {
+                ProgressView(value: Double(min(state.position, state.cards.count)), total: Double(state.cards.count))
                     .frame(width: 160)
-                Text("\(min(position + 1, cards.count)) / \(cards.count)")
+                Text("\(min(state.position + 1, state.cards.count)) / \(state.cards.count)")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
@@ -71,9 +68,9 @@ struct DailyReviewView: View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.seal").font(.system(size: 48)).foregroundStyle(.tint)
             Text("今日回顾完成").font(.title2)
-            Text("共 \(cards.count) 条").foregroundStyle(.secondary)
+            Text("共 \(state.cards.count) 条").foregroundStyle(.secondary)
             HStack {
-                Button("从头再看一遍") { position = 0; persist() }
+                Button("从头再看一遍") { state.position = 0; persist() }
                 Button("再抽一组") { loadSession(forceNew: true) }
             }
         }
@@ -85,7 +82,7 @@ struct DailyReviewView: View {
         HStack(spacing: 12) {
             Button { go(-1) } label: { Label("上一条", systemImage: "chevron.left") }
                 .keyboardShortcut(.leftArrow, modifiers: [])
-                .disabled(position == 0)
+                .disabled(state.position == 0)
             Button("编辑") { store.edit(card.highlight) }
                 .keyboardShortcut("e", modifiers: [])
 
@@ -134,26 +131,26 @@ struct DailyReviewView: View {
     }
 
     private func go(_ delta: Int) {
-        position = max(0, min(cards.count, position + delta))
+        state.position = max(0, min(state.cards.count, state.position + delta))
         persist()
     }
 
     private func loadSession(forceNew: Bool) {
         let today = ReviewSessionRecord.dayString(Date())
-        let key = ReviewSessionRecord.key(theme: theme)
+        let key = ReviewSessionRecord.key(theme: state.theme)
         do {
             if !forceNew,
                let saved = ReviewSessionRecord.load(key: key),
                saved.day == today {
                 let regular = try store.db.highlights(ids: saved.regularIds)
                 let mastery = try store.db.highlights(ids: saved.masteryIds)
-                cards = regular.map { ReviewCard(highlight: $0, isMastery: false) }
+                state.cards = regular.map { ReviewCard(highlight: $0, isMastery: false) }
                     + mastery.map { ReviewCard(highlight: $0, isMastery: true) }
-                position = min(saved.position, cards.count)
+                state.position = min(saved.position, state.cards.count)
                 return
             }
 
-            let (highlights, weights) = try store.db.reviewCandidates(tag: theme)
+            let (highlights, weights) = try store.db.reviewCandidates(tag: state.theme)
             let session: ReviewScheduler.Session
             if forceNew {
                 session = scheduler.makeSession(highlights: highlights, sourceWeights: weights)
@@ -162,9 +159,9 @@ struct DailyReviewView: View {
                 var rng = SeededGenerator.forDay(Date())
                 session = scheduler.makeSession(highlights: highlights, sourceWeights: weights, using: &rng)
             }
-            cards = session.regular.map { ReviewCard(highlight: $0, isMastery: false) }
+            state.cards = session.regular.map { ReviewCard(highlight: $0, isMastery: false) }
                 + session.mastery.map { ReviewCard(highlight: $0, isMastery: true) }
-            position = 0
+            state.position = 0
             persist()
         } catch {
             store.report(error)
@@ -173,10 +170,10 @@ struct DailyReviewView: View {
 
     /// 编辑或其他写入后，用数据库中的最新内容刷新卡片（顺序不变）
     private func refreshCards() {
-        let ids = cards.compactMap(\.highlight.id)
+        let ids = state.cards.compactMap(\.highlight.id)
         guard !ids.isEmpty, let fresh = try? store.db.highlights(ids: ids) else { return }
         let byId = Dictionary(uniqueKeysWithValues: fresh.compactMap { h in h.id.map { ($0, h) } })
-        cards = cards.map { card in
+        state.cards = state.cards.map { card in
             var c = card
             if let id = card.highlight.id, let h = byId[id] { c.highlight = h }
             return c
@@ -186,10 +183,10 @@ struct DailyReviewView: View {
     private func persist() {
         ReviewSessionRecord(
             day: ReviewSessionRecord.dayString(Date()),
-            regularIds: cards.filter { !$0.isMastery }.compactMap(\.highlight.id),
-            masteryIds: cards.filter(\.isMastery).compactMap(\.highlight.id),
-            position: position
-        ).save(key: ReviewSessionRecord.key(theme: theme))
+            regularIds: state.cards.filter { !$0.isMastery }.compactMap(\.highlight.id),
+            masteryIds: state.cards.filter(\.isMastery).compactMap(\.highlight.id),
+            position: state.position
+        ).save(key: ReviewSessionRecord.key(theme: state.theme))
     }
 }
 

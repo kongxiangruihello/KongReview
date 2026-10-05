@@ -12,11 +12,11 @@ struct ContentView: View {
         } detail: {
             detail
         }
-        .sheet(item: $store.editorDraft) { draft in
-            HighlightEditorView(draft: draft)
+        .sheet(item: $store.editorDraft) { _ in
+            HighlightEditorView()
         }
-        .sheet(item: $store.editingSource) { source in
-            SourceEditorView(source: source)
+        .sheet(item: $store.editingSource) { _ in
+            SourceEditorView()
         }
         .alert("出错了", isPresented: Binding(
             get: { store.errorMessage != nil },

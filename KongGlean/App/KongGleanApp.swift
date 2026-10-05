@@ -3,7 +3,9 @@ import KongGleanCore
 
 @main
 struct KongGleanApp: App {
-    @State private var store: LibraryStore
+    // 不用 @State：命令行工具链缺少 SwiftUIMacros 插件（macOS 27 SDK 起 @State 是宏）。
+    // App 结构体只创建一次，直接持有即可。
+    private let store: LibraryStore
 
     init() {
         let db: AppDatabase
@@ -13,7 +15,7 @@ struct KongGleanApp: App {
             // 数据库打不开时不要静默丢数据：直接终止并给出原因
             fatalError("无法打开 KongGlean 数据库：\(error)")
         }
-        _store = State(initialValue: LibraryStore(db: db))
+        store = LibraryStore(db: db)
     }
 
     var body: some Scene {

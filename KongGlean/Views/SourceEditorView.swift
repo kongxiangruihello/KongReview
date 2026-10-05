@@ -4,26 +4,34 @@ import KongGleanCore
 struct SourceEditorView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @State var source: Source
+
+    /// 直接读写 store.editingSource（不用 @State，见 ViewState.swift）
+    private var sourceBinding: Binding<Source> {
+        Binding(
+            get: { store.editingSource ?? Source(title: "") },
+            set: { store.editingSource = $0 }
+        )
+    }
+    private var source: Source { sourceBinding.wrappedValue }
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
                 Section("基本信息") {
-                    TextField("标题", text: $source.title)
-                    TextField("作者 / 译者", text: $source.author)
-                    Picker("类型", selection: $source.kind) {
+                    TextField("标题", text: sourceBinding.title)
+                    TextField("作者 / 译者", text: sourceBinding.author)
+                    Picker("类型", selection: sourceBinding.kind) {
                         ForEach(SourceKind.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
                 }
                 Section("版本信息（用于生成引文）") {
-                    TextField("出版者", text: optional($source.publisher))
-                    TextField("版本（如：点校本、修订版）", text: optional($source.edition))
-                    TextField("年份", text: optional($source.year))
-                    TextField("网址", text: optional($source.url))
+                    TextField("出版者", text: optional(sourceBinding.publisher))
+                    TextField("版本（如：点校本、修订版）", text: optional(sourceBinding.edition))
+                    TextField("年份", text: optional(sourceBinding.year))
+                    TextField("网址", text: optional(sourceBinding.url))
                 }
                 Section("每日回顾") {
-                    Picker("出现频率", selection: $source.reviewWeight) {
+                    Picker("出现频率", selection: sourceBinding.reviewWeight) {
                         Text("不再出现").tag(0.0)
                         Text("较少").tag(0.5)
                         Text("正常").tag(1.0)

@@ -15,8 +15,7 @@ struct HighlightListView: View {
     let title: String
     let filter: HighlightFilter
 
-    @State private var query = ""
-    @State private var items: [Highlight] = []
+    private var state: ListState { store.list }
 
     private struct LoadKey: Hashable {
         var filter: HighlightFilter
@@ -26,14 +25,14 @@ struct HighlightListView: View {
 
     var body: some View {
         Group {
-            if items.isEmpty {
+            if state.items.isEmpty {
                 ContentUnavailableView {
-                    Label(query.isEmpty ? "还没有摘录" : "没有找到", systemImage: "text.quote")
+                    Label(state.query.isEmpty ? "还没有摘录" : "没有找到", systemImage: "text.quote")
                 } description: {
-                    Text(query.isEmpty ? "按 ⌘N 新建一条摘录，或在浏览器里用书签小程序发送选中文字。" : "换个关键词试试。两个字以内的查询使用模糊匹配。")
+                    Text(state.query.isEmpty ? "按 ⌘N 新建一条摘录，或在浏览器里用书签小程序发送选中文字。" : "换个关键词试试。两个字以内的查询使用模糊匹配。")
                 }
             } else {
-                List(items) { h in
+                List(state.items) { h in
                     HighlightRow(highlight: h, source: store.source(for: h))
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) { store.edit(h) }
@@ -43,9 +42,9 @@ struct HighlightListView: View {
             }
         }
         .navigationTitle(title)
-        .navigationSubtitle("\(items.count) 条")
-        .searchable(text: $query, prompt: "搜索原文、译文、按语")
-        .task(id: LoadKey(filter: filter, query: query, revision: store.revision)) {
+        .navigationSubtitle("\(state.items.count) 条")
+        .searchable(text: Bindable(store.list).query, prompt: "搜索原文、译文、按语")
+        .task(id: LoadKey(filter: filter, query: state.query, revision: store.revision)) {
             load()
         }
         .toolbar {
@@ -61,8 +60,8 @@ struct HighlightListView: View {
 
     private func load() {
         do {
-            items = try store.db.highlights(
-                query: query,
+            state.items = try store.db.highlights(
+                query: state.query,
                 sourceId: filter.sourceId,
                 tag: filter.tag,
                 favoritesOnly: filter.favoritesOnly,
