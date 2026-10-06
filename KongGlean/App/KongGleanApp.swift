@@ -52,6 +52,8 @@ struct KongGleanApp: App {
                 Button("导出全部为 Markdown…") { ExportService.exportAll(store: store) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("立即备份") { ExportService.backupNow(store: store) }
+                Divider()
+                Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
             }
         }
 

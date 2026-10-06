@@ -33,6 +33,12 @@ final class LibraryStore {
     var sourcePendingDeletion: Source?
     /// 是否正在确认“清空最近删除”
     var confirmingEmptyTrash = false
+    /// 待确认的 Readwise 导入（非空时弹出预览面板）
+    var pendingImport: ImportPreview?
+    /// 导入时给每条摘录加上 #Readwise 标签
+    var importAddTag = true
+    /// 操作完成后的提示
+    var infoMessage: String?
     var errorMessage: String?
 
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
@@ -102,6 +108,28 @@ final class LibraryStore {
 
     func emptyTrash() {
         perform { try db.emptyTrash() }
+    }
+
+    /// 执行待确认的 Readwise 导入：先自动备份，再在一个事务里导入
+    func confirmImport() {
+        guard let preview = pendingImport else { return }
+        do {
+            try BackupService.backupNow(db: db)
+        } catch {
+            report(error)
+            return
+        }
+        perform {
+            let r = try db.importReadwise(preview.result, extraTag: importAddTag ? "Readwise" : nil)
+            var lines = ["导入 \(r.highlightsImported) 条摘录。"]
+            lines.append("新建出处 \(r.sourcesCreated) 个，并入已有出处 \(r.sourcesReused) 个。")
+            if r.duplicatesSkipped > 0 { lines.append("跳过已存在的重复摘录 \(r.duplicatesSkipped) 条。") }
+            if preview.result.skippedRows > 0 { lines.append("跳过没有正文的行 \(preview.result.skippedRows) 行。") }
+            lines.append("导入前的数据已自动备份。")
+            infoMessage = lines.joined(separator: "\n")
+        }
+        pendingImport = nil
+        selection = .all
     }
 
     /// 启动时的例行维护：清除过期的“最近删除”，并做当天的自动备份
@@ -182,6 +210,13 @@ final class LibraryStore {
         }
         return ok
     }
+}
+
+/// Readwise 导入预览
+struct ImportPreview: Identifiable {
+    let id = UUID()
+    var fileName: String
+    var result: ReadwiseCSVImporter.Result
 }
 
 /// 编辑面板的草稿

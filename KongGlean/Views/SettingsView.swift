@@ -176,6 +176,11 @@ private struct DataSettings: View {
                     }
                 }
             }
+            Section("导入") {
+                Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
+                Text("在 readwise.io/export 选择 CSV 下载。可重复导入同一文件，已存在的摘录会自动跳过。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("导出") {
                 Button("导出全部为 Markdown（每个出处一个文件）…") {
                     ExportService.exportAll(store: store)

@@ -19,6 +19,17 @@ struct ContentView: View {
         .sheet(item: $store.editingSource) { _ in
             SourceEditorView()
         }
+        .sheet(item: $store.pendingImport) { _ in
+            ImportPreviewView()
+        }
+        .alert("完成", isPresented: Binding(
+            get: { store.infoMessage != nil },
+            set: { if !$0 { store.infoMessage = nil } }
+        )) {
+            Button("好") { store.infoMessage = nil }
+        } message: {
+            Text(store.infoMessage ?? "")
+        }
         .confirmationDialog(
             "删除出处“\(store.sourcePendingDeletion?.title ?? "")”？",
             isPresented: Binding(

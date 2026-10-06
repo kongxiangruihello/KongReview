@@ -190,3 +190,28 @@ final class V02StoreTests: XCTestCase {
     XCTAssertNil(store.errorMessage)
   }
 }
+
+final class ReadwiseDatabaseImportTests: XCTestCase {
+  func testImportIsIdempotentAndMergesSources() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    _ = try db.save(Source(title: "论语译注", author: "杨伯峻"))
+    let csv = "Highlight,Book Title,Book Author,Note,Tags,Location Type,Location,Highlighted at\n"
+      + "学而时习之，不亦说乎？,论语译注,杨伯峻,开篇,\"论语,favorite\",page,1,2023-05-01 12:34:56+00:00\n"
+      + "温故而知新，可以为师矣。,论语译注,杨伯峻,,,page,15,2023-05-02 12:00:00+00:00\n"
+      + "Web text here,Some Article,,,,,,2024-01-01T00:00:00Z\n"
+    let parsed = try ReadwiseCSVImporter.parse(csv)
+    let r1 = try db.importReadwise(parsed, extraTag: "Readwise")
+    XCTAssertEqual(r1, ImportReport(sourcesCreated: 1, sourcesReused: 1, highlightsImported: 3, duplicatesSkipped: 0))
+    let r2 = try db.importReadwise(parsed, extraTag: "Readwise")
+    XCTAssertEqual(r2.highlightsImported, 0)
+    XCTAssertEqual(r2.duplicatesSkipped, 3)
+
+    XCTAssertEqual(try db.highlights().count, 3)
+    XCTAssertEqual(try db.highlights(tag: "Readwise").count, 3)
+    XCTAssertEqual(try db.highlights(favoritesOnly: true).count, 1)
+    XCTAssertEqual(try db.highlights(query: "温故而知新").first?.location, "第15页")
+    XCTAssertEqual(try db.allSources().count, 2)
+    // createdAt follows Readwise highlighted date → oldest last in list
+    XCTAssertEqual(try db.highlights().last?.text, "学而时习之，不亦说乎？")
+  }
+}

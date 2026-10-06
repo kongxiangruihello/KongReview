@@ -225,6 +225,67 @@ extension AppDatabase {
     }
 }
 
+// MARK: - 导入
+
+struct ImportReport: Equatable {
+    var sourcesCreated = 0
+    var sourcesReused = 0
+    var highlightsImported = 0
+    var duplicatesSkipped = 0
+}
+
+extension AppDatabase {
+    /// 导入 Readwise CSV 的解析结果。整个导入在一个事务里完成：要么全部成功，要么什么都不改。
+    /// - 同一出处（书名 + 作者完全相同）沿用已有记录；
+    /// - 同一出处下正文完全相同的摘录视为重复，跳过（可重复导入同一个文件而不产生重复）；
+    /// - extraTag 会加到每条导入的摘录上，方便日后筛选或批量处理。
+    @discardableResult
+    func importReadwise(_ result: ReadwiseCSVImporter.Result, extraTag: String? = nil, now: Date = Date()) throws -> ImportReport {
+        try writer.write { db in
+            var report = ImportReport()
+            for src in result.sources {
+                var source: Source
+                if let existing = try Source
+                    .filter(Column("title") == src.title && Column("author") == src.author)
+                    .fetchOne(db) {
+                    source = existing
+                    report.sourcesReused += 1
+                } else {
+                    source = Source(title: src.title, author: src.author, kind: src.kind, url: src.url, createdAt: now)
+                    try source.insert(db)
+                    report.sourcesCreated += 1
+                }
+
+                for item in src.highlights {
+                    let exists = try Bool.fetchOne(db, sql: """
+                        SELECT EXISTS (SELECT 1 FROM highlight WHERE sourceId = ? AND text = ?)
+                        """, arguments: [source.id, item.text]) ?? false
+                    if exists {
+                        report.duplicatesSkipped += 1
+                        continue
+                    }
+                    var tags = item.tags
+                    if let extraTag, !extraTag.isEmpty, !tags.contains(extraTag) { tags.append(extraTag) }
+                    let when = item.highlightedAt ?? now
+                    var h = Highlight(
+                        sourceId: source.id,
+                        text: item.text,
+                        note: item.note,
+                        location: item.location,
+                        tags: tags,
+                        isFavorite: item.isFavorite,
+                        createdAt: when,
+                        updatedAt: now
+                    )
+                    try h.insert(db)
+                    report.highlightsImported += 1
+                }
+            }
+            return report
+        }
+    }
+}
+
 // MARK: - 读操作
 
 extension AppDatabase {

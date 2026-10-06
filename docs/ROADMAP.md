@@ -9,7 +9,7 @@
 - [ ] 在 Xcode 中首次编译并修正编译问题
 - [ ] 统一 kong 系列图标（以 kongfetch 为准）
 
-## v0.2 — 数据安全与录入（当前）
+## v0.2 — 数据安全与录入
 - [x] 每日自动备份（VACUUM INTO，保留 30 份，可选 iCloud 云盘）
 - [x] 软删除与“最近删除”（30 天），删除出处 / 清空前确认
 - [x] 全局快捷键快速录入浮窗（剪贴板预填、沿用上次出处）
@@ -18,10 +18,11 @@
 - [x] 构建脚本归档旧产物
 
 ## v0.3 — 打通
+- [x] 从 Readwise 导入 CSV（预览确认、导入前自动备份、重复导入自动去重、可加 #Readwise 标签）
 - [ ] 记忆卡导出到 Anki（.apkg / CSV），不自己实现 FSRS
 - [ ] 与 KongFolio（PDF）约定：划线带 PDF 路径与页码送入，回顾卡片可跳回原页
 - [ ] 粘贴时自动识别“正文——作者《书名》页码”格式
-- [ ] 批量导入：Markdown / CSV / Readwise 导出的 CSV
+- [ ] 批量导入：Markdown / 通用 CSV
 
 ## v0.4 — 网页存档
 - [ ] 整页正文存档：在 WKWebView 中注入 Defuddle（MIT 许可证）或 Readability.js（Apache 2.0 许可证），把正文保存为 Markdown

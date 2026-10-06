@@ -205,3 +205,52 @@ private extension Array where Element: Hashable {
         return filter { seen.insert($0).inserted }
     }
 }
+
+final class ReadwiseImportTests: XCTestCase {
+    let sample = "\u{FEFF}Highlight,Book Title,Book Author,Amazon Book ID,Note,Color,Tags,Location Type,Location,Highlighted at,Document tags\r\n"
+        + "\"学而时习之，不亦说乎？\",论语译注,杨伯峻,,开篇,yellow,\"论语, favorite\",page,1,2023-05-01 12:34:56+00:00,经部\r\n"
+        + "\"多行\n摘录，含\"\"引号\"\"\",论语译注,杨伯峻,,,,.h1,page,2,2023-05-02 08:00:00+00:00,经部\r\n"
+        + "Some web text,An Article,Jane Doe,,,,,order,3,2024-01-01T00:00:00Z,\r\n"
+        + ",空行,,,,,,,,,\r\n"
+        + "Kindle text,Kindle Book,Someone,B00ABC,,,,location,1234,\"March 3, 2022 10:15:00 AM\",\r\n"
+
+    func testParsesReadwiseCSV() throws {
+        let r = try ReadwiseCSVImporter.parse(sample)
+        XCTAssertEqual(r.sources.map(\.title), ["论语译注", "An Article", "Kindle Book"])
+        XCTAssertEqual(r.highlightCount, 4)
+        XCTAssertEqual(r.skippedRows, 1)
+
+        let lunyu = r.sources[0]
+        XCTAssertEqual(lunyu.author, "杨伯峻")
+        XCTAssertEqual(lunyu.kind, .book)
+        let h1 = lunyu.highlights[0]
+        XCTAssertEqual(h1.text, "学而时习之，不亦说乎？")
+        XCTAssertEqual(h1.note, "开篇")
+        XCTAssertEqual(h1.location, "第1页")
+        XCTAssertEqual(h1.tags, ["论语", "经部"])
+        XCTAssertTrue(h1.isFavorite)
+        XCTAssertEqual(h1.highlightedAt, ISO8601DateFormatter().date(from: "2023-05-01T12:34:56Z"))
+
+        let h2 = lunyu.highlights[1]
+        XCTAssertEqual(h2.text, "多行\n摘录，含\"引号\"")
+        XCTAssertEqual(h2.tags, ["经部"], "dot tags dropped")
+        XCTAssertFalse(h2.isFavorite)
+
+        XCTAssertNil(r.sources[1].highlights[0].location, "order is not a real location")
+        XCTAssertNotNil(r.sources[1].highlights[0].highlightedAt)
+        XCTAssertEqual(r.sources[2].highlights[0].location, "Kindle 位置 1234")
+        XCTAssertNotNil(r.sources[2].highlights[0].highlightedAt)
+    }
+
+    func testRejectsNonReadwise() {
+        XCTAssertThrowsError(try ReadwiseCSVImporter.parse("a,b\n1,2\n")) { e in
+            XCTAssertEqual(e as? ReadwiseCSVImporter.ImportError, .missingHighlightColumn(found: ["a", "b"]))
+        }
+        XCTAssertThrowsError(try ReadwiseCSVImporter.parse(""))
+    }
+
+    func testCSVEdgeCases() {
+        XCTAssertEqual(CSV.parse("a,\"b,c\",d\nx,,z"), [["a", "b,c", "d"], ["x", "", "z"]])
+        XCTAssertEqual(CSV.parse("a\r\n\r\nb\r\n"), [["a"], ["b"]])
+    }
+}

@@ -20,6 +20,31 @@ enum ExportService {
         }
     }
 
+    /// 选择 Readwise 导出的 CSV，解析后交给预览面板确认
+    static func importReadwiseCSV(store: LibraryStore) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.commaSeparatedText, .plainText]
+        panel.allowsMultipleSelection = false
+        panel.prompt = "导入"
+        panel.message = "选择从 readwise.io/export 下载的 CSV 文件"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) else {
+                store.errorMessage = "无法读取文件编码（应为 UTF-8）。"
+                return
+            }
+            let result = try ReadwiseCSVImporter.parse(text)
+            guard result.highlightCount > 0 else {
+                store.errorMessage = "文件里没有可导入的摘录。"
+                return
+            }
+            store.pendingImport = ImportPreview(fileName: url.lastPathComponent, result: result)
+        } catch {
+            store.report(error)
+        }
+    }
+
     static func backupNow(store: LibraryStore) {
         do {
             let url = try BackupService.backupNow(db: store.db)
