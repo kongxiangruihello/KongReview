@@ -274,6 +274,7 @@ extension AppDatabase {
                         location: item.location,
                         tags: tags,
                         isFavorite: item.isFavorite,
+                        isDiscarded: item.isDiscarded,
                         createdAt: when,
                         updatedAt: now
                     )

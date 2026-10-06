@@ -39,6 +39,8 @@ final class LibraryStore {
     var importAddTag = true
     /// 操作完成后的提示
     var infoMessage: String?
+    /// 后台导入进行中时的状态文字（非空表示正忙）
+    var importProgress: String?
     var errorMessage: String?
 
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
@@ -111,25 +113,40 @@ final class LibraryStore {
     }
 
     /// 执行待确认的 Readwise 导入：先自动备份，再在一个事务里导入
+    ///（上万条时需要十几秒，所以放到后台线程，界面不会卡住）
     func confirmImport() {
-        guard let preview = pendingImport else { return }
-        do {
-            try BackupService.backupNow(db: db)
-        } catch {
-            report(error)
-            return
+        guard let preview = pendingImport, importProgress == nil else { return }
+        let db = self.db
+        let tag = importAddTag ? "Readwise" : nil
+        importProgress = "正在备份现有数据…"
+        Task.detached(priority: .userInitiated) {
+            do {
+                try BackupService.backupNow(db: db)
+                await MainActor.run {
+                    self.importProgress = "正在导入 \(preview.result.highlightCount) 条摘录，请稍候…"
+                }
+                let r = try db.importReadwise(preview.result, extraTag: tag)
+                await MainActor.run { self.finishImport(r, preview: preview) }
+            } catch {
+                await MainActor.run {
+                    self.importProgress = nil
+                    self.report(error)
+                }
+            }
         }
-        perform {
-            let r = try db.importReadwise(preview.result, extraTag: importAddTag ? "Readwise" : nil)
-            var lines = ["导入 \(r.highlightsImported) 条摘录。"]
-            lines.append("新建出处 \(r.sourcesCreated) 个，并入已有出处 \(r.sourcesReused) 个。")
-            if r.duplicatesSkipped > 0 { lines.append("跳过已存在的重复摘录 \(r.duplicatesSkipped) 条。") }
-            if preview.result.skippedRows > 0 { lines.append("跳过没有正文的行 \(preview.result.skippedRows) 行。") }
-            lines.append("导入前的数据已自动备份。")
-            infoMessage = lines.joined(separator: "\n")
-        }
+    }
+
+    private func finishImport(_ r: ImportReport, preview: ImportPreview) {
+        var lines = ["导入 \(r.highlightsImported) 条摘录。"]
+        lines.append("新建出处 \(r.sourcesCreated) 个，并入已有出处 \(r.sourcesReused) 个。")
+        if r.duplicatesSkipped > 0 { lines.append("跳过重复摘录 \(r.duplicatesSkipped) 条（已存在，或文件内重复）。") }
+        if preview.result.skippedRows > 0 { lines.append("跳过没有正文的行 \(preview.result.skippedRows) 行。") }
+        lines.append("导入前的数据已自动备份。")
+        importProgress = nil
         pendingImport = nil
+        reload()
         selection = .all
+        infoMessage = lines.joined(separator: "\n")
     }
 
     /// 启动时的例行维护：清除过期的“最近删除”，并做当天的自动备份

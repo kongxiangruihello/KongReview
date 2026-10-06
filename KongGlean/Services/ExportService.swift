@@ -28,21 +28,36 @@ enum ExportService {
         panel.prompt = "导入"
         panel.message = "选择从 readwise.io/export 下载的 CSV 文件"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let data = try Data(contentsOf: url)
-            guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) else {
-                store.errorMessage = "无法读取文件编码（应为 UTF-8）。"
-                return
+        store.importProgress = "正在读取 \(url.lastPathComponent)…"
+        Task.detached(priority: .userInitiated) {
+            let outcome: Swift.Result<ReadwiseCSVImporter.Result, Error>
+            do {
+                let data = try Data(contentsOf: url)
+                guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) else {
+                    throw ImportFileError("无法读取文件编码（应为 UTF-8）。")
+                }
+                let result = try ReadwiseCSVImporter.parse(text)
+                guard result.highlightCount > 0 else { throw ImportFileError("文件里没有可导入的摘录。") }
+                outcome = .success(result)
+            } catch {
+                outcome = .failure(error)
             }
-            let result = try ReadwiseCSVImporter.parse(text)
-            guard result.highlightCount > 0 else {
-                store.errorMessage = "文件里没有可导入的摘录。"
-                return
+            await MainActor.run {
+                store.importProgress = nil
+                switch outcome {
+                case .success(let result):
+                    store.pendingImport = ImportPreview(fileName: url.lastPathComponent, result: result)
+                case .failure(let error):
+                    store.report(error)
+                }
             }
-            store.pendingImport = ImportPreview(fileName: url.lastPathComponent, result: result)
-        } catch {
-            store.report(error)
         }
+    }
+
+    struct ImportFileError: LocalizedError {
+        let message: String
+        init(_ message: String) { self.message = message }
+        var errorDescription: String? { message }
     }
 
     static func backupNow(store: LibraryStore) {

@@ -235,11 +235,34 @@ final class ReadwiseImportTests: XCTestCase {
         XCTAssertEqual(h2.text, "多行\n摘录，含\"引号\"")
         XCTAssertEqual(h2.tags, ["经部"], "dot tags dropped")
         XCTAssertFalse(h2.isFavorite)
+        XCTAssertFalse(h2.isDiscarded)
 
         XCTAssertNil(r.sources[1].highlights[0].location, "order is not a real location")
         XCTAssertNotNil(r.sources[1].highlights[0].highlightedAt)
         XCTAssertEqual(r.sources[2].highlights[0].location, "Kindle 位置 1234")
         XCTAssertNotNil(r.sources[2].highlights[0].highlightedAt)
+    }
+
+    func testDiscardTagAndDocumentFavorite() throws {
+        let csv = "Highlight,Book Title,Book Author,Amazon Book ID,Note,Color,Tags,Location Type,Location,Highlighted at,Document tags\n"
+            + "a,T,,,,,discard,offset,10,2023-01-18 15:43:26+00:00,\"林乐知, favorite\"\n"
+        let h = try ReadwiseCSVImporter.parse(csv).sources[0].highlights[0]
+        XCTAssertTrue(h.isDiscarded)
+        XCTAssertFalse(h.isFavorite, "document-level favorite is not a highlight favorite")
+        XCTAssertEqual(h.tags, ["林乐知", "favorite"])
+        XCTAssertNil(h.location, "offset is not a real location")
+    }
+
+    func testFastDateParse() {
+        let iso = ISO8601DateFormatter()
+        XCTAssertEqual(ReadwiseCSVImporter.fastParse("2023-01-18 15:43:26+00:00"), iso.date(from: "2023-01-18T15:43:26Z"))
+        XCTAssertEqual(ReadwiseCSVImporter.fastParse("2023-01-18T23:43:26+08:00"), iso.date(from: "2023-01-18T15:43:26Z"))
+        XCTAssertEqual(ReadwiseCSVImporter.fastParse("2024-02-29T00:00:00Z"), iso.date(from: "2024-02-29T00:00:00Z"))
+        XCTAssertEqual(ReadwiseCSVImporter.fastParse("1999-12-31 23:59:59"), iso.date(from: "1999-12-31T23:59:59Z"))
+        XCTAssertEqual(ReadwiseCSVImporter.fastParse("2023-01-18 15:43:26.500000+00:00")!.timeIntervalSince1970,
+                       iso.date(from: "2023-01-18T15:43:26Z")!.timeIntervalSince1970 + 0.5, accuracy: 1e-6)
+        XCTAssertNil(ReadwiseCSVImporter.fastParse("March 3, 2022"))
+        XCTAssertNil(ReadwiseCSVImporter.fastParse("2023-13-01 00:00:00"))
     }
 
     func testRejectsNonReadwise() {

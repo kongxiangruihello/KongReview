@@ -55,16 +55,23 @@ struct ImportPreviewView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
+                if let progress = store.importProgress {
+                    ProgressView().controlSize(.small)
+                    Text(progress).font(.callout).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("取消", role: .cancel) { store.pendingImport = nil }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(store.importProgress != nil)
                 Button("导入") { store.confirmImport() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .disabled(store.importProgress != nil)
             }
         }
         .padding(24)
         .frame(width: 520)
+        .interactiveDismissDisabled(store.importProgress != nil)
     }
 
     private func stat(_ value: String, _ label: String) -> some View {

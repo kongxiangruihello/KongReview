@@ -3,53 +3,56 @@ import Foundation
 // MARK: - CSV 解析（RFC 4180：引号、转义引号、字段内换行、BOM、CRLF）
 
 public enum CSV {
+    /// 按 UTF-8 字节解析，3 万行、30 MB 级别的文件在一两秒内完成。
     public static func parse(_ text: String) -> [[String]] {
+        var bytes = Array(text.utf8)
+        if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { bytes.removeFirst(3) }
+
+        let quote: UInt8 = 0x22, comma: UInt8 = 0x2C, cr: UInt8 = 0x0D, lf: UInt8 = 0x0A
         var rows: [[String]] = []
         var row: [String] = []
-        var field = ""
+        var field: [UInt8] = []
+        field.reserveCapacity(256)
         var inQuotes = false
-        var chars = Array(text.unicodeScalars)
-        if chars.first == "\u{FEFF}" { chars.removeFirst() }
-
         var i = 0
-        while i < chars.count {
-            let c = chars[i]
+        let n = bytes.count
+
+        @inline(__always) func endField() {
+            row.append(String(decoding: field, as: UTF8.self))
+            field.removeAll(keepingCapacity: true)
+        }
+
+        while i < n {
+            let c = bytes[i]
             if inQuotes {
-                if c == "\"" {
-                    if i + 1 < chars.count, chars[i + 1] == "\"" {
-                        field.unicodeScalars.append("\"")
+                if c == quote {
+                    if i + 1 < n, bytes[i + 1] == quote {
+                        field.append(quote)
                         i += 1
                     } else {
                         inQuotes = false
                     }
                 } else {
-                    field.unicodeScalars.append(c)
+                    field.append(c)
                 }
             } else {
                 switch c {
-                case "\"":
-                    inQuotes = true
-                case ",":
-                    row.append(field)
-                    field = ""
-                case "\r":
-                    break
-                case "\n":
-                    row.append(field)
+                case quote: inQuotes = true
+                case comma: endField()
+                case cr: break
+                case lf:
+                    endField()
                     rows.append(row)
                     row = []
-                    field = ""
-                default:
-                    field.unicodeScalars.append(c)
+                default: field.append(c)
                 }
             }
             i += 1
         }
         if !field.isEmpty || !row.isEmpty {
-            row.append(field)
+            endField()
             rows.append(row)
         }
-        // 去掉完全空白的行
         return rows.filter { !$0.allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty } }
     }
 }
@@ -70,6 +73,7 @@ public enum ReadwiseCSVImporter {
         public var location: String?
         public var tags: [String]
         public var isFavorite: Bool
+        public var isDiscarded: Bool
         public var highlightedAt: Date?
     }
 
@@ -156,10 +160,16 @@ public enum ReadwiseCSVImporter {
             let author = value(row, .author) ?? ""
             let key = title + "\u{1F}" + author
 
-            var tags = splitTags(value(row, .tags)) + splitTags(value(row, .documentTags))
-            let isFavorite = tags.contains { $0.lowercased() == "favorite" }
-            tags = tags.filter { !$0.hasPrefix(".") && $0.lowercased() != "favorite" }
-            tags = dedupe(tags)
+            // 划线自身的标签里，Readwise 用 favorite / discard 表示“收藏”“弃置”；
+            // 以 . 开头的（.h1、.c1 等）是 Readwise 的排版指令，不保留。
+            // 文档标签（Document tags）原样并入（其中的 favorite 指“收藏的文档”，不等于收藏这条摘录）。
+            let own = splitTags(value(row, .tags))
+            let isFavorite = own.contains { $0.lowercased() == "favorite" }
+            let isDiscarded = own.contains { $0.lowercased() == "discard" }
+            let ownKept = own.filter {
+                !$0.hasPrefix(".") && !["favorite", "discard"].contains($0.lowercased())
+            }
+            let tags = dedupe(ownKept + splitTags(value(row, .documentTags)).filter { !$0.hasPrefix(".") })
 
             let h = ImportedHighlight(
                 text: body,
@@ -167,6 +177,7 @@ public enum ReadwiseCSVImporter {
                 location: formatLocation(type: value(row, .locationType), value: value(row, .location)),
                 tags: tags,
                 isFavorite: isFavorite,
+                isDiscarded: isDiscarded,
                 highlightedAt: value(row, .date).flatMap(parseDate)
             )
 
@@ -211,27 +222,100 @@ public enum ReadwiseCSVImporter {
         }
     }
 
-    static func parseDate(_ s: String) -> Date? {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: s) { return d }
-        iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: s) { return d }
+    /// 快速解析 “yyyy-MM-dd[ T]HH:mm:ss[.ffffff][Z|±hh:mm]”（Readwise 导出的格式），不经过 DateFormatter
+    static func fastParse(_ s: String) -> Date? {
+        let b = Array(s.utf8)
+        func num(_ from: Int, _ len: Int) -> Int? {
+            guard from + len <= b.count else { return nil }
+            var v = 0
+            for k in from..<(from + len) {
+                let c = b[k]
+                guard c >= 48, c <= 57 else { return nil }
+                v = v * 10 + Int(c - 48)
+            }
+            return v
+        }
+        guard b.count >= 19, b[4] == 45, b[7] == 45, b[10] == 32 || b[10] == 84, b[13] == 58, b[16] == 58,
+              let y = num(0, 4), let mo = num(5, 2), let d = num(8, 2),
+              let h = num(11, 2), let mi = num(14, 2), let se = num(17, 2),
+              (1...12).contains(mo), (1...31).contains(d), h < 24, mi < 60, se < 61
+        else { return nil }
 
+        var i = 19
+        var frac = 0.0
+        if i < b.count, b[i] == 46 {   // 小数秒
+            i += 1
+            var scale = 0.1
+            while i < b.count, b[i] >= 48, b[i] <= 57 {
+                frac += Double(b[i] - 48) * scale
+                scale /= 10
+                i += 1
+            }
+        }
+        var offset = 0
+        if i < b.count {
+            switch b[i] {
+            case 90: i += 1                                   // Z
+            case 43, 45:                                      // + / -
+                let sign = b[i] == 45 ? -1 : 1
+                guard let oh = num(i + 1, 2) else { return nil }
+                var om = 0
+                if i + 3 < b.count, b[i + 3] == 58 { om = num(i + 4, 2) ?? 0; i += 6 }
+                else { om = num(i + 3, 2) ?? 0; i += 5 }
+                offset = sign * (oh * 3600 + om * 60)
+            default: return nil
+            }
+        }
+        guard i == b.count else { return nil }
+
+        // 公历日期 → 1970 年起的天数（Howard Hinnant 算法）
+        let yy = mo <= 2 ? y - 1 : y
+        let era = (yy >= 0 ? yy : yy - 399) / 400
+        let yoe = yy - era * 400
+        let mp = (mo + 9) % 12
+        let doy = (153 * mp + 2) / 5 + d - 1
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+        let days = era * 146_097 + doe - 719_468
+        let seconds = Double(days * 86_400 + h * 3600 + mi * 60 + se - offset) + frac
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    // 日期格式器创建代价很高，必须复用（逐行新建会让 2 万行的文件慢上十几秒）
+    nonisolated(unsafe) private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    nonisolated(unsafe) private static let fallbackFormatters: [DateFormatter] = [
+        "yyyy-MM-dd HH:mm:ssZZZZZ",          // Readwise CSV：2023-01-18 15:43:26+00:00
+        "yyyy-MM-dd HH:mm:ss.SSSSSSZZZZZ",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd",
+        "MMMM d, yyyy h:mm:ss a",
+        "MMMM d, yyyy h:mm a",
+        "MMMM d, yyyy",
+    ].map { fmt in
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC")
-        for fmt in [
-            "yyyy-MM-dd HH:mm:ssZZZZZ",
-            "yyyy-MM-dd HH:mm:ss.SSSSSSZZZZZ",
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd'T'HH:mm:ss",
-            "yyyy-MM-dd",
-            "MMMM d, yyyy h:mm:ss a",
-            "MMMM d, yyyy h:mm a",
-            "MMMM d, yyyy",
-        ] {
-            f.dateFormat = fmt
+        f.dateFormat = fmt
+        return f
+    }
+
+    static func parseDate(_ s: String) -> Date? {
+        if let d = fastParse(s) { return d }
+        for f in fallbackFormatters.prefix(1) {
+            if let d = f.date(from: s) { return d }
+        }
+        if let d = isoFractional.date(from: s) { return d }
+        if let d = isoPlain.date(from: s) { return d }
+        for f in fallbackFormatters.dropFirst() {
             if let d = f.date(from: s) { return d }
         }
         return nil

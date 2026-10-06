@@ -19,6 +19,18 @@ struct ContentView: View {
         .sheet(item: $store.editingSource) { _ in
             SourceEditorView()
         }
+        .overlay(alignment: .bottom) {
+            if let progress = store.importProgress, store.pendingImport == nil {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(progress).font(.callout)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.bottom, 16)
+            }
+        }
         .sheet(item: $store.pendingImport) { _ in
             ImportPreviewView()
         }
