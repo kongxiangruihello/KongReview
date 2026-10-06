@@ -1,4 +1,4 @@
-// KongGlean 阅读器脚本：在存档的文章里划线、显示已有摘录。
+// KongReview 阅读器脚本：在存档的文章里划线、显示已有摘录。
 // 与 Swift 的通信：window.webkit.messageHandlers.kg.postMessage({...})
 //   {type: "highlight", text}  选中文字后按 H 或点浮动按钮
 //   {type: "open", id}         点击已有摘录

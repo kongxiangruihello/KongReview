@@ -1,19 +1,19 @@
 #!/bin/bash
-# 不依赖 Xcode，只用 Apple 命令行工具构建 KongGlean.app 并打包成 DMG。
+# 不依赖 Xcode，只用 Apple 命令行工具构建 KongReview.app 并打包成 DMG。
 # 用法：在仓库根目录执行  ./Tools/build-dmg.sh
-# 产物：与仓库同级的 KongGlean-<版本>.dmg（例如 ~/Documents/KongGlean-0.2.0.dmg）
-# 旧产物不覆盖、不删除：移到同级的“KongGlean旧构建/<时间>/”里。
+# 产物：与仓库同级的 KongReview-<版本>.dmg（例如 ~/Documents/KongReview-0.2.0.dmg）
+# 旧产物不覆盖、不删除：移到同级的“KongReview旧构建/<时间>/”里。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP="KongGlean"
-BUNDLE_ID="com.kongxiangrui.KongGlean"
+APP="KongReview"
+BUNDLE_ID="com.kongxiangrui.KongReview"
 VERSION="$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1/')"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 OUT="build"
 # 在临时目录里组装与签名：“文稿”若开启了 iCloud 同步，文件会被加上扩展属性，
 # codesign 会报 “resource fork, Finder information, or similar detritus not allowed”。
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/kongglean-build.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/kongreview-build.XXXXXX")"
 APP_DIR="${WORK}/${APP}.app"
 FINAL_DMG="../${APP}-${VERSION}.dmg"
 
@@ -47,7 +47,7 @@ find "${BIN_DIR}" -maxdepth 1 -name '*.bundle' -exec cp -R {} "${APP_DIR}/Conten
 echo "==> 生成图标"
 ICONSET="${WORK}/AppIcon.iconset"
 mkdir -p "${ICONSET}"
-cp KongGlean/Resources/Assets.xcassets/AppIcon.appiconset/icon_*.png "${ICONSET}/"
+cp KongReview/Resources/Assets.xcassets/AppIcon.appiconset/icon_*.png "${ICONSET}/"
 iconutil -c icns "${ICONSET}" -o "${APP_DIR}/Contents/Resources/AppIcon.icns"
 rm -rf "${ICONSET}"
 
@@ -73,7 +73,7 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
   <array>
     <dict>
       <key>CFBundleURLName</key><string>${BUNDLE_ID}</string>
-      <key>CFBundleURLSchemes</key><array><string>kongglean</string></array>
+      <key>CFBundleURLSchemes</key><array><string>kongreview</string><string>kongglean</string></array>
     </dict>
   </array>
 </dict>

@@ -12,9 +12,10 @@ build/
 Package.resolved
 
 # 由 XcodeGen 生成
-KongGlean/Info.plist
-KongGlean/KongGlean.entitlements
+KongReview/Info.plist
+KongReview/KongReview.entitlements
 
 # macOS
 .DS_Store
 build.log
+__pycache__/

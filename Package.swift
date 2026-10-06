@@ -5,23 +5,23 @@
 import PackageDescription
 
 let package = Package(
-    name: "KongGlean",
+    name: "KongReview",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "KongGlean", targets: ["KongGlean"]),
+        .executable(name: "KongReview", targets: ["KongReview"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
-        .package(path: "Packages/KongGleanCore"),
+        .package(path: "Packages/KongReviewCore"),
     ],
     targets: [
         .executableTarget(
-            name: "KongGlean",
+            name: "KongReview",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
-                .product(name: "KongGleanCore", package: "KongGleanCore"),
+                .product(name: "KongReviewCore", package: "KongReviewCore"),
             ],
-            path: "KongGlean",
+            path: "KongReview",
             exclude: ["Resources"]
         ),
     ]

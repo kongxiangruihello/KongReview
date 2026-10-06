@@ -1,8 +1,8 @@
 # XcodeGen 项目描述。生成 Xcode 工程：
 #   brew install xcodegen
 #   xcodegen generate
-#   open KongGlean.xcodeproj
-name: KongGlean
+#   open KongReview.xcodeproj
+name: KongReview
 
 options:
   bundleIdPrefix: com.kongxiangrui
@@ -14,7 +14,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.5.0"
+    MARKETING_VERSION: "0.6.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""          # 在 Xcode 的 Signing & Capabilities 里选自己的 Team
 
@@ -22,71 +22,71 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: "7.0.0"
-  KongGleanCore:
-    path: Packages/KongGleanCore
+  KongReviewCore:
+    path: Packages/KongReviewCore
 
 targets:
-  KongGlean:
+  KongReview:
     type: application
     platform: macOS
     sources:
-      - path: KongGlean
+      - path: KongReview
     dependencies:
       - package: GRDB
-      - package: KongGleanCore
+      - package: KongReviewCore
     info:
-      path: KongGlean/Info.plist
+      path: KongReview/Info.plist
       properties:
-        CFBundleDisplayName: KongGlean
+        CFBundleDisplayName: KongReview
         CFBundleDevelopmentRegion: zh-Hans
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: "© 孔祥瑞"
         CFBundleURLTypes:
-          - CFBundleURLName: com.kongxiangrui.KongGlean
-            CFBundleURLSchemes: [kongglean]
+          - CFBundleURLName: com.kongxiangrui.KongReview
+            CFBundleURLSchemes: [kongreview, kongglean]   # kongglean：改名前的旧链接
     entitlements:
-      path: KongGlean/KongGlean.entitlements
+      path: KongReview/KongReview.entitlements
       properties:
         # 个人自用，不开沙盒：与 DMG 版（Tools/build-dmg.sh）共用同一个数据目录
         com.apple.security.app-sandbox: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.kongxiangrui.KongGlean
-        PRODUCT_NAME: KongGlean
+        PRODUCT_BUNDLE_IDENTIFIER: com.kongxiangrui.KongReview
+        PRODUCT_NAME: KongReview
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
         COMBINE_HIDPI_IMAGES: YES
 
-  KongGleanTests:
+  KongReviewTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: KongGleanTests
+      - path: KongReviewTests
     dependencies:
-      - target: KongGlean
+      - target: KongReview
       # 测试包由 App 作宿主，包已链接进 App，这里只需可见、不重复链接
       - package: GRDB
         link: false
-      - package: KongGleanCore
+      - package: KongReviewCore
         link: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.kongxiangrui.KongGleanTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.kongxiangrui.KongReviewTests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
-  KongGlean:
+  KongReview:
     build:
       targets:
-        KongGlean: all
-        KongGleanTests: [test]
+        KongReview: all
+        KongReviewTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - KongGleanTests
+        - KongReviewTests
     archive:
       config: Release

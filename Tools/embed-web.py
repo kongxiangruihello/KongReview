@@ -4,7 +4,7 @@
 """
 import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "Packages/KongGleanCore/Sources/KongGleanCore/WebScripts.swift")
+OUT = os.path.join(ROOT, "Packages/KongReviewCore/Sources/KongReviewCore/WebScripts.swift")
 files = [("readability", "Readability.js", "Mozilla Readability 0.6.0（Apache License 2.0，见 Web/Readability-LICENSE.md）"),
          ("extract", "extract.js", "调用 Readability 提取正文"),
          ("reader", "reader.js", "阅读器：划线与标注")]
