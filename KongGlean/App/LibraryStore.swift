@@ -10,6 +10,7 @@ enum SidebarItem: Hashable {
     case mastery
     case unsorted
     case trash
+    case articles
     case source(Int64)
     case tag(String)
 }
@@ -24,6 +25,7 @@ final class LibraryStore {
     var highlightCounts: [Int64: Int] = [:]
     var tags: [String] = []
     var trashCount = 0
+    var articleCount = 0
 
     var selection: SidebarItem? = .review
     /// 正在编辑/新建的摘录草稿；非空时弹出编辑面板
@@ -41,6 +43,15 @@ final class LibraryStore {
     var infoMessage: String?
     /// 后台导入进行中时的状态文字（非空表示正忙）
     var importProgress: String?
+
+    // 网页存档
+    /// 正在阅读的文章（非空时“网页存档”页显示阅读器）
+    var openArticle: Article?
+    /// “添加网页”面板里输入的网址（非空时弹出面板）
+    var addArticleDraft: AddArticleDraft?
+    /// 抓取进行中的状态文字
+    var articleProgress: String?
+    var articlePendingDeletion: Article?
     var errorMessage: String?
 
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
@@ -61,6 +72,7 @@ final class LibraryStore {
             highlightCounts = try db.highlightCounts()
             tags = try db.allTags()
             trashCount = try db.trashCount()
+            articleCount = try db.articleCount()
             revision += 1
         } catch {
             report(error)
@@ -149,6 +161,37 @@ final class LibraryStore {
         infoMessage = lines.joined(separator: "\n")
     }
 
+    // MARK: 网页存档
+
+    func open(_ article: Article) {
+        selection = .articles
+        // 列表里的条目不含正文，打开时取全文
+        openArticle = article.id.flatMap { try? db.article(id: $0) } ?? article
+        if let id = article.id { try? db.markArticleOpened(id: id) }
+    }
+
+    func closeArticle() {
+        openArticle = nil
+        revisionBump()
+    }
+
+    /// 在阅读器里划线：存为该文章出处下的一条摘录
+    func addHighlight(from article: Article, text raw: String) {
+        let text = ArticleText.cleanSelection(raw)
+        guard !text.isEmpty else { return }
+        perform {
+            try db.save(Highlight(sourceId: article.sourceId, text: text))
+        }
+    }
+
+    func deleteArticle(_ article: Article) {
+        guard let id = article.id else { return }
+        perform { try db.deleteArticle(id: id) }
+        if openArticle?.id == id { openArticle = nil }
+    }
+
+    func revisionBump() { revision += 1 }
+
     /// 启动时的例行维护：清除过期的“最近删除”，并做当天的自动备份
     func runStartupMaintenance() {
         perform { try db.purgeTrash(olderThan: TrashPolicy.cutoff(now: Date())) }
@@ -227,6 +270,13 @@ final class LibraryStore {
         }
         return ok
     }
+}
+
+/// “添加网页”面板
+struct AddArticleDraft: Identifiable {
+    let id = UUID()
+    var urlText = ""
+    var error: String?
 }
 
 /// Readwise 导入预览

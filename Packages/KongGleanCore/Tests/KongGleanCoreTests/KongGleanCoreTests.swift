@@ -277,3 +277,60 @@ final class ReadwiseImportTests: XCTestCase {
         XCTAssertEqual(CSV.parse("a\r\n\r\nb\r\n"), [["a"], ["b"]])
     }
 }
+
+final class ArticleTests: XCTestCase {
+    func testTitleCleanup() {
+        XCTAssertEqual(ArticleText.cleanTitle("明清之际的思想转向 - 某学术博客", h1: "明清之际的思想转向", siteName: "某学术博客"), "明清之际的思想转向")
+        XCTAssertEqual(ArticleText.cleanTitle("明清之际的思想转向_某学术博客", h1: nil, siteName: "某学术博客"), "明清之际的思想转向")
+        XCTAssertEqual(ArticleText.cleanTitle("论语札记｜澎湃新闻", h1: "论语札记", siteName: nil), "论语札记")
+        XCTAssertEqual(ArticleText.cleanTitle("A - B - C", h1: nil, siteName: nil), "A - B - C")
+        XCTAssertEqual(ArticleText.cleanTitle("  只有标题  ", h1: "完全不同的大标题", siteName: "X"), "只有标题")
+    }
+
+    func testBylineAndCounts() {
+        XCTAssertEqual(ArticleText.cleanByline("作者：张三"), "张三")
+        XCTAssertEqual(ArticleText.cleanByline("文/李四\n2025-01-01"), "李四")
+        XCTAssertNil(ArticleText.cleanByline("   "))
+        XCTAssertEqual(ArticleText.wordCount("学而 时习\n之 ab"), 7)
+        XCTAssertEqual(ArticleText.normalize("  a \n\n\n  b \n\n"), "a\n\nb")
+    }
+
+    func testDecodeExtraction() throws {
+        let body = String(repeating: "晚明思想界的变动。", count: 10)
+        let json = #"{"title":"标题 - 站","byline":"作者：王五","siteName":"站","publishedTime":"2025-03-01T08:00:00+08:00","excerpt":"摘要","content":"<p>x</p>","textContent":"\#(body)","length":90,"h1":"标题","url":"https://a.cn/1"}"#
+        let e = try ArticleExtraction.decode(json)
+        let a = e.makeArticle(url: "https://fallback")
+        XCTAssertEqual(a.title, "标题")
+        XCTAssertEqual(a.author, "王五")
+        XCTAssertEqual(a.url, "https://a.cn/1")
+        XCTAssertEqual(a.publishedYear, "2025")
+        XCTAssertEqual(a.wordCount, 90)
+        XCTAssertThrowsError(try ArticleExtraction.decode("null")) { XCTAssertEqual($0 as? ArticleExtraction.ParseError, .noArticle) }
+        XCTAssertThrowsError(try ArticleExtraction.decode(#"{"error":"boom"}"#)) { XCTAssertEqual($0 as? ArticleExtraction.ParseError, .script("boom")) }
+        let short = #"{"title":"t","content":"<p>x</p>","textContent":"太短"}"#
+        XCTAssertThrowsError(try ArticleExtraction.decode(short)) { XCTAssertEqual($0 as? ArticleExtraction.ParseError, .tooShort) }
+    }
+
+    func testSaveRouteAndURLNormalize() {
+        XCTAssertEqual(CaptureRequest.route(for: URL(string: "kongglean://save?url=https%3A%2F%2Fa.cn%2Fp%3Fid%3D1")!), .save(URL(string: "https://a.cn/p?id=1")!))
+        XCTAssertNil(CaptureRequest.route(for: URL(string: "kongglean://save?url=javascript%3Aalert(1)")!))
+        XCTAssertNil(CaptureRequest.route(for: URL(string: "kongglean://save")!))
+        XCTAssertEqual(CaptureRequest.normalizeWebURL(" www.thepaper.cn/a "), URL(string: "https://www.thepaper.cn/a"))
+        XCTAssertEqual(CaptureRequest.normalizeWebURL("http://x.org"), URL(string: "http://x.org"))
+        XCTAssertNil(CaptureRequest.normalizeWebURL("not a url"))
+        XCTAssertNil(CaptureRequest.normalizeWebURL("localhost"))
+    }
+
+    func testReaderPage() {
+        let a = Article(url: "https://a.cn/?x=1&y=\"2\"", title: "<标题>", author: "张三", siteName: "站", publishedAt: "2025-03-01T08:00", contentHTML: "<p>正文</p>", contentText: "正文", wordCount: 2)
+        let html = ReaderPage.html(for: a)
+        XCTAssertTrue(html.contains("<h1>&lt;标题&gt;</h1>"))
+        XCTAssertTrue(html.contains("张三 · 站 · 2025-03-01"))
+        XCTAssertTrue(html.contains("href=\"https://a.cn/?x=1&amp;y=&quot;2&quot;\""))
+        XCTAssertTrue(html.contains("<article id=\"kg-content\"><p>正文</p></article>"))
+        XCTAssertTrue(html.contains("window.kgApply = function"))
+        XCTAssertEqual(ReaderPage.applyScript([.init(id: 3, text: "a\"b")]), #"window.kgApply && window.kgApply([{"id":3,"text":"a\"b"}]);"#)
+        XCTAssertTrue(WebScripts.readability.contains("function Readability("))
+        XCTAssertTrue(WebScripts.extract.contains("new Readability("))
+    }
+}

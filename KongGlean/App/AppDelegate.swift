@@ -42,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .review:
             QuickCaptureController.shared.store?.selection = .review
             WindowOpener.showMain()
+        case .save(let url):
+            WindowOpener.showMain()
+            QuickCaptureController.shared.store?.saveArticle(from: url.absoluteString)
         }
     }
 }

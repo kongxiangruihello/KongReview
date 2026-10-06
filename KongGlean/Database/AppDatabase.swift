@@ -13,6 +13,14 @@ extension Source: @retroactive FetchableRecord, @retroactive MutablePersistableR
     }
 }
 
+extension Article: @retroactive FetchableRecord, @retroactive MutablePersistableRecord {
+    public static let databaseTableName = "article"
+
+    public mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
 extension Highlight: @retroactive FetchableRecord, @retroactive MutablePersistableRecord {
     public static let databaseTableName = "highlight"
     public static let source = belongsTo(Source.self)
@@ -102,6 +110,26 @@ final class AppDatabase {
         m.registerMigration("v2-soft-delete") { db in
             try db.alter(table: "highlight") { t in
                 t.add(column: "deletedAt", .datetime)
+            }
+        }
+
+        // v0.4：网页存档
+        m.registerMigration("v3-articles") { db in
+            try db.create(table: "article") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.belongsTo("source", onDelete: .setNull)
+                t.column("url", .text).notNull().unique()
+                t.column("title", .text).notNull()
+                t.column("author", .text)
+                t.column("siteName", .text)
+                t.column("publishedAt", .text)
+                t.column("excerpt", .text)
+                t.column("contentHTML", .text).notNull()
+                t.column("contentText", .text).notNull()
+                t.column("wordCount", .integer).notNull().defaults(to: 0)
+                t.column("savedAt", .datetime).notNull()
+                t.column("lastOpenedAt", .datetime)
+                t.column("isRead", .boolean).notNull().defaults(to: false)
             }
         }
         return m
@@ -222,6 +250,104 @@ extension AppDatabase {
             tags: capture.tags
         )
         return try save(h)
+    }
+}
+
+// MARK: - 网页存档
+
+extension AppDatabase {
+    /// 保存抓取到的文章：同一网址已存在则更新正文；同时建立（或沿用）对应的“网页”出处。
+    @discardableResult
+    func saveArticle(_ fetched: Article, now: Date = Date()) throws -> Article {
+        try writer.write { db in
+            // 出处：按网址找，没有就新建
+            var source: Source
+            if let s = try Source.filter(Column("url") == fetched.url).fetchOne(db) {
+                source = s
+            } else {
+                source = Source(
+                    title: fetched.title,
+                    author: fetched.author ?? "",
+                    kind: .web,
+                    url: fetched.url,
+                    publisher: fetched.siteName,
+                    year: fetched.publishedYear,
+                    createdAt: now
+                )
+                try source.insert(db)
+            }
+
+            var article = fetched
+            article.sourceId = source.id
+            if let existing = try Article.filter(Column("url") == fetched.url).fetchOne(db) {
+                article.id = existing.id
+                article.savedAt = existing.savedAt
+                article.lastOpenedAt = existing.lastOpenedAt
+                article.isRead = existing.isRead
+                try article.update(db)
+            } else {
+                try article.insert(db)
+            }
+            return article
+        }
+    }
+
+    /// 文章列表（只取元数据，不取正文，列表再长也很快；阅读时用 article(id:) 取全文）
+    func articles(query: String = "") throws -> [Article] {
+        try writer.read { db in
+            var sql = """
+                SELECT id, sourceId, url, title, author, siteName, publishedAt, excerpt,
+                       '' AS contentHTML, '' AS contentText, wordCount, savedAt, lastOpenedAt, isRead
+                FROM article
+                """
+            var args: [(any DatabaseValueConvertible)?] = []
+            let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !q.isEmpty {
+                let p = SearchQuery.likePattern(q)
+                sql += " WHERE title LIKE ? ESCAPE '\\' OR siteName LIKE ? ESCAPE '\\' OR author LIKE ? ESCAPE '\\'"
+                args += [p, p, p]
+            }
+            sql += " ORDER BY savedAt DESC"
+            return try Article.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+        }
+    }
+
+    func articleCount() throws -> Int {
+        try writer.read { db in try Article.fetchCount(db) }
+    }
+
+    func article(id: Int64) throws -> Article? {
+        try writer.read { db in try Article.fetchOne(db, key: id) }
+    }
+
+    func article(url: String) throws -> Article? {
+        try writer.read { db in try Article.filter(Column("url") == url).fetchOne(db) }
+    }
+
+    func markArticleOpened(id: Int64, now: Date = Date()) throws {
+        try writer.write { db in
+            try db.execute(sql: "UPDATE article SET lastOpenedAt = ?, isRead = 1 WHERE id = ?", arguments: [now, id])
+        }
+    }
+
+    /// 只删存档的正文；出处和已划的摘录都保留
+    func deleteArticle(id: Int64) throws {
+        _ = try writer.write { db in try Article.deleteOne(db, key: id) }
+    }
+
+    /// 文章对应出处下的摘录数（不含已删除）
+    func articleHighlightCounts() throws -> [Int64: Int] {
+        try writer.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT article.id AS aid, COUNT(highlight.id) AS n
+                FROM article JOIN highlight ON highlight.sourceId = article.sourceId
+                WHERE highlight.deletedAt IS NULL
+                GROUP BY article.id
+                """)
+            var dict: [Int64: Int] = [:]
+            for r in rows { dict[r["aid"]] = r["n"] }
+            return dict
+        }
     }
 }
 

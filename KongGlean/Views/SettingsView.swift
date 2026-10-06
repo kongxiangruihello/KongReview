@@ -117,15 +117,25 @@ private struct CaptureSettings: View {
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Button("复制书签代码") {
+                    Button("复制“摘录选中文字”书签") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(CaptureRequest.bookmarklet, forType: .string)
                     }
                     Spacer()
                 }
+                Text("另一个书签“整页存档”：点一下就把当前网页整篇存进 KongGlean 的“网页存档”，之后在应用里阅读、划线。")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("复制“整页存档”书签") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(CaptureRequest.saveBookmarklet, forType: .string)
+                    }
+                    Spacer()
+                }
             }
             Section("链接格式（供快捷指令、kongfetch 调用）") {
-                Text("kongglean://add?text=…&title=…&author=…&url=…&location=…&tags=…\nkongglean://quick（打开空白浮窗）\nkongglean://review（打开今日回顾）")
+                Text("kongglean://add?text=…&title=…&author=…&url=…&location=…&tags=…\nkongglean://quick（打开空白浮窗）\nkongglean://review（打开今日回顾）\nkongglean://save?url=…（整页存档）")
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                 Text("链接会打开快速录入浮窗并预先填好内容，确认后按 ⌘↩ 保存。Drafts、kongfetch 的配置方法见仓库中的 docs/INTEGRATIONS.md。")

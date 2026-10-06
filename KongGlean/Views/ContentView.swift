@@ -20,7 +20,8 @@ struct ContentView: View {
             SourceEditorView()
         }
         .overlay(alignment: .bottom) {
-            if let progress = store.importProgress, store.pendingImport == nil {
+            if let progress = store.importProgress.flatMap({ store.pendingImport == nil ? $0 : nil })
+                ?? store.articleProgress.flatMap({ store.addArticleDraft == nil ? $0 : nil }) {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(progress).font(.callout)
@@ -30,6 +31,25 @@ struct ContentView: View {
                 .background(.regularMaterial, in: Capsule())
                 .padding(.bottom, 16)
             }
+        }
+        .sheet(item: $store.addArticleDraft) { _ in
+            AddArticleView()
+        }
+        .confirmationDialog(
+            "删除“\(store.articlePendingDeletion?.title ?? "")”的存档？",
+            isPresented: Binding(
+                get: { store.articlePendingDeletion != nil },
+                set: { if !$0 { store.articlePendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除存档", role: .destructive) {
+                if let a = store.articlePendingDeletion { store.deleteArticle(a) }
+                store.articlePendingDeletion = nil
+            }
+            Button("取消", role: .cancel) { store.articlePendingDeletion = nil }
+        } message: {
+            Text("只删除保存的网页正文；这篇文章的出处和已经划下的摘录都会保留。")
         }
         .sheet(item: $store.pendingImport) { _ in
             ImportPreviewView()
@@ -87,6 +107,8 @@ struct ContentView: View {
             HighlightListView(title: "未归类", filter: .init(unsortedOnly: true))
         case .trash:
             HighlightListView(title: "最近删除", filter: .init(deletedOnly: true))
+        case .articles:
+            ArticlesView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -111,6 +133,14 @@ struct SidebarView: View {
                 Label("收藏", systemImage: "star").tag(SidebarItem.favorites)
                 Label("记忆卡", systemImage: "brain").tag(SidebarItem.mastery)
                 Label("未归类", systemImage: "tray").tag(SidebarItem.unsorted)
+                HStack {
+                    Label("网页存档", systemImage: "globe")
+                    Spacer()
+                    if store.articleCount > 0 {
+                        Text("\(store.articleCount)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                .tag(SidebarItem.articles)
                 HStack {
                     Label("最近删除", systemImage: "trash")
                     Spacer()

@@ -39,6 +39,8 @@ struct KongGleanApp: App {
                     .keyboardShortcut("n")
                 Button("快速录入浮窗") { QuickCaptureController.shared.show() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+                Button("存档网页…") { store.showAddArticle() }
+                    .keyboardShortcut("l")
                 Button("新建出处") {
                     store.editingSource = Source(title: "")
                 }

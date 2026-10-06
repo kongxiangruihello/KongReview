@@ -9,6 +9,7 @@ KongGlean 对外只有一个入口：`kongglean://` 链接。凡是能“打开�
 | `kongglean://quick` | 打开空白浮窗（同全局快捷键） |
 | `kongglean://quick?text=…` | 同 add，但所有参数都可以省略 |
 | `kongglean://review` | 打开主窗口的“今日回顾” |
+| `kongglean://save?url=…` | 抓取该网页并存入“网页存档”，随即打开阅读器 |
 
 参数要做 URL 编码（JavaScript 用 `encodeURIComponent`）。`tags` 用逗号分隔。
 

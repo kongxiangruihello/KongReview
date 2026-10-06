@@ -25,9 +25,12 @@
 - [ ] 批量导入：Markdown / 通用 CSV
 
 ## v0.4 — 网页存档
-- [ ] 整页正文存档：在 WKWebView 中注入 Defuddle（MIT 许可证）或 Readability.js（Apache 2.0 许可证），把正文保存为 Markdown
+- [x] 整页正文存档：WKWebView 加载网页 + Mozilla Readability 0.6.0 提取正文，保存清理后的 HTML
+- [x] 文章阅读视图：在存档的正文里划线（H 键 / 浮动按钮），已有摘录高亮，点击可编辑
+- [x] “整页存档”书签与 `kongglean://save?url=` 链接
+- [ ] 阅读进度记忆、文章内搜索
+- [ ] 微信公众号文章适配
 - [ ] Safari Web Extension：选中文字后在右键菜单中“发送到 KongGlean”
-- [ ] 文章阅读视图：在存档的正文里直接划线
 
 ## v0.5 — 记忆与学术
 - [ ] 记忆卡改用 FSRS 算法（Swift 实现可选 swift-fsrs），用于需要背诵的章句

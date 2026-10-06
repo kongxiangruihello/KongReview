@@ -41,6 +41,7 @@ final class StatusItemController: NSObject {
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
         add(menu, "快速录入（\(HotKeyPreset.current.label)）", #selector(quickCapture))
+        add(menu, "存档网页…", #selector(addArticle))
         add(menu, "今日回顾", #selector(review))
         add(menu, "打开 KongGlean", #selector(openMain))
         menu.addItem(.separator())
@@ -64,6 +65,11 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func openMain() { WindowOpener.showMain() }
+
+    @objc private func addArticle() {
+        WindowOpener.showMain()
+        QuickCaptureController.shared.store?.showAddArticle()
+    }
 
     @objc private func backup() {
         if let store = QuickCaptureController.shared.store { ExportService.backupNow(store: store) }

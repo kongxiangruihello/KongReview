@@ -27,6 +27,8 @@ public struct CaptureRequest: Equatable, Sendable {
         case quick(CaptureRequest?)
         /// kongglean://review：打开今日回顾
         case review
+        /// kongglean://save?url=…：抓取并存档整篇网页
+        case save(URL)
     }
 
     public static func route(for url: URL) -> Route? {
@@ -40,6 +42,13 @@ public struct CaptureRequest: Equatable, Sendable {
             return .quick(comps?.url.flatMap(CaptureRequest.init(url:)))
         case "review":
             return .review
+        case "save":
+            let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            guard let raw = comps?.queryItems?.first(where: { $0.name.lowercased() == "url" })?.value,
+                  let target = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  let scheme = target.scheme?.lowercased(), scheme == "http" || scheme == "https"
+            else { return nil }
+            return .save(target)
         default:
             return nil
         }
@@ -85,6 +94,18 @@ public struct CaptureRequest: Equatable, Sendable {
             note: dict["note"],
             tags: dict["tags"].map(TagParser.parse) ?? []
         )
+    }
+
+    /// 书签小程序：把当前网页整篇存档到 KongGlean
+    public static let saveBookmarklet = "javascript:location.href='kongglean://save?url='+encodeURIComponent(location.href)"
+
+    /// 规范化用户输入的网址：补上 https://，只接受 http/https
+    public static func normalizeWebURL(_ raw: String) -> URL? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty, !s.contains(" ") else { return nil }
+        if !s.lowercased().hasPrefix("http://") && !s.lowercased().hasPrefix("https://") { s = "https://" + s }
+        guard let u = URL(string: s), let host = u.host, host.contains(".") else { return nil }
+        return u
     }
 
     /// 浏览器书签小程序：选中文字后点书签即可发送到 KongGlean。

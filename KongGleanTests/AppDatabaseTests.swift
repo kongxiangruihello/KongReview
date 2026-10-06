@@ -215,3 +215,54 @@ final class ReadwiseDatabaseImportTests: XCTestCase {
     XCTAssertEqual(try db.highlights().last?.text, "学而时习之，不亦说乎？")
   }
 }
+
+final class ArticleDatabaseTests: XCTestCase {
+  func testSaveArticleLinksSourceAndHighlights() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let a = Article(url: "https://blog.example.cn/1", title: "明清之际的思想转向", author: "张三", siteName: "某学术博客",
+                    publishedAt: "2025-03-01T08:00:00+08:00", contentHTML: "<p>正文</p>", contentText: "正文内容", wordCount: 4)
+    let saved = try db.saveArticle(a)
+    XCTAssertNotNil(saved.id)
+    let src = try db.source(id: saved.sourceId)
+    XCTAssertEqual(src?.kind, .web)
+    XCTAssertEqual(src?.publisher, "某学术博客")
+    XCTAssertEqual(src?.year, "2025")
+    XCTAssertEqual(src?.author, "张三")
+
+    // re-save same URL updates, not duplicates
+    var again = a; again.contentHTML = "<p>新正文</p>"
+    let saved2 = try db.saveArticle(again)
+    XCTAssertEqual(saved2.id, saved.id)
+    XCTAssertEqual(try db.articles().count, 1)
+    XCTAssertEqual(try db.article(id: saved.id!)?.contentHTML, "<p>新正文</p>")
+    XCTAssertEqual(try db.allSources().count, 1)
+
+    // highlights in the article's source
+    _ = try db.save(Highlight(sourceId: saved.sourceId, text: "思想转向的一段"))
+    XCTAssertEqual(try db.articleHighlightCounts()[saved.id!], 1)
+    XCTAssertEqual(try db.articles(query: "学术").count, 1)
+    XCTAssertEqual(try db.articles(query: "无关").count, 0)
+
+    try db.markArticleOpened(id: saved.id!)
+    XCTAssertEqual(try db.article(id: saved.id!)?.isRead, true)
+
+    // deleting the article keeps source + highlights
+    try db.deleteArticle(id: saved.id!)
+    XCTAssertEqual(try db.articles().count, 0)
+    XCTAssertEqual(try db.highlights(sourceId: saved.sourceId).count, 1)
+  }
+}
+
+final class ArticleListTests: XCTestCase {
+  func testListOmitsContentAndSearches() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    _ = try db.saveArticle(Article(url: "https://a.cn/1", title: "百分之50%的标题", siteName: "站点", contentHTML: "<p>很长的正文</p>", contentText: "很长的正文", wordCount: 5))
+    let list = try db.articles()
+    XCTAssertEqual(list.count, 1)
+    XCTAssertEqual(list[0].contentHTML, "")
+    XCTAssertEqual(try db.article(id: list[0].id!)?.contentHTML, "<p>很长的正文</p>")
+    XCTAssertEqual(try db.articles(query: "50%").count, 1)
+    XCTAssertEqual(try db.articles(query: "站点").count, 1)
+    XCTAssertEqual(try db.articleCount(), 1)
+  }
+}
