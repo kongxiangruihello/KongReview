@@ -42,6 +42,10 @@ open KongGlean.xcodeproj
 cd Packages/KongGleanCore && swift test
 ```
 
+数据库层（表结构、全文检索、标签查询、捕获入库）和 `LibraryStore` 的测试在 `KongGleanTests/` 里，在 Xcode 中按 ⌘U 运行。
+
+> 开发状态：`KongGleanCore`、`AppDatabase`、`LibraryStore` 已用 Swift 6.0.3 + GRDB 7.8 编译，测试全部通过（Linux 环境）。SwiftUI 界面部分尚未在 Xcode 中编译过，第一次构建时可能需要修正少量编译问题。
+
 ## 目录结构
 
 ```
