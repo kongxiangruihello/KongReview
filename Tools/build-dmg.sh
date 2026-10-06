@@ -1,7 +1,8 @@
 #!/bin/bash
 # 不依赖 Xcode，只用 Apple 命令行工具构建 KongGlean.app 并打包成 DMG。
 # 用法：在仓库根目录执行  ./Tools/build-dmg.sh
-# 产物：build/KongGlean-<版本>.dmg
+# 产物：与仓库同级的 KongGlean-<版本>.dmg（例如 ~/Documents/KongGlean-0.2.0.dmg）
+# 旧产物不覆盖、不删除：移到同级的“KongGlean旧构建/<时间>/”里。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -11,6 +12,7 @@ VERSION="$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 OUT="build"
 APP_DIR="$OUT/$APP.app"
+FINAL_DMG="../$APP-$VERSION.dmg"
 
 echo "==> 检查工具链"
 if ! xcode-select -p >/dev/null 2>&1; then
@@ -19,12 +21,21 @@ if ! xcode-select -p >/dev/null 2>&1; then
 fi
 swift --version
 
+echo "==> 归档上一次的产物（版本 $VERSION）"
+ARCHIVE="../${APP}旧构建/$(date +%Y%m%d-%H%M%S)"
+for f in "$OUT" "$FINAL_DMG"; do
+  if [ -e "$f" ]; then
+    mkdir -p "$ARCHIVE"
+    mv -n "$f" "$ARCHIVE/"
+    echo "已移走：$f → $ARCHIVE"
+  fi
+done
+
 echo "==> 编译（Release，arm64）"
 swift build -c release --arch arm64 --product "$APP"
 BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 
 echo "==> 组装 $APP.app"
-rm -rf "$OUT"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_DIR/$APP" "$APP_DIR/Contents/MacOS/$APP"
 # SwiftPM 生成的资源包（如 GRDB 的隐私清单）
@@ -78,6 +89,7 @@ ln -s /Applications "$STAGE/Applications"
 DMG="$OUT/$APP-$VERSION.dmg"
 hdiutil create -volname "$APP $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
+cp "$DMG" "$FINAL_DMG"
 
 echo ""
-echo "完成：$(pwd)/$DMG"
+echo "完成：$(cd .. && pwd)/$APP-$VERSION.dmg"

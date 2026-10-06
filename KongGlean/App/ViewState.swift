@@ -23,3 +23,9 @@ final class ListState {
     var query = ""
     var items: [Highlight] = []
 }
+
+struct ReviewCard: Identifiable {
+    var highlight: Highlight
+    var isMastery: Bool
+    var id: Int64 { highlight.id ?? -1 }
+}

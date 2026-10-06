@@ -19,6 +19,32 @@ public struct CaptureRequest: Equatable, Sendable {
 
     public static let scheme = "kongglean"
 
+    /// 解析任意 kongglean:// 链接
+    public enum Route: Equatable, Sendable {
+        /// kongglean://add?text=...（text 必填）
+        case add(CaptureRequest)
+        /// kongglean://quick 或 kongglean://quick?text=...：打开快速录入浮窗，参数可选
+        case quick(CaptureRequest?)
+        /// kongglean://review：打开今日回顾
+        case review
+    }
+
+    public static func route(for url: URL) -> Route? {
+        guard url.scheme?.lowercased() == scheme else { return nil }
+        switch url.host?.lowercased() {
+        case "add":
+            return CaptureRequest(url: url).map(Route.add)
+        case "quick":
+            var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            comps?.host = "add"
+            return .quick(comps?.url.flatMap(CaptureRequest.init(url:)))
+        case "review":
+            return .review
+        default:
+            return nil
+        }
+    }
+
     public init(
         text: String,
         title: String? = nil,

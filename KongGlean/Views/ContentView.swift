@@ -3,6 +3,7 @@ import KongGleanCore
 
 struct ContentView: View {
     @Environment(LibraryStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var store = store
@@ -17,6 +18,26 @@ struct ContentView: View {
         }
         .sheet(item: $store.editingSource) { _ in
             SourceEditorView()
+        }
+        .confirmationDialog(
+            "删除出处“\(store.sourcePendingDeletion?.title ?? "")”？",
+            isPresented: Binding(
+                get: { store.sourcePendingDeletion != nil },
+                set: { if !$0 { store.sourcePendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除出处", role: .destructive) {
+                if let s = store.sourcePendingDeletion { store.delete(s) }
+                store.sourcePendingDeletion = nil
+            }
+            Button("取消", role: .cancel) { store.sourcePendingDeletion = nil }
+        } message: {
+            Text("其下的摘录会保留，转入“未归类”。")
+        }
+        .onAppear {
+            // 让菜单栏、链接等 AppKit 代码在主窗口关闭后也能重新打开它
+            WindowOpener.openMain = { openWindow(id: "main") }
         }
         .alert("出错了", isPresented: Binding(
             get: { store.errorMessage != nil },
@@ -41,6 +62,8 @@ struct ContentView: View {
             HighlightListView(title: "记忆卡", filter: .init(masteryOnly: true))
         case .unsorted:
             HighlightListView(title: "未归类", filter: .init(unsortedOnly: true))
+        case .trash:
+            HighlightListView(title: "最近删除", filter: .init(deletedOnly: true))
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -65,6 +88,14 @@ struct SidebarView: View {
                 Label("收藏", systemImage: "star").tag(SidebarItem.favorites)
                 Label("记忆卡", systemImage: "brain").tag(SidebarItem.mastery)
                 Label("未归类", systemImage: "tray").tag(SidebarItem.unsorted)
+                HStack {
+                    Label("最近删除", systemImage: "trash")
+                    Spacer()
+                    if store.trashCount > 0 {
+                        Text("\(store.trashCount)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                .tag(SidebarItem.trash)
             }
 
             Section("出处") {
@@ -85,7 +116,7 @@ struct SidebarView: View {
                             Divider()
                             Button("导出为 Markdown…") { ExportService.export(source: source, store: store) }
                             Divider()
-                            Button("删除出处（保留摘录）", role: .destructive) { store.delete(source) }
+                            Button("删除出处（保留摘录）…", role: .destructive) { store.sourcePendingDeletion = source }
                         }
                     }
                 }

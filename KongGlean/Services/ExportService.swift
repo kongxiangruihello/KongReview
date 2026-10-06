@@ -20,6 +20,16 @@ enum ExportService {
         }
     }
 
+    static func backupNow(store: LibraryStore) {
+        do {
+            let url = try BackupService.backupNow(db: store.db)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            store.reload()
+        } catch {
+            store.report(error)
+        }
+    }
+
     static func exportAll(store: LibraryStore) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true

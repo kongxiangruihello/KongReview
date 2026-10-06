@@ -190,12 +190,6 @@ struct DailyReviewView: View {
     }
 }
 
-struct ReviewCard: Identifiable {
-    var highlight: Highlight
-    var isMastery: Bool
-    var id: Int64 { highlight.id ?? -1 }
-}
-
 struct ReviewCardView: View {
     let card: ReviewCard
     let source: Source?

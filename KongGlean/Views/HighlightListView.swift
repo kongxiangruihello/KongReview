@@ -8,6 +8,7 @@ struct HighlightFilter: Hashable {
     var favoritesOnly = false
     var masteryOnly = false
     var unsortedOnly = false
+    var deletedOnly = false
 }
 
 struct HighlightListView: View {
@@ -29,7 +30,9 @@ struct HighlightListView: View {
                 ContentUnavailableView {
                     Label(state.query.isEmpty ? "还没有摘录" : "没有找到", systemImage: "text.quote")
                 } description: {
-                    Text(state.query.isEmpty ? "按 ⌘N 新建一条摘录，或在浏览器里用书签小程序发送选中文字。" : "换个关键词试试。两个字以内的查询使用模糊匹配。")
+                    Text(filter.deletedOnly
+                         ? "删除的摘录会在这里保留 30 天，可随时恢复。"
+                         : (state.query.isEmpty ? "按 ⌘N 新建一条摘录，或在任意应用中按 \(HotKeyPreset.current.label) 快速录入。" : "换个关键词试试。两个字以内的查询使用模糊匹配。"))
                 }
             } else {
                 List(state.items) { h in
@@ -47,12 +50,35 @@ struct HighlightListView: View {
         .task(id: LoadKey(filter: filter, query: state.query, revision: store.revision)) {
             load()
         }
+        .confirmationDialog(
+            "彻底删除“最近删除”里的 \(state.items.count) 条摘录？",
+            isPresented: Binding(
+                get: { store.confirmingEmptyTrash },
+                set: { store.confirmingEmptyTrash = $0 }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("彻底删除", role: .destructive) { store.emptyTrash() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("此操作无法撤销（每日自动备份中仍保留删除前的数据）。")
+        }
         .toolbar {
             ToolbarItem {
-                Button {
-                    store.newHighlight(in: filter.sourceId)
-                } label: {
-                    Label("新建摘录", systemImage: "square.and.pencil")
+                if filter.deletedOnly {
+                    Button(role: .destructive) {
+                        store.confirmingEmptyTrash = true
+                    } label: {
+                        Label("清空", systemImage: "trash.slash")
+                    }
+                    .help("立即彻底删除这里的全部摘录（无法恢复）")
+                    .disabled(state.items.isEmpty)
+                } else {
+                    Button {
+                        store.newHighlight(in: filter.sourceId)
+                    } label: {
+                        Label("新建摘录", systemImage: "square.and.pencil")
+                    }
                 }
             }
         }
@@ -66,7 +92,8 @@ struct HighlightListView: View {
                 tag: filter.tag,
                 favoritesOnly: filter.favoritesOnly,
                 masteryOnly: filter.masteryOnly,
-                unsortedOnly: filter.unsortedOnly
+                unsortedOnly: filter.unsortedOnly,
+                deletedOnly: filter.deletedOnly
             )
         } catch {
             store.report(error)
@@ -114,6 +141,17 @@ struct HighlightMenu: View {
     private let scheduler = ReviewScheduler()
 
     var body: some View {
+        if highlight.isDeleted {
+            Button("恢复") { store.restore(highlight) }
+            Divider()
+            Button("彻底删除", role: .destructive) { store.deletePermanently(highlight) }
+        } else {
+            normalItems
+        }
+    }
+
+    @ViewBuilder
+    private var normalItems: some View {
         Button("编辑…") { store.edit(highlight) }
         Button("复制（含出处）") { copy(withCitation: true) }
         Button("复制为 Markdown") { copyMarkdown() }
@@ -136,7 +174,7 @@ struct HighlightMenu: View {
             }
         }
         Divider()
-        Button("删除", role: .destructive) { store.delete(highlight) }
+        Button("删除（移入最近删除）", role: .destructive) { store.delete(highlight) }
     }
 
     private func copy(withCitation: Bool) {

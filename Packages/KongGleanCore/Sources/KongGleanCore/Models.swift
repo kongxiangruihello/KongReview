@@ -83,6 +83,8 @@ public struct Highlight: Codable, Identifiable, Hashable, Sendable {
 
     public var createdAt: Date
     public var updatedAt: Date
+    /// 软删除时间；非空表示在“最近删除”里，30 天后彻底清除
+    public var deletedAt: Date?
 
     public init(
         id: Int64? = nil,
@@ -99,7 +101,8 @@ public struct Highlight: Codable, Identifiable, Hashable, Sendable {
         masteryHalfLifeDays: Double? = nil,
         masteryLastReviewedAt: Date? = nil,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.sourceId = sourceId
@@ -116,7 +119,10 @@ public struct Highlight: Codable, Identifiable, Hashable, Sendable {
         self.masteryLastReviewedAt = masteryLastReviewedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
     }
+
+    public var isDeleted: Bool { deletedAt != nil }
 
     public var isInMastery: Bool { masteryHalfLifeDays != nil }
 }

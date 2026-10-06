@@ -100,3 +100,93 @@ final class StoreTests: XCTestCase {
     XCTAssertNil(store.errorMessage)
   }
 }
+
+final class V02DatabaseTests: XCTestCase {
+  func testSoftDeleteTrashAndPurge() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let s = try db.save(Source(title: "书"))
+    let a = try db.save(Highlight(sourceId: s.id, text: "第一条摘录内容", tags: ["甲"]))
+    _ = try db.save(Highlight(sourceId: s.id, text: "第二条摘录内容", tags: ["乙"]))
+
+    let now = Date()
+    try db.moveToTrash(a, now: now.addingTimeInterval(-40 * 86_400))
+    XCTAssertEqual(try db.highlights().count, 1)
+    XCTAssertEqual(try db.highlights(query: "第一条摘录").count, 0, "search excludes deleted")
+    XCTAssertEqual(try db.highlights(deletedOnly: true).count, 1)
+    XCTAssertEqual(try db.trashCount(), 1)
+    XCTAssertEqual(try db.allTags(), ["乙"])
+    XCTAssertEqual(try db.highlightCounts()[s.id!], 1)
+    XCTAssertEqual(try db.highlights(ids: [a.id!]).count, 0)
+    XCTAssertTrue(try db.reviewCandidates().highlights.allSatisfy { !$0.isDeleted })
+
+    // restore
+    let trashed = try db.highlights(deletedOnly: true)[0]
+    try db.restore(trashed)
+    XCTAssertEqual(try db.highlights().count, 2)
+
+    // purge only expired
+    let all = try db.highlights()
+    try db.moveToTrash(all[0], now: now.addingTimeInterval(-40 * 86_400))
+    try db.moveToTrash(all[1], now: now.addingTimeInterval(-1 * 86_400))
+    XCTAssertEqual(try db.purgeTrash(olderThan: TrashPolicy.cutoff(now: now)), 1)
+    XCTAssertEqual(try db.trashCount(), 1)
+    XCTAssertEqual(try db.emptyTrash(), 1)
+    XCTAssertEqual(try db.trashCount(), 0)
+    XCTAssertEqual(try db.highlights(query: "摘录内容").count, 0, "FTS rows removed")
+  }
+
+  func testSourceMatchingByTitleWhenAuthorEmpty() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let s = try db.save(Source(title: "论语译注", author: "杨伯峻"))
+    XCTAssertEqual(try db.findOrCreateSource(title: "论语译注", kind: .book).id, s.id)
+    XCTAssertNotEqual(try db.findOrCreateSource(title: "论语译注", author: "钱穆", kind: .book).id, s.id)
+  }
+
+  func testBackupAndPrune() throws {
+    let path = NSTemporaryDirectory() + "kg-\(UUID().uuidString).sqlite"
+    var config = Configuration(); config.foreignKeysEnabled = true
+    let db = try AppDatabase(DatabasePool(path: path, configuration: config))
+    _ = try db.save(Highlight(text: "备份测试内容"))
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kgb-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    // 40 份旧备份 + 无关文件
+    for i in 0..<40 {
+      let d = Date(timeIntervalSince1970: 1_700_000_000 + Double(i) * 86_400)
+      FileManager.default.createFile(atPath: dir.appendingPathComponent(BackupPolicy.fileName(for: d)).path, contents: Data())
+    }
+    FileManager.default.createFile(atPath: dir.appendingPathComponent("notes.txt").path, contents: Data())
+
+    let now = Date()
+    let made = try BackupService.backupIfNeeded(db: db, now: now, directory: dir)
+    XCTAssertNotNil(made)
+    XCTAssertNil(try BackupService.backupIfNeeded(db: db, now: now, directory: dir), "once per day")
+    _ = try BackupService.backupNow(db: db, now: now, directory: dir) // overwrite same day ok
+
+    let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+    XCTAssertEqual(names.filter(BackupPolicy.isBackupFile).count, BackupService.keepCount)
+    XCTAssertTrue(names.contains("notes.txt"))
+    XCTAssertFalse(names.contains { $0.hasPrefix(".tmp-") })
+
+    // backup is a valid DB with the data
+    let copy = try DatabaseQueue(path: made!.path)
+    XCTAssertEqual(try copy.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM highlight") }, 1)
+  }
+}
+
+final class V02StoreTests: XCTestCase {
+  @MainActor func testStoreTrashFlow() async throws {
+    let store = LibraryStore(db: try AppDatabase(DatabaseQueue()))
+    var d = HighlightDraft(highlight: Highlight(text: "条目一"))
+    d.newSourceTitle = "某书"
+    store.commit(d)
+    let h = try store.db.highlights()[0]
+    store.delete(h)
+    XCTAssertEqual(store.trashCount, 1)
+    store.restore(try store.db.highlights(deletedOnly: true)[0])
+    XCTAssertEqual(store.trashCount, 0)
+    store.delete(try store.db.highlights()[0])
+    store.emptyTrash()
+    XCTAssertEqual(store.trashCount, 0)
+    XCTAssertNil(store.errorMessage)
+  }
+}

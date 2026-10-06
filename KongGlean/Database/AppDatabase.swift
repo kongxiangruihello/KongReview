@@ -97,6 +97,13 @@ final class AppDatabase {
                 t.column("note")
             }
         }
+
+        // v0.2：软删除
+        m.registerMigration("v2-soft-delete") { db in
+            try db.alter(table: "highlight") { t in
+                t.add(column: "deletedAt", .datetime)
+            }
+        }
         return m
     }
 }
@@ -129,8 +136,47 @@ extension AppDatabase {
         }
     }
 
-    func delete(_ highlight: Highlight) throws {
+    /// 软删除：移入“最近删除”
+    func moveToTrash(_ highlight: Highlight, now: Date = Date()) throws {
+        var h = highlight
+        h.deletedAt = now
+        try save(h)
+    }
+
+    func restore(_ highlight: Highlight) throws {
+        var h = highlight
+        h.deletedAt = nil
+        try save(h)
+    }
+
+    /// 彻底删除（仅用于“最近删除”）
+    func deletePermanently(_ highlight: Highlight) throws {
         _ = try writer.write { db in try highlight.delete(db) }
+    }
+
+    /// 清空“最近删除”
+    @discardableResult
+    func emptyTrash() throws -> Int {
+        try writer.write { db in
+            try db.execute(sql: "DELETE FROM highlight WHERE deletedAt IS NOT NULL")
+            return db.changesCount
+        }
+    }
+
+    /// 清除删除时间早于 cutoff 的条目（默认保留 30 天）
+    @discardableResult
+    func purgeTrash(olderThan cutoff: Date) throws -> Int {
+        try writer.write { db in
+            try db.execute(sql: "DELETE FROM highlight WHERE deletedAt IS NOT NULL AND deletedAt < ?", arguments: [cutoff])
+            return db.changesCount
+        }
+    }
+
+    /// 把整个数据库写成一个独立的 SQLite 文件（VACUUM INTO，一致性快照，不影响正在使用的库）
+    func backup(to url: URL) throws {
+        try writer.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM INTO ?", arguments: [url.path])
+        }
     }
 
     func delete(_ source: Source) throws {
@@ -147,6 +193,11 @@ extension AppDatabase {
             if let existing = try Source
                 .filter(Column("title") == title && Column("author") == author)
                 .fetchOne(db) {
+                return existing
+            }
+            // 只填书名、没填作者时（快速录入的常见情况），沿用同名的已有出处
+            if author.isEmpty,
+               let existing = try Source.filter(Column("title") == title).order(Column("id")).fetchOne(db) {
                 return existing
             }
             var s = Source(title: title, author: author, kind: kind, url: url)
@@ -187,7 +238,7 @@ extension AppDatabase {
         try writer.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT sourceId, COUNT(*) AS n FROM highlight
-                WHERE sourceId IS NOT NULL AND isDiscarded = 0
+                WHERE sourceId IS NOT NULL AND isDiscarded = 0 AND deletedAt IS NULL
                 GROUP BY sourceId
                 """)
             var dict: [Int64: Int] = [:]
@@ -204,7 +255,8 @@ extension AppDatabase {
         includeDiscarded: Bool = false,
         favoritesOnly: Bool = false,
         masteryOnly: Bool = false,
-        unsortedOnly: Bool = false
+        unsortedOnly: Bool = false,
+        deletedOnly: Bool = false
     ) throws -> [Highlight] {
         try writer.read { db in
             var clauses: [String] = []
@@ -232,14 +284,19 @@ extension AppDatabase {
                 clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ?)")
                 args.append(tag)
             }
-            if !includeDiscarded { clauses.append("highlight.isDiscarded = 0") }
+            if deletedOnly {
+                clauses.append("highlight.deletedAt IS NOT NULL")
+            } else {
+                clauses.append("highlight.deletedAt IS NULL")
+                if !includeDiscarded { clauses.append("highlight.isDiscarded = 0") }
+            }
             if favoritesOnly { clauses.append("highlight.isFavorite = 1") }
             if masteryOnly { clauses.append("highlight.masteryHalfLifeDays IS NOT NULL") }
             if unsortedOnly { clauses.append("highlight.sourceId IS NULL") }
 
             var sql = "SELECT highlight.* FROM \(from)"
             if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
-            sql += " ORDER BY highlight.createdAt DESC"
+            sql += deletedOnly ? " ORDER BY highlight.deletedAt DESC" : " ORDER BY highlight.createdAt DESC"
             return try Highlight.fetchAll(db, sql: sql, arguments: StatementArguments(args))
         }
     }
@@ -248,15 +305,22 @@ extension AppDatabase {
         try writer.read { db in
             try String.fetchAll(db, sql: """
                 SELECT DISTINCT json_each.value FROM highlight, json_each(highlight.tags)
-                WHERE highlight.isDiscarded = 0
+                WHERE highlight.isDiscarded = 0 AND highlight.deletedAt IS NULL
                 ORDER BY json_each.value
                 """)
         }
     }
 
-    /// 按给定 id 顺序取出摘录（用于恢复当日回顾）
+    func trashCount() throws -> Int {
+        try writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM highlight WHERE deletedAt IS NOT NULL") ?? 0
+        }
+    }
+
+    /// 按给定 id 顺序取出摘录（用于恢复当日回顾；已删除的不返回）
     func highlights(ids: [Int64]) throws -> [Highlight] {
         let found = try writer.read { db in try Highlight.fetchAll(db, keys: ids) }
+            .filter { !$0.isDeleted }
         let byId = Dictionary(uniqueKeysWithValues: found.compactMap { h in h.id.map { ($0, h) } })
         return ids.compactMap { byId[$0] }
     }

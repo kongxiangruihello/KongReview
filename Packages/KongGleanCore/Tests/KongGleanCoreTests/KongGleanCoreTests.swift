@@ -160,3 +160,48 @@ final class ExporterTests: XCTestCase {
         XCTAssertEqual(SearchQuery.likePattern("50%_"), "%50\\%\\_%")
     }
 }
+
+final class V02Tests: XCTestCase {
+    func testRoutes() {
+        let add = CaptureRequest.route(for: URL(string: "kongglean://add?text=abc&title=T")!)
+        XCTAssertEqual(add, .add(CaptureRequest(text: "abc", title: "T")))
+        XCTAssertEqual(CaptureRequest.route(for: URL(string: "kongglean://quick")!), .quick(nil))
+        XCTAssertEqual(CaptureRequest.route(for: URL(string: "kongglean://quick?text=x")!), .quick(CaptureRequest(text: "x")))
+        XCTAssertEqual(CaptureRequest.route(for: URL(string: "kongglean://review")!), .review)
+        XCTAssertNil(CaptureRequest.route(for: URL(string: "kongglean://add")!))
+        XCTAssertNil(CaptureRequest.route(for: URL(string: "kongglean://unknown")!))
+        XCTAssertNil(CaptureRequest.route(for: URL(string: "https://x.com")!))
+    }
+
+    func testBackupPolicy() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let d = cal.date(from: DateComponents(year: 2026, month: 10, day: 6, hour: 9))!
+        XCTAssertEqual(BackupPolicy.fileName(for: d, calendar: cal), "glean-2026-10-06.sqlite")
+        XCTAssertTrue(BackupPolicy.needsBackup(existing: ["glean-2026-10-05.sqlite"], now: d, calendar: cal))
+        XCTAssertFalse(BackupPolicy.needsBackup(existing: ["glean-2026-10-06.sqlite"], now: d, calendar: cal))
+        let files = (1...35).map { String(format: "glean-2026-09-%02d.sqlite", min($0, 30)) } .uniqued() + ["other.txt", "glean-bad.sqlite"]
+        let prune = BackupPolicy.filesToPrune(existing: files, keep: 28)
+        XCTAssertEqual(prune, ["glean-2026-09-01.sqlite", "glean-2026-09-02.sqlite"])
+        XCTAssertEqual(BackupPolicy.filesToPrune(existing: ["glean-2026-09-01.sqlite"], keep: 30), [])
+    }
+
+    func testTrashPolicyAndDeletedExcludedFromReview() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        XCTAssertFalse(TrashPolicy.isExpired(deletedAt: now.addingTimeInterval(-29 * 86_400), now: now))
+        XCTAssertTrue(TrashPolicy.isExpired(deletedAt: now.addingTimeInterval(-30 * 86_400), now: now))
+        var h = Highlight(id: 1, text: "x")
+        h.deletedAt = now
+        XCTAssertTrue(h.isDeleted)
+        XCTAssertEqual(ReviewScheduler().weight(of: h, sourceWeight: 1, now: now), 0)
+        var rng = SeededGenerator(seed: 1)
+        XCTAssertTrue(ReviewScheduler().makeSession(highlights: [h], sourceWeights: [:], now: now, using: &rng).regular.isEmpty)
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}

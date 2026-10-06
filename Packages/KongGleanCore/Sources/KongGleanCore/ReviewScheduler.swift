@@ -104,7 +104,7 @@ public struct ReviewScheduler: Sendable {
     /// 到期的记忆卡（p ≤ 0.5），越该复习的越靠前
     public func dueMastery(from highlights: [Highlight], now: Date) -> [Highlight] {
         highlights
-            .filter { !$0.isDiscarded }
+            .filter { !$0.isDiscarded && !$0.isDeleted }
             .compactMap { h -> (Highlight, Double)? in
                 guard let p = recallProbability(of: h, now: now), p <= 0.5 else { return nil }
                 return (h, p)
@@ -115,7 +115,7 @@ public struct ReviewScheduler: Sendable {
 
     /// 单条摘录在普通回顾中的权重
     public func weight(of highlight: Highlight, sourceWeight: Double, now: Date) -> Double {
-        guard !highlight.isDiscarded, sourceWeight > 0 else { return 0 }
+        guard !highlight.isDiscarded, !highlight.isDeleted, sourceWeight > 0 else { return 0 }
         var w = sourceWeight
         if highlight.isFavorite { w *= config.favoriteBoost }
         if let last = highlight.lastSurfacedAt {

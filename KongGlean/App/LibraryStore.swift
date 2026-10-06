@@ -9,6 +9,7 @@ enum SidebarItem: Hashable {
     case favorites
     case mastery
     case unsorted
+    case trash
     case source(Int64)
     case tag(String)
 }
@@ -22,11 +23,16 @@ final class LibraryStore {
     var sources: [Source] = []
     var highlightCounts: [Int64: Int] = [:]
     var tags: [String] = []
+    var trashCount = 0
 
     var selection: SidebarItem? = .review
     /// 正在编辑/新建的摘录草稿；非空时弹出编辑面板
     var editorDraft: HighlightDraft?
     var editingSource: Source?
+    /// 等待确认删除的出处
+    var sourcePendingDeletion: Source?
+    /// 是否正在确认“清空最近删除”
+    var confirmingEmptyTrash = false
     var errorMessage: String?
 
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
@@ -46,6 +52,7 @@ final class LibraryStore {
             sources = try db.allSources()
             highlightCounts = try db.highlightCounts()
             tags = try db.allTags()
+            trashCount = try db.trashCount()
             revision += 1
         } catch {
             report(error)
@@ -80,8 +87,31 @@ final class LibraryStore {
         perform { try db.save(source) }
     }
 
+    /// 删除 = 移入“最近删除”，30 天内可恢复
     func delete(_ highlight: Highlight) {
-        perform { try db.delete(highlight) }
+        perform { try db.moveToTrash(highlight) }
+    }
+
+    func restore(_ highlight: Highlight) {
+        perform { try db.restore(highlight) }
+    }
+
+    func deletePermanently(_ highlight: Highlight) {
+        perform { try db.deletePermanently(highlight) }
+    }
+
+    func emptyTrash() {
+        perform { try db.emptyTrash() }
+    }
+
+    /// 启动时的例行维护：清除过期的“最近删除”，并做当天的自动备份
+    func runStartupMaintenance() {
+        perform { try db.purgeTrash(olderThan: TrashPolicy.cutoff(now: Date())) }
+        do {
+            try BackupService.backupIfNeeded(db: db)
+        } catch {
+            report(error)
+        }
     }
 
     func delete(_ source: Source) {
@@ -121,8 +151,15 @@ final class LibraryStore {
         editorDraft = draft
     }
 
-    /// 保存编辑面板的内容
+    /// 保存编辑面板的内容并关闭面板
     func commit(_ draft: HighlightDraft) {
+        if save(draft: draft) { editorDraft = nil }
+    }
+
+    /// 保存一份草稿（主窗口编辑器与快速录入浮窗共用）；成功返回 true
+    @discardableResult
+    func save(draft: HighlightDraft) -> Bool {
+        var ok = false
         perform {
             var h = draft.highlight
             h.tags = TagParser.parse(draft.tagsText)
@@ -141,8 +178,9 @@ final class LibraryStore {
                 h.sourceId = s.id
             }
             try db.save(h)
+            ok = true
         }
-        editorDraft = nil
+        return ok
     }
 }
 
