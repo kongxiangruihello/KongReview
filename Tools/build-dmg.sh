@@ -11,7 +11,10 @@ BUNDLE_ID="com.kongxiangrui.KongGlean"
 VERSION="$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1/')"
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 OUT="build"
-APP_DIR="${OUT}/${APP}.app"
+# 在临时目录里组装与签名：“文稿”若开启了 iCloud 同步，文件会被加上扩展属性，
+# codesign 会报 “resource fork, Finder information, or similar detritus not allowed”。
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/kongglean-build.XXXXXX")"
+APP_DIR="${WORK}/${APP}.app"
 FINAL_DMG="../${APP}-${VERSION}.dmg"
 
 echo "==> 检查工具链"
@@ -42,7 +45,7 @@ cp "${BIN_DIR}/${APP}" "${APP_DIR}/Contents/MacOS/${APP}"
 find "${BIN_DIR}" -maxdepth 1 -name '*.bundle' -exec cp -R {} "${APP_DIR}/Contents/Resources/" \;
 
 echo "==> 生成图标"
-ICONSET="${OUT}/AppIcon.iconset"
+ICONSET="${WORK}/AppIcon.iconset"
 mkdir -p "${ICONSET}"
 cp KongGlean/Resources/Assets.xcassets/AppIcon.appiconset/icon_*.png "${ICONSET}/"
 iconutil -c icns "${ICONSET}" -o "${APP_DIR}/Contents/Resources/AppIcon.icns"
@@ -77,18 +80,23 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+echo "==> 清除扩展属性"
+xattr -cr "${APP_DIR}"
+
 echo "==> 本机签名（ad-hoc）"
 codesign --force --deep --sign - "${APP_DIR}"
 codesign --verify --verbose=1 "${APP_DIR}"
 
 echo "==> 打包 DMG"
-STAGE="${OUT}/dmg"
+STAGE="${WORK}/dmg"
 mkdir -p "${STAGE}"
 cp -R "${APP_DIR}" "${STAGE}/"
 ln -s /Applications "${STAGE}/Applications"
+mkdir -p "${OUT}"
 DMG="${OUT}/${APP}-${VERSION}.dmg"
 hdiutil create -volname "${APP} ${VERSION}" -srcfolder "${STAGE}" -ov -format UDZO "${DMG}" >/dev/null
-rm -rf "${STAGE}"
+cp -R "${APP_DIR}" "${OUT}/"
+rm -rf "${WORK}"
 cp "${DMG}" "${FINAL_DMG}"
 
 echo ""
