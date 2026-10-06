@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         HotKeyCenter.shared.action = { QuickCaptureController.shared.show() }
         HotKeyCenter.shared.apply(HotKeyPreset.current)
+        StatusItemController.shared.apply()
         QuickCaptureController.shared.store?.runStartupMaintenance()
     }
 

@@ -4,7 +4,10 @@ import KongGleanCore
 @main
 struct KongGleanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @AppStorage("menubar.visible") private var showMenuBarIcon = true
+
+    // 注意：App 结构体里不要放 @AppStorage、可变绑定，也不要用 MenuBarExtra。
+    // 0.2.0 的 MenuBarExtra(isInserted: $appStorage) 让整个 App 场景图反复重建，
+    // 主线程 100% 占用、点哪里都卡死。菜单栏图标改由 AppKit 实现（StatusItem.swift）。
 
     // 不用 @State：命令行工具链缺少 SwiftUIMacros 插件（macOS 27 SDK 起 @State 是宏）。
     // App 结构体只创建一次，直接持有即可。
@@ -52,40 +55,9 @@ struct KongGleanApp: App {
             }
         }
 
-        MenuBarExtra("KongGlean", systemImage: "text.quote", isInserted: $showMenuBarIcon) {
-            MenuBarContent()
-                .environment(store)
-        }
-
         Settings {
             SettingsView()
                 .environment(store)
         }
-    }
-}
-
-/// 菜单栏图标的菜单
-struct MenuBarContent: View {
-    @Environment(LibraryStore.self) private var store
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Button("快速录入（\(HotKeyPreset.current.label)）") {
-            QuickCaptureController.shared.show()
-        }
-        Button("今日回顾") {
-            store.selection = .review
-            show()
-        }
-        Button("打开 KongGlean") { show() }
-        Divider()
-        SettingsLink { Text("设置…") }
-        Divider()
-        Button("退出 KongGlean") { NSApp.terminate(nil) }
-    }
-
-    private func show() {
-        WindowOpener.openMain = { openWindow(id: "main") }
-        WindowOpener.showMain()
     }
 }

@@ -54,6 +54,7 @@ private struct QuickCaptureSettings: View {
             }
             Section {
                 Toggle("在菜单栏显示图标", isOn: $showMenuBarIcon)
+                    .onChange(of: showMenuBarIcon) { StatusItemController.shared.apply() }
                 Toggle("登录时自动启动", isOn: Binding(
                     get: { LoginItem.isEnabled },
                     set: { on in
