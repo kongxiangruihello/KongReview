@@ -25,10 +25,17 @@ struct SourceEditorView: View {
                     }
                 }
                 Section("版本信息（用于生成引文）") {
+                    TextField("出版地（如：北京）", text: optional(sourceBinding.place))
                     TextField("出版者", text: optional(sourceBinding.publisher))
                     TextField("版本（如：点校本、修订版）", text: optional(sourceBinding.edition))
                     TextField("年份", text: optional(sourceBinding.year))
                     TextField("网址", text: optional(sourceBinding.url))
+                    if source.kind == .article || source.kind == .web {
+                        TextField(source.kind == .article ? "期刊 / 文集名" : "网站名", text: optional(sourceBinding.container))
+                    }
+                    if source.kind == .article {
+                        TextField("卷期（如：55(34) 或 第3期）", text: optional(sourceBinding.issue))
+                    }
                 }
                 Section("每日回顾") {
                     Picker("出现频率", selection: sourceBinding.reviewWeight) {

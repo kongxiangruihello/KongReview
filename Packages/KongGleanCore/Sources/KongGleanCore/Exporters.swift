@@ -1,28 +1,11 @@
 import Foundation
 
-// MARK: - 引文格式
-
-/// 中文脚注简式。不是严格的 GB/T 7714，只求备课、写作时能直接粘贴；以后可扩展多种体例。
-public enum CitationFormatter {
-    public static func citation(for highlight: Highlight, source: Source?) -> String {
-        guard let s = source else { return highlight.location ?? "" }
-        var parts: [String] = []
-        let titled = "《\(s.title)》"
-        parts.append(s.author.isEmpty ? titled : "\(s.author)：\(titled)")
-        if let p = s.publisher, !p.isEmpty { parts.append(p) }
-        if let e = s.edition, !e.isEmpty { parts.append(e) }
-        if let y = s.year, !y.isEmpty { parts.append(y.hasSuffix("年") ? y : "\(y)年") }
-        if let loc = highlight.location, !loc.isEmpty { parts.append(loc) }
-        if s.kind == .web, let u = s.url, !u.isEmpty { parts.append(u) }
-        return parts.joined(separator: "，") + "。"
-    }
-}
-
 // MARK: - Markdown 导出（Obsidian 友好）
 
 public enum MarkdownExporter {
 
-    public static func export(source: Source, highlights: [Highlight], exportedAt: Date = Date()) -> String {
+    public static func export(source: Source, highlights: [Highlight], exportedAt: Date = Date(),
+                              style: CitationStyle = .footnote) -> String {
         var out = "---\n"
         out += "title: \(yamlEscape(source.title))\n"
         if !source.author.isEmpty { out += "author: \(yamlEscape(source.author))\n" }
@@ -36,20 +19,21 @@ public enum MarkdownExporter {
         out += "# \(source.title)\n\n"
 
         for h in highlights where !h.isDiscarded {
-            out += block(for: h, source: source)
+            out += block(for: h, source: source, style: style, accessed: exportedAt)
             out += "\n"
         }
         return out
     }
 
-    public static func block(for h: Highlight, source: Source?) -> String {
+    public static func block(for h: Highlight, source: Source?, style: CitationStyle = .footnote,
+                             accessed: Date = Date()) -> String {
         var out = ""
         for line in h.text.split(separator: "\n", omittingEmptySubsequences: false) {
             out += "> \(line)\n"
         }
         if let t = h.translation, !t.isEmpty { out += "\n译：\(t)\n" }
         if let n = h.note, !n.isEmpty { out += "\n按：\(n)\n" }
-        let cite = CitationFormatter.citation(for: h, source: source)
+        let cite = CitationFormatter.citation(for: h, source: source, style: style, accessed: accessed)
         if !cite.isEmpty { out += "\n— \(cite)\n" }
         if !h.tags.isEmpty { out += "\n" + h.tags.map { "#\($0)" }.joined(separator: " ") + "\n" }
         return out

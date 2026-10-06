@@ -18,10 +18,18 @@ struct HighlightListView: View {
 
     private var state: ListState { store.list }
 
+    private var query: HighlightQuery {
+        HighlightQuery(
+            text: state.query, sourceId: filter.sourceId, tag: filter.tag,
+            favoritesOnly: filter.favoritesOnly, masteryOnly: filter.masteryOnly,
+            unsortedOnly: filter.unsortedOnly, deletedOnly: filter.deletedOnly
+        )
+    }
+
     private struct LoadKey: Hashable {
-        var filter: HighlightFilter
-        var query: String
+        var query: HighlightQuery
         var revision: Int
+        var limit: Int
     }
 
     var body: some View {
@@ -35,23 +43,44 @@ struct HighlightListView: View {
                          : (state.query.isEmpty ? "按 ⌘N 新建一条摘录，或在任意应用中按 \(HotKeyPreset.current.label) 快速录入。" : "换个关键词试试。两个字以内的查询使用模糊匹配。"))
                 }
             } else {
-                List(state.items) { h in
-                    HighlightRow(highlight: h, source: store.source(for: h))
-                        .contentShape(Rectangle())
-                        .onTapGesture(count: 2) { store.edit(h) }
-                        .contextMenu { HighlightMenu(highlight: h) }
+                List(selection: Bindable(store.list).selection) {
+                    ForEach(state.items, id: \.id) { h in
+                        HighlightRow(highlight: h, source: store.source(for: h))
+                            .tag(h.id ?? -1)
+                            .onAppear {
+                                if h.id == state.items.last?.id, state.hasMore { state.limit += ListState.pageSize }
+                            }
+                    }
+                    if state.hasMore {
+                        HStack {
+                            Spacer()
+                            Button("加载更多（已显示 \(state.items.count) / \(state.total)）") {
+                                state.limit += ListState.pageSize
+                            }
+                            .buttonStyle(.link)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                    }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
+                .contextMenu(forSelectionType: Int64.self) { ids in
+                    contextItems(Array(ids))
+                } primaryAction: { ids in
+                    if ids.count == 1, let id = ids.first, let h = state.items.first(where: { $0.id == id }) {
+                        store.edit(h)
+                    }
+                }
             }
         }
         .navigationTitle(title)
-        .navigationSubtitle("\(state.items.count) 条")
+        .navigationSubtitle(state.selection.isEmpty ? "共 \(state.total) 条" : "共 \(state.total) 条 · 已选 \(state.selection.count) 条")
         .searchable(text: Bindable(store.list).query, prompt: "搜索原文、译文、按语")
-        .task(id: LoadKey(filter: filter, query: state.query, revision: store.revision)) {
+        .task(id: LoadKey(query: query, revision: store.revision, limit: state.limit)) {
             load()
         }
         .confirmationDialog(
-            "彻底删除“最近删除”里的 \(state.items.count) 条摘录？",
+            "彻底删除“最近删除”里的 \(state.total) 条摘录？",
             isPresented: Binding(
                 get: { store.confirmingEmptyTrash },
                 set: { store.confirmingEmptyTrash = $0 }
@@ -64,6 +93,28 @@ struct HighlightListView: View {
             Text("此操作无法撤销（每日自动备份中仍保留删除前的数据）。")
         }
         .toolbar {
+            if !filter.deletedOnly {
+                ToolbarItem {
+                    Menu {
+                        Button("专题汇编（Word / Markdown）…") { startExport(.compilation) }
+                        Button("导出到 Anki…") { startExport(.anki) }
+                    } label: {
+                        Label("导出", systemImage: "square.and.arrow.up")
+                    }
+                    .help(state.selection.isEmpty ? "导出当前列表中的全部摘录" : "导出所选摘录")
+                    .disabled(state.total == 0)
+                }
+            }
+            if !state.selection.isEmpty {
+                ToolbarItem {
+                    Menu {
+                        contextItems(Array(state.selection), batchOnly: true)
+                    } label: {
+                        Label("批量操作", systemImage: "checklist")
+                    }
+                    .help("对已选的 \(state.selection.count) 条摘录批量操作")
+                }
+            }
             ToolbarItem {
                 if filter.deletedOnly {
                     Button(role: .destructive) {
@@ -84,19 +135,76 @@ struct HighlightListView: View {
         }
     }
 
+    @ViewBuilder
+    private func contextItems(_ ids: [Int64], batchOnly: Bool = false) -> some View {
+        if !batchOnly, ids.count == 1, let h = state.items.first(where: { $0.id == ids[0] }) {
+            HighlightMenu(highlight: h)
+        } else if !ids.isEmpty {
+            BatchMenu(ids: ids, inTrash: filter.deletedOnly)
+        }
+    }
+
     private func load() {
         do {
-            state.items = try store.db.highlights(
-                query: state.query,
-                sourceId: filter.sourceId,
-                tag: filter.tag,
-                favoritesOnly: filter.favoritesOnly,
-                masteryOnly: filter.masteryOnly,
-                unsortedOnly: filter.unsortedOnly,
-                deletedOnly: filter.deletedOnly
-            )
+            if state.lastQuery != query {
+                // 换了筛选条件：回到第一页，清空选择
+                state.lastQuery = query
+                state.selection = []
+                if state.limit != ListState.pageSize {
+                    state.limit = ListState.pageSize
+                    return   // limit 变化会再次触发 load
+                }
+            }
+            state.total = try store.db.count(query)
+            state.items = try store.db.highlights(query, limit: state.limit)
+            state.selection = state.selection.filter { id in state.items.contains { $0.id == id } }
         } catch {
             store.report(error)
+        }
+    }
+
+    private func startExport(_ kind: ExportRequest.Kind) {
+        let ids = Array(state.selection)
+        let hs: [Highlight]
+        let scope: String
+        if ids.isEmpty {
+            hs = (try? store.db.highlights(query)) ?? []
+            scope = "\(title) · 全部 \(hs.count) 条"
+        } else {
+            // 按列表中的顺序
+            let order = state.items.compactMap(\.id).filter { state.selection.contains($0) }
+            hs = (try? store.db.highlights(ids: order)) ?? []
+            scope = "\(title) · 已选 \(hs.count) 条"
+        }
+        store.exportRequest = ExportRequest(kind: kind, scopeLabel: scope, highlights: hs, title: title)
+    }
+}
+
+/// 多选时的批量菜单
+struct BatchMenu: View {
+    @Environment(LibraryStore.self) private var store
+    let ids: [Int64]
+    let inTrash: Bool
+
+    var body: some View {
+        if inTrash {
+            Button("恢复 \(ids.count) 条") {
+                store.perform { try store.db.modifyHighlights(ids: ids) { $0.deletedAt = nil } }
+            }
+        } else {
+            Text("已选 \(ids.count) 条")
+            Divider()
+            Button("加标签…") { store.batchPrompt = BatchPrompt(kind: .addTags, ids: ids) }
+            Button("去掉标签…") { store.batchPrompt = BatchPrompt(kind: .removeTags, ids: ids) }
+            Button("移到出处…") { store.batchPrompt = BatchPrompt(kind: .move, ids: ids) }
+            Divider()
+            Button("收藏") { store.batch(.favorite(true), ids: ids) }
+            Button("取消收藏") { store.batch(.favorite(false), ids: ids) }
+            Button("加入记忆卡") { store.batch(.addToMastery, ids: ids) }
+            Button("弃置（不再出现在回顾中）") { store.batch(.discard(true), ids: ids) }
+            Button("取消弃置") { store.batch(.discard(false), ids: ids) }
+            Divider()
+            Button("删除 \(ids.count) 条（移入最近删除）", role: .destructive) { store.batch(.delete, ids: ids) }
         }
     }
 }
@@ -118,7 +226,7 @@ struct HighlightRow: View {
                 Text("按：\(n)").font(.callout).foregroundStyle(.blue).lineLimit(3)
             }
             HStack(spacing: 8) {
-                let cite = CitationFormatter.citation(for: highlight, source: source)
+                let cite = CitationFormatter.citation(for: highlight, source: source, style: CitationSettings.style)
                 if !cite.isEmpty {
                     Text(cite).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -180,7 +288,7 @@ struct HighlightMenu: View {
     private func copy(withCitation: Bool) {
         var s = highlight.text
         if withCitation {
-            let cite = CitationFormatter.citation(for: highlight, source: store.source(for: highlight))
+            let cite = CitationFormatter.citation(for: highlight, source: store.source(for: highlight), style: CitationSettings.style)
             if !cite.isEmpty { s += "\n——\(cite)" }
         }
         NSPasteboard.general.clearContents()
@@ -188,7 +296,7 @@ struct HighlightMenu: View {
     }
 
     private func copyMarkdown() {
-        let md = MarkdownExporter.block(for: highlight, source: store.source(for: highlight))
+        let md = MarkdownExporter.block(for: highlight, source: store.source(for: highlight), style: CitationSettings.style)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(md, forType: .string)
     }

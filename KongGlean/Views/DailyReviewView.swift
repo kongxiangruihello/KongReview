@@ -213,7 +213,7 @@ struct ReviewCardView: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
-            let cite = CitationFormatter.citation(for: card.highlight, source: source)
+            let cite = CitationFormatter.citation(for: card.highlight, source: source, style: CitationSettings.style)
             if !cite.isEmpty {
                 Text("—— \(cite)").font(.callout).foregroundStyle(.secondary)
             }

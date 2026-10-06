@@ -132,6 +132,15 @@ final class AppDatabase {
                 t.column("isRead", .boolean).notNull().defaults(to: false)
             }
         }
+
+        // v0.5：引文需要的出处字段
+        m.registerMigration("v4-source-citation-fields") { db in
+            try db.alter(table: "source") { t in
+                t.add(column: "place", .text)
+                t.add(column: "container", .text)
+                t.add(column: "issue", .text)
+            }
+        }
         return m
     }
 }
@@ -250,6 +259,84 @@ extension AppDatabase {
             tags: capture.tags
         )
         return try save(h)
+    }
+}
+
+// MARK: - 批量操作
+
+extension AppDatabase {
+    /// 对一批摘录做同一种修改（一个事务内完成）
+    @discardableResult
+    func modifyHighlights(ids: [Int64], now: Date = Date(), _ change: (inout Highlight) -> Void) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+        return try writer.write { db in
+            var n = 0
+            for var h in try Highlight.fetchAll(db, keys: ids) {
+                let before = h
+                change(&h)
+                if h != before {
+                    h.updatedAt = now
+                    try h.update(db)
+                    n += 1
+                }
+            }
+            return n
+        }
+    }
+
+    /// 出处列表（附摘录数，不含已删除），用于出处管理
+    func sourcesWithCounts() throws -> [(source: Source, count: Int)] {
+        try writer.read { db in
+            let counts = try Row.fetchAll(db, sql: """
+                SELECT sourceId, COUNT(*) AS n FROM highlight
+                WHERE sourceId IS NOT NULL AND deletedAt IS NULL GROUP BY sourceId
+                """)
+            var dict: [Int64: Int] = [:]
+            for r in counts { dict[r["sourceId"]] = r["n"] }
+            return try Source.fetchAll(db).map { ($0, $0.id.flatMap { dict[$0] } ?? 0) }
+        }
+    }
+
+    /// 把若干出处合并到 target：摘录和存档文章都转过去，target 缺的书目信息用被合并者补齐，然后删除被合并的出处
+    @discardableResult
+    func mergeSources(_ ids: [Int64], into target: Int64) throws -> Int {
+        let others = ids.filter { $0 != target }
+        guard !others.isEmpty else { return 0 }
+        return try writer.write { db in
+            guard var t = try Source.fetchOne(db, key: target) else { return 0 }
+            let merged = try Source.fetchAll(db, keys: others)
+            func fill(_ kp: WritableKeyPath<Source, String?>) {
+                if t[keyPath: kp]?.isEmpty ?? true, let v = merged.compactMap({ $0[keyPath: kp] }).first(where: { !$0.isEmpty }) {
+                    t[keyPath: kp] = v
+                }
+            }
+            if t.author.isEmpty, let a = merged.map(\.author).first(where: { !$0.isEmpty }) { t.author = a }
+            fill(\.publisher); fill(\.year); fill(\.edition); fill(\.url); fill(\.place); fill(\.container); fill(\.issue)
+            try t.update(db)
+
+            let placeholders = Array(repeating: "?", count: others.count).joined(separator: ",")
+            var args: [(any DatabaseValueConvertible)?] = [target]
+            args += others.map { $0 }
+            try db.execute(sql: "UPDATE highlight SET sourceId = ? WHERE sourceId IN (\(placeholders))", arguments: StatementArguments(args))
+            let moved = db.changesCount
+            try db.execute(sql: "UPDATE article SET sourceId = ? WHERE sourceId IN (\(placeholders))", arguments: StatementArguments(args))
+            _ = try Source.deleteAll(db, keys: others)
+            return moved
+        }
+    }
+
+    func setKind(_ kind: SourceKind, forSources ids: [Int64]) throws {
+        guard !ids.isEmpty else { return }
+        try writer.write { db in
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            var args: [(any DatabaseValueConvertible)?] = [kind.rawValue]
+            args += ids.map { $0 }
+            try db.execute(sql: "UPDATE source SET kind = ? WHERE id IN (\(placeholders))", arguments: StatementArguments(args))
+        }
+    }
+
+    func deleteSources(_ ids: [Int64]) throws {
+        _ = try writer.write { db in try Source.deleteAll(db, keys: ids) }
     }
 }
 
@@ -413,6 +500,59 @@ extension AppDatabase {
     }
 }
 
+// MARK: - 查询条件
+
+/// 摘录列表的筛选条件（列表、计数、导出共用）
+struct HighlightQuery: Hashable {
+    var text: String = ""
+    var sourceId: Int64?
+    var tag: String?
+    var includeDiscarded = false
+    var favoritesOnly = false
+    var masteryOnly = false
+    var unsortedOnly = false
+    var deletedOnly = false
+
+    func sqlParts() -> (from: String, where: String, args: [(any DatabaseValueConvertible)?]) {
+        var clauses: [String] = []
+        var args: [(any DatabaseValueConvertible)?] = []
+        var from = "highlight"
+
+        let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty {
+            if SearchQuery.usesFullText(q) {
+                from = "highlight JOIN highlight_ft ON highlight_ft.rowid = highlight.id"
+                clauses.append("highlight_ft MATCH ?")
+                args.append(SearchQuery.fts5Phrase(q))
+            } else {
+                clauses.append("(highlight.text LIKE ? ESCAPE '\\' OR highlight.note LIKE ? ESCAPE '\\' OR highlight.translation LIKE ? ESCAPE '\\')")
+                let p = SearchQuery.likePattern(q)
+                args += [p, p, p]
+            }
+        }
+        if let sourceId {
+            clauses.append("highlight.sourceId = ?")
+            args.append(sourceId)
+        }
+        if let tag, !tag.isEmpty {
+            // tags 以 JSON 数组存储，用 json_each 精确匹配
+            clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ?)")
+            args.append(tag)
+        }
+        if deletedOnly {
+            clauses.append("highlight.deletedAt IS NOT NULL")
+        } else {
+            clauses.append("highlight.deletedAt IS NULL")
+            if !includeDiscarded { clauses.append("highlight.isDiscarded = 0") }
+        }
+        if favoritesOnly { clauses.append("highlight.isFavorite = 1") }
+        if masteryOnly { clauses.append("highlight.masteryHalfLifeDays IS NOT NULL") }
+        if unsortedOnly { clauses.append("highlight.sourceId IS NULL") }
+        let whereSQL = clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")
+        return (from, whereSQL, args)
+    }
+}
+
 // MARK: - 读操作
 
 extension AppDatabase {
@@ -446,46 +586,32 @@ extension AppDatabase {
         unsortedOnly: Bool = false,
         deletedOnly: Bool = false
     ) throws -> [Highlight] {
+        try highlights(HighlightQuery(
+            text: query, sourceId: sourceId, tag: tag, includeDiscarded: includeDiscarded,
+            favoritesOnly: favoritesOnly, masteryOnly: masteryOnly, unsortedOnly: unsortedOnly, deletedOnly: deletedOnly
+        ))
+    }
+
+    /// 分页查询（limit 为 nil 时返回全部）
+    func highlights(_ q: HighlightQuery, limit: Int? = nil, offset: Int = 0) throws -> [Highlight] {
         try writer.read { db in
-            var clauses: [String] = []
-            var args: [(any DatabaseValueConvertible)?] = []
-            var from = "highlight"
+            let (from, whereSQL, args) = q.sqlParts()
+            var sql = "SELECT highlight.* FROM \(from)\(whereSQL)"
+            sql += q.deletedOnly ? " ORDER BY highlight.deletedAt DESC" : " ORDER BY highlight.createdAt DESC"
+            sql += ", highlight.id DESC"
+            var all = args
+            if let limit {
+                sql += " LIMIT ? OFFSET ?"
+                all += [limit, offset]
+            }
+            return try Highlight.fetchAll(db, sql: sql, arguments: StatementArguments(all))
+        }
+    }
 
-            let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !q.isEmpty {
-                if SearchQuery.usesFullText(q) {
-                    from = "highlight JOIN highlight_ft ON highlight_ft.rowid = highlight.id"
-                    clauses.append("highlight_ft MATCH ?")
-                    args.append(SearchQuery.fts5Phrase(q))
-                } else {
-                    clauses.append("(highlight.text LIKE ? ESCAPE '\\' OR highlight.note LIKE ? ESCAPE '\\' OR highlight.translation LIKE ? ESCAPE '\\')")
-                    let p = SearchQuery.likePattern(q)
-                    args += [p, p, p]
-                }
-            }
-            if let sourceId {
-                clauses.append("highlight.sourceId = ?")
-                args.append(sourceId)
-            }
-            if let tag, !tag.isEmpty {
-                // tags 以 JSON 数组存储，用 json_each 精确匹配
-                clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ?)")
-                args.append(tag)
-            }
-            if deletedOnly {
-                clauses.append("highlight.deletedAt IS NOT NULL")
-            } else {
-                clauses.append("highlight.deletedAt IS NULL")
-                if !includeDiscarded { clauses.append("highlight.isDiscarded = 0") }
-            }
-            if favoritesOnly { clauses.append("highlight.isFavorite = 1") }
-            if masteryOnly { clauses.append("highlight.masteryHalfLifeDays IS NOT NULL") }
-            if unsortedOnly { clauses.append("highlight.sourceId IS NULL") }
-
-            var sql = "SELECT highlight.* FROM \(from)"
-            if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
-            sql += deletedOnly ? " ORDER BY highlight.deletedAt DESC" : " ORDER BY highlight.createdAt DESC"
-            return try Highlight.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+    func count(_ q: HighlightQuery) throws -> Int {
+        try writer.read { db in
+            let (from, whereSQL, args) = q.sqlParts()
+            return try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(from)\(whereSQL)", arguments: StatementArguments(args)) ?? 0
         }
     }
 

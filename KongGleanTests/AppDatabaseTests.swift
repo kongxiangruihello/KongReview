@@ -266,3 +266,56 @@ final class ArticleListTests: XCTestCase {
     XCTAssertEqual(try db.articleCount(), 1)
   }
 }
+
+final class V05DatabaseTests: XCTestCase {
+  func testPaginationAndCount() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    for i in 0..<450 { _ = try db.save(Highlight(text: "第\(i)条摘录内容", createdAt: t0.addingTimeInterval(Double(i)))) }
+    let q = HighlightQuery()
+    XCTAssertEqual(try db.count(q), 450)
+    let p1 = try db.highlights(q, limit: 200, offset: 0)
+    let p3 = try db.highlights(q, limit: 200, offset: 400)
+    XCTAssertEqual(p1.count, 200); XCTAssertEqual(p3.count, 50)
+    XCTAssertEqual(p1.first?.text, "第449条摘录内容")
+    XCTAssertEqual(p3.last?.text, "第0条摘录内容")
+    XCTAssertEqual(try db.count(HighlightQuery(text: "第44")), 11) // 44, 440-449 (LIKE: <3 chars? "第44" is 3 chars → FTS)
+  }
+
+  func testBatchModifyMergeAndKind() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let a = try db.save(Source(title: "论语译注", author: "杨伯峻", publisher: "中华书局"))
+    let b = try db.save(Source(title: "论语译注（修订本）", author: "", year: "1980", place: "北京"))
+    let c = try db.save(Source(title: "孟子"))
+    var ids: [Int64] = []
+    for (i, s) in [a, a, b, c].enumerated() { ids.append(try db.save(Highlight(sourceId: s.id, text: "条目\(i)", tags: ["旧"])).id!) }
+    _ = try db.saveArticle(Article(url: "https://x.cn/1", title: "文", contentHTML: "", contentText: "", wordCount: 0))
+
+    // batch tags / favorite
+    XCTAssertEqual(try db.modifyHighlights(ids: Array(ids.prefix(2))) { h in
+      h.tags = TagParser.parse((h.tags + ["新"]).joined(separator: ",")); h.isFavorite = true }, 2)
+    XCTAssertEqual(try db.highlights(tag: "新").count, 2)
+    XCTAssertEqual(try db.highlights(favoritesOnly: true).count, 2)
+    XCTAssertEqual(try db.modifyHighlights(ids: ids) { h in h.tags.removeAll { $0 == "旧" } }, 4)
+    XCTAssertEqual(try db.highlights(tag: "旧").count, 0)
+
+    // move
+    _ = try db.modifyHighlights(ids: [ids[3]]) { $0.sourceId = a.id }
+    XCTAssertEqual(try db.highlights(sourceId: a.id).count, 3)
+
+    // dedup + merge b into a
+    XCTAssertEqual(SourceDedup.duplicateGroups(try db.allSources()), [[a.id!, b.id!]])
+    XCTAssertEqual(try db.mergeSources([a.id!, b.id!], into: a.id!), 1)
+    let merged = try db.source(id: a.id)!
+    XCTAssertEqual(merged.year, "1980"); XCTAssertEqual(merged.place, "北京"); XCTAssertEqual(merged.publisher, "中华书局")
+    XCTAssertNil(try db.source(id: b.id))
+    XCTAssertEqual(try db.highlights(sourceId: a.id).count, 4)
+    let counts = Dictionary(uniqueKeysWithValues: try db.sourcesWithCounts().map { ($0.source.id!, $0.count) })
+    XCTAssertEqual(counts[a.id!], 4); XCTAssertEqual(counts[c.id!], 0)
+
+    try db.setKind(.article, forSources: [c.id!])
+    XCTAssertEqual(try db.source(id: c.id)?.kind, .article)
+    try db.deleteSources([c.id!])
+    XCTAssertNil(try db.source(id: c.id))
+  }
+}

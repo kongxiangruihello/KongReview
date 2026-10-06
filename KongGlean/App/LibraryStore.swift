@@ -11,6 +11,7 @@ enum SidebarItem: Hashable {
     case unsorted
     case trash
     case articles
+    case sourceManager
     case source(Int64)
     case tag(String)
 }
@@ -52,6 +53,15 @@ final class LibraryStore {
     /// 抓取进行中的状态文字
     var articleProgress: String?
     var articlePendingDeletion: Article?
+
+    // 批量与导出
+    var batchPrompt: BatchPrompt?
+    var exportRequest: ExportRequest?
+    var mergeRequest: MergeRequest?
+    var sourcesPendingDeletion: [Source] = []
+    var sourceSort: SourceSort = SourceSort.current {
+        didSet { SourceSort.current = sourceSort; sortSources() }
+    }
     var errorMessage: String?
 
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
@@ -70,6 +80,7 @@ final class LibraryStore {
         do {
             sources = try db.allSources()
             highlightCounts = try db.highlightCounts()
+            sortSources()
             tags = try db.allTags()
             trashCount = try db.trashCount()
             articleCount = try db.articleCount()
@@ -159,6 +170,104 @@ final class LibraryStore {
         reload()
         selection = .all
         infoMessage = lines.joined(separator: "\n")
+    }
+
+    // MARK: 出处排序
+
+    func sortSources() {
+        switch sourceSort {
+        case .recent:
+            sources.sort { $0.createdAt > $1.createdAt }
+        case .count:
+            sources.sort { (highlightCounts[$0.id ?? -1] ?? 0) > (highlightCounts[$1.id ?? -1] ?? 0) }
+        case .title:
+            sources.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        }
+    }
+
+    // MARK: 批量操作
+
+    func batch(_ action: BatchAction, ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        let scheduler = ReviewScheduler()
+        perform {
+            switch action {
+            case .favorite(let on):
+                try db.modifyHighlights(ids: ids) { $0.isFavorite = on }
+            case .discard(let on):
+                try db.modifyHighlights(ids: ids) { $0.isDiscarded = on }
+            case .addTags(let tags):
+                try db.modifyHighlights(ids: ids) { h in
+                    for t in tags where !h.tags.contains(t) { h.tags.append(t) }
+                }
+            case .removeTags(let tags):
+                try db.modifyHighlights(ids: ids) { h in h.tags.removeAll { tags.contains($0) } }
+            case .move(let sourceId):
+                try db.modifyHighlights(ids: ids) { $0.sourceId = sourceId }
+            case .addToMastery:
+                try db.modifyHighlights(ids: ids) { h in
+                    if !h.isInMastery { h = scheduler.addToMastery(h) }
+                }
+            case .delete:
+                let now = Date()
+                try db.modifyHighlights(ids: ids) { $0.deletedAt = now }
+            }
+        }
+        if case .delete = action { list.selection.subtract(ids) }
+        if case .move = action { list.selection.subtract(ids) }
+    }
+
+    func commitBatchPrompt() {
+        guard let p = batchPrompt else { return }
+        switch p.kind {
+        case .addTags: batch(.addTags(TagParser.parse(p.text)), ids: p.ids)
+        case .removeTags: batch(.removeTags(TagParser.parse(p.text)), ids: p.ids)
+        case .move: break   // 移动在选择出处时直接执行
+        }
+        batchPrompt = nil
+    }
+
+    /// 被选摘录共有的标签（去标签时作为候选）
+    func tags(of ids: [Int64]) -> [String] {
+        let hs = (try? db.highlights(ids: ids)) ?? []
+        var seen: [String] = []
+        for h in hs { for t in h.tags where !seen.contains(t) { seen.append(t) } }
+        return seen
+    }
+
+    // MARK: 出处管理
+
+    func requestMerge(_ ids: [Int64]) {
+        let all = (try? db.sourcesWithCounts()) ?? []
+        let chosen = all.filter { ids.contains($0.source.id ?? -1) }.sorted { $0.count > $1.count }
+            .map { MergeRequest.Candidate(source: $0.source, count: $0.count) }
+        guard chosen.count >= 2, let target = chosen.first?.source.id else { return }
+        mergeRequest = MergeRequest(sources: chosen, target: target)
+    }
+
+    func commitMerge() {
+        guard let m = mergeRequest else { return }
+        let ids = m.sources.compactMap(\.source.id)
+        do {
+            try BackupService.backupNow(db: db)
+        } catch {
+            report(error)
+            return
+        }
+        perform { try db.mergeSources(ids, into: m.target) }
+        mergeRequest = nil
+        if case .source(let id) = selection, ids.contains(id), id != m.target { selection = .source(m.target) }
+    }
+
+    func setKind(_ kind: SourceKind, for ids: [Int64]) {
+        perform { try db.setKind(kind, forSources: ids) }
+    }
+
+    func commitDeleteSources() {
+        let ids = sourcesPendingDeletion.compactMap(\.id)
+        perform { try db.deleteSources(ids) }
+        sourcesPendingDeletion = []
+        if case .source(let id) = selection, ids.contains(id) { selection = .sourceManager }
     }
 
     // MARK: 网页存档

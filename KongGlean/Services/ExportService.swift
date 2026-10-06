@@ -9,7 +9,7 @@ enum ExportService {
     static func export(source: Source, store: LibraryStore) {
         do {
             let hs = try store.db.highlights(sourceId: source.id)
-            let md = MarkdownExporter.export(source: source, highlights: hs.reversed())
+            let md = MarkdownExporter.export(source: source, highlights: hs.reversed(), style: CitationSettings.style)
             let panel = NSSavePanel()
             panel.nameFieldStringValue = MarkdownExporter.fileName(for: source)
             panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
@@ -81,13 +81,13 @@ enum ExportService {
             for source in store.sources {
                 let hs = try store.db.highlights(sourceId: source.id)
                 guard !hs.isEmpty else { continue }
-                let md = MarkdownExporter.export(source: source, highlights: hs.reversed())
+                let md = MarkdownExporter.export(source: source, highlights: hs.reversed(), style: CitationSettings.style)
                 try md.write(to: dir.appendingPathComponent(MarkdownExporter.fileName(for: source)),
                              atomically: true, encoding: .utf8)
             }
             let unsorted = try store.db.highlights(unsortedOnly: true)
             if !unsorted.isEmpty {
-                let md = MarkdownExporter.export(source: Source(title: "未归类"), highlights: unsorted.reversed())
+                let md = MarkdownExporter.export(source: Source(title: "未归类"), highlights: unsorted.reversed(), style: CitationSettings.style)
                 try md.write(to: dir.appendingPathComponent("未归类.md"), atomically: true, encoding: .utf8)
             }
             NSWorkspace.shared.activateFileViewerSelecting([dir])

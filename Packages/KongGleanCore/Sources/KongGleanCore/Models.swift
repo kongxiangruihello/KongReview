@@ -29,6 +29,12 @@ public struct Source: Codable, Identifiable, Hashable, Sendable {
     /// 回顾频率系数：0 = 不再出现，1 = 正常，2 = 加倍
     public var reviewWeight: Double
     public var createdAt: Date
+    /// 出版地（GB/T 7714 专著需要），如“北京”
+    public var place: String?
+    /// 所载期刊 / 文集 / 报纸名（论文、文章用）
+    public var container: String?
+    /// 卷期，如“55(34)”或“第3期”
+    public var issue: String?
 
     public init(
         id: Int64? = nil,
@@ -40,7 +46,10 @@ public struct Source: Codable, Identifiable, Hashable, Sendable {
         edition: String? = nil,
         year: String? = nil,
         reviewWeight: Double = 1,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        place: String? = nil,
+        container: String? = nil,
+        issue: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -52,6 +61,9 @@ public struct Source: Codable, Identifiable, Hashable, Sendable {
         self.year = year
         self.reviewWeight = reviewWeight
         self.createdAt = createdAt
+        self.place = place
+        self.container = container
+        self.issue = issue
     }
 }
 

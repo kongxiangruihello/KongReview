@@ -110,7 +110,10 @@ private struct ReviewSettings: View {
 }
 
 private struct CaptureSettings: View {
+    @Environment(LibraryStore.self) private var store
+
     var body: some View {
+        let _ = store.revision
         Form {
             Section("浏览器书签小程序") {
                 Text("在浏览器中新建一个书签，把下面的代码粘贴到“网址”栏。阅读网页时选中文字、点这个书签，就会弹出快速录入浮窗，正文、标题与网址已自动填好。")
@@ -133,6 +136,16 @@ private struct CaptureSettings: View {
                     }
                     Spacer()
                 }
+            }
+            Section("引文体例") {
+                Picker("复制、导出时使用", selection: Binding(
+                    get: { CitationSettings.style },
+                    set: { CitationSettings.style = $0; store.reload() }
+                )) {
+                    ForEach(CitationStyle.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Text("GB/T 7714 需要出版地、出版者、年份；论文还需要期刊名和卷期。可在“编辑出处”里补全。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("链接格式（供快捷指令、kongfetch 调用）") {
                 Text("kongglean://add?text=…&title=…&author=…&url=…&location=…&tags=…\nkongglean://quick（打开空白浮窗）\nkongglean://review（打开今日回顾）\nkongglean://save?url=…（整页存档）")

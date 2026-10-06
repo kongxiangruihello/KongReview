@@ -334,3 +334,93 @@ final class ArticleTests: XCTestCase {
         XCTAssertTrue(WebScripts.extract.contains("new Readability("))
     }
 }
+
+final class V05CoreTests: XCTestCase {
+    let accessed = ISO8601DateFormatter().date(from: "2026-10-06T04:00:00Z")!
+
+    func testFootnoteStyles() {
+        let book = Source(id: 1, title: "国史旧闻", author: "陈登原", publisher: "中华书局", year: "2000", place: "北京")
+        let h = Highlight(id: 1, sourceId: 1, text: "x", location: "第29页")
+        XCTAssertEqual(CitationFormatter.citation(for: h, source: book), "陈登原：《国史旧闻》，北京：中华书局，2000年，第29页。")
+        let art = Source(id: 2, title: "蓝田生物群", author: "袁训来", kind: .article, year: "2012", container: "科学通报", issue: "第34期")
+        XCTAssertEqual(CitationFormatter.citation(for: Highlight(text: "x", location: "第3219页"), source: art),
+                       "袁训来：《蓝田生物群》，《科学通报》2012年第34期，第3219页。")
+    }
+
+    func testGBT7714() {
+        // 标准 4.1 示例：陈登原.国史旧闻:第1卷[M].北京:中华书局,2000:29.
+        let book = Source(id: 1, title: "国史旧闻:第1卷", author: "陈登原", publisher: "中华书局", year: "2000", place: "北京")
+        XCTAssertEqual(CitationFormatter.citation(for: Highlight(text: "x", location: "第29页"), source: book, style: .gbt7714),
+                       "陈登原.国史旧闻:第1卷[M].北京:中华书局,2000:29.")
+        // 标准 4.4 示例：袁训来,陈哲,肖书海,等.蓝田生物群…[J].科学通报,2012,55(34):3219.
+        let art = Source(id: 2, title: "蓝田生物群", author: "袁训来、陈哲、肖书海、张三", kind: .article, year: "2012", container: "科学通报", issue: "55(34)")
+        XCTAssertEqual(CitationFormatter.citation(for: Highlight(text: "x", location: "3219"), source: art, style: .gbt7714),
+                       "袁训来,陈哲,肖书海,等.蓝田生物群[J].科学通报,2012,55(34):3219.")
+        let web = Source(id: 3, title: "某文", author: "", kind: .web, url: "https://a.cn/1", year: "2025")
+        XCTAssertEqual(CitationFormatter.citation(for: Highlight(text: "x"), source: web, style: .gbt7714, accessed: accessed),
+                       "某文[EB/OL].(2025)[2026-10-06].https://a.cn/1.")
+        XCTAssertEqual(CitationFormatter.gbtAuthors("Smith, Jones, Lee, Kim"), "Smith,Jones,Lee, et al")
+    }
+
+    func testPages() {
+        XCTAssertEqual(CitationFormatter.pages(from: "第12页"), "12")
+        XCTAssertEqual(CitationFormatter.pages(from: "第12—15页"), "12-15")
+        XCTAssertEqual(CitationFormatter.pages(from: "p. 7"), "7")
+        XCTAssertEqual(CitationFormatter.pages(from: "33"), "33")
+        XCTAssertNil(CitationFormatter.pages(from: "Kindle 位置 1234"))
+        XCTAssertNil(CitationFormatter.pages(from: "学而第一"))
+        XCTAssertNil(CitationFormatter.pages(from: nil))
+    }
+
+    func testCompilation() {
+        let sources: [Int64: Source] = [
+            1: Source(id: 1, title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980"),
+            2: Source(id: 2, title: "孟子译注", author: "杨伯峻"),
+        ]
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        let hs = [
+            Highlight(id: 1, sourceId: 1, text: "后一条", note: "按语", location: "第20页", createdAt: t0),
+            Highlight(id: 2, sourceId: 1, text: "前一条", location: "第3页", createdAt: t0.addingTimeInterval(10)),
+            Highlight(id: 3, sourceId: 2, text: "孟子一条", createdAt: t0.addingTimeInterval(5)),
+            Highlight(id: 4, text: "无出处", createdAt: t0.addingTimeInterval(1)),
+        ]
+        let c = CompilationBuilder.build(highlights: hs, sources: sources, options: .init(title: "专题：仁", date: accessed))
+        XCTAssertEqual(c.count, 4)
+        XCTAssertEqual(c.sections.map(\.heading), ["《论语译注》 杨伯峻", "《孟子译注》 杨伯峻", "未注明出处"])
+        XCTAssertEqual(c.sections[0].items.map(\.text), ["前一条", "后一条"], "ordered by page")
+        XCTAssertEqual(c.sections[0].items[1].note, "按语")
+        let md = CompilationBuilder.markdown(c)
+        XCTAssertTrue(md.hasPrefix("# 专题：仁\n\n*共 4 条摘录 · 2026-10-06 整理"))
+        XCTAssertTrue(md.contains("## 《论语译注》 杨伯峻\n\n> 前一条\n\n—— 杨伯峻：《论语译注》，中华书局，1980年，第3页。"))
+
+        var o = CompilationOptions(title: "t", grouping: .chronological, includeNotes: false, date: accessed)
+        o.style = .gbt7714
+        let c2 = CompilationBuilder.build(highlights: hs, sources: sources, options: o)
+        XCTAssertEqual(c2.sections.count, 1)
+        XCTAssertEqual(c2.sections[0].items.map(\.text), ["后一条", "无出处", "孟子一条", "前一条"])
+        XCTAssertNil(c2.sections[0].items[0].note)
+    }
+
+    func testAnki() {
+        let sources: [Int64: Source] = [1: Source(id: 1, title: "论语", author: "")]
+        let hs = [Highlight(id: 1, sourceId: 1, text: "学而时习之\n不亦说乎<b>", translation: "学了\t按时温习", tags: ["论语 选读"])]
+        let out = AnkiExporter.export(highlights: hs, sources: sources)
+        let lines = out.split(separator: "\n", omittingEmptySubsequences: false)
+        XCTAssertEqual(Array(lines.prefix(6)), ["#separator:tab", "#html:true", "#notetype:Basic", "#deck:KongGlean", "#columns:Front;Back;Tags", "#tags column:3"])
+        let cols = lines[6].split(separator: "\t", omittingEmptySubsequences: false)
+        XCTAssertEqual(cols.count, 3)
+        XCTAssertEqual(cols[0], "学而时习之<br>不亦说乎&lt;b&gt;")
+        XCTAssertEqual(cols[1], "学了 按时温习<br><br><small>《论语》。</small>")
+        XCTAssertEqual(cols[2], "论语_选读 KongGlean")
+    }
+
+    func testDedup() {
+        XCTAssertEqual(SourceDedup.key("论语译注（修订本）"), SourceDedup.key("《论语译注》"))
+        XCTAssertEqual(SourceDedup.key("The  Analects"), SourceDedup.key("the analects:"))
+        let ss = [Source(id: 1, title: "论语译注"), Source(id: 2, title: "论语 译注"), Source(id: 3, title: "孟子"), Source(id: 4, title: "论语译注 (第二版)")]
+        XCTAssertEqual(SourceDedup.duplicateGroups(ss), [[1, 2, 4]])
+        // 上下篇不是重复
+        XCTAssertNotEqual(SourceDedup.key("鄭玄六天説析論（上）"), SourceDedup.key("鄭玄六天説析論（下）"))
+        XCTAssertEqual(SourceDedup.key("邓小南：我的学术自述"), SourceDedup.key("邓小南 | 我的学术自述"))
+    }
+}

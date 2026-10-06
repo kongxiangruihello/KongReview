@@ -51,6 +51,30 @@ struct ContentView: View {
         } message: {
             Text("只删除保存的网页正文；这篇文章的出处和已经划下的摘录都会保留。")
         }
+        .sheet(item: $store.batchPrompt) { _ in
+            BatchPromptView()
+        }
+        .sheet(item: $store.exportRequest) { _ in
+            ExportOptionsView()
+        }
+        .sheet(item: $store.mergeRequest) { _ in
+            MergeSourcesView()
+        }
+        .confirmationDialog(
+            store.sourcesPendingDeletion.count == 1
+                ? "删除出处“\(store.sourcesPendingDeletion.first?.title ?? "")”？"
+                : "删除 \(store.sourcesPendingDeletion.count) 个出处？",
+            isPresented: Binding(
+                get: { !store.sourcesPendingDeletion.isEmpty },
+                set: { if !$0 { store.sourcesPendingDeletion = [] } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除出处", role: .destructive) { store.commitDeleteSources() }
+            Button("取消", role: .cancel) { store.sourcesPendingDeletion = [] }
+        } message: {
+            Text("其下的摘录会保留，转入“未归类”。")
+        }
         .sheet(item: $store.pendingImport) { _ in
             ImportPreviewView()
         }
@@ -109,6 +133,8 @@ struct ContentView: View {
             HighlightListView(title: "最近删除", filter: .init(deletedOnly: true))
         case .articles:
             ArticlesView()
+        case .sourceManager:
+            SourceManagerView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -141,6 +167,7 @@ struct SidebarView: View {
                     }
                 }
                 .tag(SidebarItem.articles)
+                Label("出处管理", systemImage: "books.vertical").tag(SidebarItem.sourceManager)
                 HStack {
                     Label("最近删除", systemImage: "trash")
                     Spacer()
@@ -151,7 +178,7 @@ struct SidebarView: View {
                 .tag(SidebarItem.trash)
             }
 
-            Section("出处") {
+            Section {
                 ForEach(store.sources) { source in
                     if let id = source.id {
                         HStack {
@@ -173,7 +200,25 @@ struct SidebarView: View {
                         }
                     }
                 }
+            } header: {
+                HStack {
+                    Text("出处")
+                    Spacer()
+                    Menu {
+                        Picker("排序", selection: Bindable(store).sourceSort) {
+                            ForEach(SourceSort.allCases, id: \.self) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("出处排序：\(store.sourceSort.label)")
+                }
             }
+
 
             if !store.tags.isEmpty {
                 Section("标签") {
