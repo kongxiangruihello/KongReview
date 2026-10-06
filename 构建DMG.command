@@ -4,7 +4,7 @@
 cd "$(dirname "$0")"
 V="$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1/')"
 if ./Tools/build-dmg.sh 2>&1 | tee build.log; [ "${PIPESTATUS[0]}" -eq 0 ]; then
-  open -R "../KongGlean-$V.dmg"
+  open -R "../KongGlean-${V}.dmg"
 else
   echo ""
   echo "构建失败，日志已保存在 build.log。"
