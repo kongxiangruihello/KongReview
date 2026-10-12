@@ -105,6 +105,7 @@ struct DailyReviewView: View {
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                MarkdownPreview(text: state.noteDraft ?? "", font: .callout)
                 HStack {
                     Spacer()
                     Button("取消") { state.noteDraft = nil }
@@ -285,11 +286,30 @@ struct DailyReviewView: View {
     }
 }
 
-/// 把 Markdown 行内格式（**粗体**、*斜体*、`代码`、[链接](url)）渲染出来；纯文本原样显示
+/// 摘录、译文、按语的 Markdown 显示（块级语法逐行处理，见 KongReviewCore/MarkdownText.swift）
 enum RichText {
     static func attributed(_ s: String) -> AttributedString {
-        let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: s, options: opts)) ?? AttributedString(s)
+        MarkdownText.attributed(s)
+    }
+}
+
+/// 一边写一边看：Markdown 实时预览
+struct MarkdownPreview: View {
+    let text: String
+    var font: Font = .body
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("预览").font(.caption).foregroundStyle(.secondary)
+            Text(text.isEmpty ? AttributedString("（空）") : RichText.attributed(text))
+                .font(font)
+                .foregroundStyle(text.isEmpty ? .secondary : .primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(8)
+        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 

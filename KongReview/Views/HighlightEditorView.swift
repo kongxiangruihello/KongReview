@@ -22,10 +22,13 @@ struct HighlightEditorView: View {
                     TextEditor(text: draftBinding.highlight.text)
                         .font(.system(.body, design: .serif))
                         .frame(minHeight: 140)
+                    if !draft.highlight.text.isEmpty {
+                        MarkdownPreview(text: draft.highlight.text, font: .system(.body, design: .serif))
+                    }
                 } header: {
                     Text("原文")
                 } footer: {
-                    Text("原文、译文、按语都支持 Markdown 行内格式：**粗体**、*斜体*、`代码`、[链接](https://…)。")
+                    Text("原文、译文、按语都支持 Markdown：# 标题、- 列表、> 引用、**粗体**、*斜体*、`代码`、[链接](https://…)，下方实时预览。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -57,11 +60,17 @@ struct HighlightEditorView: View {
                 Section("译文 / 白话（可选）") {
                     TextEditor(text: optional(draftBinding.highlight.translation))
                         .frame(minHeight: 50)
+                    if let t = draft.highlight.translation, !t.isEmpty {
+                        MarkdownPreview(text: t)
+                    }
                 }
 
                 Section("按语（可选）") {
                     TextEditor(text: optional(draftBinding.highlight.note))
                         .frame(minHeight: 60)
+                    if let n = draft.highlight.note, !n.isEmpty {
+                        MarkdownPreview(text: n)
+                    }
                 }
 
                 Section("标签") {

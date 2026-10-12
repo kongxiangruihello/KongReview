@@ -184,6 +184,17 @@ enum AnkiCollectionReader {
         }
     }
 
+    /// 把 SQLite 文件头的读写版本号（第 18、19 字节）从 2（WAL）改为 1（rollback journal）
+    static func disableWAL(at url: URL) {
+        guard let h = try? FileHandle(forUpdating: url) else { return }
+        defer { try? h.close() }
+        guard let head = try? h.read(upToCount: 20), head.count == 20,
+              head.starts(with: Data("SQLite format 3".utf8)),
+              head[18] == 2 || head[19] == 2 else { return }
+        try? h.seek(toOffset: 18)
+        try? h.write(contentsOf: Data([1, 1]))
+    }
+
     /// folder 为 .apkg 解压后的目录
     static func read(folder: URL, now: Date = Date()) throws -> (notes: [AnkiNote], media: [String: Data]) {
         let fm = FileManager.default
@@ -206,9 +217,11 @@ enum AnkiCollectionReader {
         else if fm.fileExists(atPath: c2.path) { path = c2 }
         else { throw ReadError.noCollection }
 
-        var config = Configuration()
-        config.readonly = true
-        let dbq = try DatabaseQueue(path: path.path, configuration: config)
+        // Anki 的集合是 WAL 模式（文件头第 18、19 字节为 2）。包里没有 -wal / -shm 文件，
+        // 以只读方式打开 WAL 数据库时 macOS 的 SQLite 会报 error 14（unable to open database file）。
+        // 这里读的是解压到临时目录的副本，直接把文件头改回传统日志模式（1），再正常打开。
+        disableWAL(at: path)
+        let dbq = try DatabaseQueue(path: path.path)
         let notes: [AnkiNote] = try dbq.read { db in
             let col = try Row.fetchOne(db, sql: "SELECT crt, models, decks FROM col")
             let crt = Date(timeIntervalSince1970: TimeInterval((col?["crt"] as Int64?) ?? 0))

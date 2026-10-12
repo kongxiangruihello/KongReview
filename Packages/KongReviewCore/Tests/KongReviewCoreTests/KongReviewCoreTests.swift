@@ -623,3 +623,21 @@ final class ZstdTests: XCTestCase {
         XCTAssertTrue(refs.isSuperset(of: ["a.jpg", "b c.png", "s.mp3"]))
     }
 }
+
+#if canImport(Darwin)
+final class MarkdownTextTests: XCTestCase {
+    func testPlainTextUnchanged() {
+        let s = "第一行\n\n第三行  有空格"
+        XCTAssertEqual(String(MarkdownText.attributed(s).characters), s)
+    }
+
+    func testBlocksAndInline() {
+        let a = MarkdownText.attributed("# 标题\n- 一\n- **二**\n> 引文\n```\nlet x = 1\n```\n末行 *斜*")
+        XCTAssertEqual(String(a.characters), "标题\n• 一\n• 二\n┃ 引文\nlet x = 1\n末行 斜")
+        let bold = a.runs.contains { run in
+            String(a[run.range].characters) == "二" && run[AttributeScopes.FoundationAttributes.InlinePresentationIntentAttribute.self]?.contains(.stronglyEmphasized) == true
+        }
+        XCTAssertTrue(bold)
+    }
+}
+#endif
