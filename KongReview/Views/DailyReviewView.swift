@@ -75,22 +75,61 @@ struct DailyReviewView: View {
         .padding(.vertical, 10)
     }
 
-    @ViewBuilder
+    /// 首页顶部的统计条：今日回顾、连续天数、近 7 天、记忆卡待学；点“全部统计”进统计页
     private var cardsBanner: some View {
         let _ = store.revision
+        let _ = store.today
+        let s = ReviewStats.summarize((try? store.db.events()) ?? [], now: Date(), days: 7)
         let due = store.dueCardCount()
-        if due > 0 {
-            HStack {
-                Image(systemName: "brain").foregroundStyle(.purple)
-                Text("今天有 \(due) 张记忆卡待学习")
+        let week = s.lastDays
+        let peak = max(1, week.map(\.total).max() ?? 1)
+        return VStack(spacing: 0) {
+            HStack(spacing: 18) {
+                statItem("今日回顾", "\(s.today.highlights) 条", s.today.cards > 0 ? "记忆卡 \(s.today.cards) 次" : nil,
+                         icon: s.today.total > 0 ? "checkmark.circle.fill" : "sun.max",
+                         color: s.today.total > 0 ? .green : .orange)
+                statItem("连续回顾", "\(s.currentStreak) 天", "最长 \(s.longestStreak) 天", icon: "flame", color: .red)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("近 7 天").font(.caption).foregroundStyle(.secondary)
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(Array(week.enumerated()), id: \.offset) { idx, d in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(idx == week.count - 1 ? Color.accentColor : Color.accentColor.opacity(0.45))
+                                .frame(width: 8, height: max(2, 22 * CGFloat(d.total) / CGFloat(peak)))
+                                .help("\(d.key)：摘录 \(d.highlights) 条，记忆卡 \(d.cards) 次")
+                        }
+                    }
+                    .frame(height: 22, alignment: .bottom)
+                }
+                Button {
+                    store.selection = .cards
+                } label: {
+                    statItem("记忆卡待学", "\(due) 张", due > 0 ? "去学习 ›" : "今天学完了",
+                             icon: "brain", color: .purple)
+                }
+                .buttonStyle(.plain)
+                .help("打开记忆卡")
                 Spacer()
-                Button("去学习") { store.selection = .cards }
+                Button("全部统计 ›") { store.selection = .stats }
+                    .buttonStyle(.link)
             }
-            .font(.callout)
             .padding(.horizontal)
-            .padding(.vertical, 6)
-            .background(Color.purple.opacity(0.08))
+            .padding(.vertical, 8)
+            .background(Color.secondary.opacity(0.05))
             Divider()
+        }
+    }
+
+    private func statItem(_ title: String, _ value: String, _ detail: String?, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(color).font(.title3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(value).font(.headline).monospacedDigit()
+                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
         }
     }
 
