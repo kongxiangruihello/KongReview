@@ -208,6 +208,9 @@ public enum StudyQueue {
     public struct Counts: Hashable, Sendable {
         public var new = 0, learning = 0, review = 0
         public var total: Int { new + learning + review }
+        public init(new: Int = 0, learning: Int = 0, review: Int = 0) {
+            self.new = new; self.learning = learning; self.review = review
+        }
     }
 
     /// 今天的学习截止点：学习中卡片可以提前 20 分钟（Anki 的 learn ahead limit）
