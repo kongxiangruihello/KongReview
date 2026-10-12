@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         QuickCaptureController.shared.store?.onReviewedToday = {
             ReminderScheduler.shared.applySavedSettings()
         }
+        // 每次数据变化后更新菜单栏上的数字
+        QuickCaptureController.shared.store?.onReload = {
+            StatusItemController.shared.updateCounts()
+        }
         ReminderScheduler.shared.applySavedSettings()
 
         // 跨日（含睡眠唤醒后跨了日）与回到前台时检查日期：回顾换新、统计与提醒刷新

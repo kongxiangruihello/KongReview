@@ -17,12 +17,14 @@ struct SettingsView: View {
                 .tabItem { Label("快速录入", systemImage: "keyboard") }
             ReviewSettings()
                 .tabItem { Label("回顾", systemImage: "sun.max") }
+            CardSettingsTab()
+                .tabItem { Label("记忆卡", systemImage: "brain") }
             CaptureSettings()
                 .tabItem { Label("摘录", systemImage: "square.and.arrow.down") }
             DataSettings()
                 .tabItem { Label("数据", systemImage: "externaldrive") }
         }
-        .frame(width: 560, height: 420)
+        .frame(width: 600, height: 500)
     }
 }
 
@@ -73,8 +75,6 @@ private struct QuickCaptureSettings: View {
 
 private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
-    @AppStorage(CardSettings.newPerDayKey) private var newPerDay = 20
-    @AppStorage(CardSettings.reviewsPerDayKey) private var reviewsPerDay = 200
     @AppStorage(SettingsKeys.reminderEnabled) private var reminderEnabled = false
     @AppStorage(SettingsKeys.reminderHour) private var hour = 8
     @AppStorage(SettingsKeys.reminderMinute) private var minute = 0
@@ -85,13 +85,6 @@ private struct ReviewSettings: View {
             Text("改动从明天（或点“再抽一组”）开始生效。")
                 .font(.caption).foregroundStyle(.secondary)
 
-            Section("记忆卡（仿 Anki）") {
-                Stepper("每天新卡上限：\(newPerDay)", value: $newPerDay, in: 0...500, step: 5)
-                Stepper("每天复习上限：\(reviewsPerDay)", value: $reviewsPerDay, in: 10...9999, step: 10)
-                Text("排程与 Anki 默认设置一致（SM-2）：学习步长 1 分钟、10 分钟；毕业间隔 1 天，简单 4 天；起始难度系数 250%。")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
 
             Section("提醒") {
                 Toggle("每日提醒", isOn: $reminderEnabled)
@@ -203,6 +196,17 @@ private struct DataSettings: View {
             Section("存储") {
                 Text("全部数据保存在一个 SQLite 文件中。删除的摘录在“最近删除”里保留 30 天。")
                     .font(.callout)
+                let f = ByteCountFormatter()
+                LabeledContent("数据文件", value: f.string(fromByteCount: store.db.fileSize()))
+                ForEach(Array(((try? store.db.storageBreakdown()) ?? []).enumerated()), id: \.offset) { _, item in
+                    LabeledContent(item.0, value: f.string(fromByteCount: item.1))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Button("整理数据库…") { store.compactDatabase() }
+                    .disabled(store.maintenanceProgress != nil)
+                Text("删除没有卡片再用到的图片，并用 SQLite 的 VACUUM 收回删除数据后留下的空间。整理前自动备份。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Button("在访达中显示数据文件夹") {
                     if let dir = try? FileManager.default
                         .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
@@ -220,6 +224,58 @@ private struct DataSettings: View {
                 Button("导出全部为 Markdown（每个出处一个文件）…") {
                     ExportService.exportAll(store: store)
                 }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct CardSettingsTab: View {
+    @Environment(LibraryStore.self) private var store
+    @AppStorage(CardSettings.newPerDayKey) private var newPerDay = 20
+    @AppStorage(CardSettings.reviewsPerDayKey) private var reviewsPerDay = 200
+    @AppStorage(CardSettings.adjustDarkColorsKey) private var adjustDarkColors = true
+    @AppStorage(CardSettings.syncFromHighlightKey) private var syncMode = "ask"
+    @AppStorage(CardSettings.menuBarCountsKey) private var menuBarCounts = true
+
+    var body: some View {
+        let _ = store.revision
+        Form {
+            Section("每日上限（未单独设置的牌组）") {
+                Stepper("每天新卡：\(newPerDay)", value: $newPerDay, in: 0...500, step: 5)
+                Stepper("每天复习上限：\(reviewsPerDay)", value: $reviewsPerDay, in: 10...9999, step: 10)
+                Text("每个牌组可单独设置：在“记忆卡”页右键牌组 → 牌组选项。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("FSRS 参数") {
+                Text(CardSettings.fsrsIsDefault ? "当前：FSRS-6 默认参数" : "当前：已优化（\(CardSettings.fsrsInfo ?? "")）")
+                    .font(.callout)
+                HStack {
+                    Button("用我的复习记录优化") { store.optimizeFSRS() }
+                        .disabled(store.maintenanceProgress != nil)
+                    Button("恢复默认") { store.resetFSRS() }
+                        .disabled(CardSettings.fsrsIsDefault)
+                }
+                Text("按你过去的复习记录（含从 Anki 导入的）拟合遗忘曲线，至少需要 \(FSRSOptimizer.minimumReviews) 次跨日复习。只有在留出的检验记录上也更准时才采用新参数。参数对所有使用 FSRS 的牌组生效；在牌组选项里选择算法与期望保留率。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("显示") {
+                Toggle("深色模式下自动调亮卡片自带的深色文字", isOn: $adjustDarkColors)
+                Text("从网页复制来的卡片常带深灰色文字（如 rgb(51,51,51)），深色背景下看不清。打开后：灰色文字改用系统文字色，彩色文字调亮，浅色底色去掉。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("菜单栏图标旁显示今日待看数（摘录·记忆卡）", isOn: $menuBarCounts)
+                    .onChange(of: menuBarCounts) { StatusItemController.shared.updateCounts() }
+            }
+            Section("摘录与记忆卡") {
+                Picker("改了已做成卡片的摘录后", selection: $syncMode) {
+                    Text("询问是否同步").tag("ask")
+                    Text("总是同步更新卡片").tag("always")
+                    Text("不同步").tag("never")
+                }
+                Text("同步只替换卡片的正反面内容（原文、译文、按语、出处），复习进度不变。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

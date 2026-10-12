@@ -25,6 +25,26 @@ final class StatusItemController: NSObject {
         }
     }
 
+    /// 图标旁显示“今日待看摘录 · 待学卡片”（如 8·23）；都为 0 或在设置里关掉时只显示图标
+    func updateCounts() {
+        guard let button = item?.button else { return }
+        guard CardSettings.menuBarCounts, let store = QuickCaptureController.shared.store else {
+            button.title = ""
+            item?.length = NSStatusItem.squareLength
+            return
+        }
+        let c = store.todayCounts()
+        if c.highlights == 0 && c.cards == 0 {
+            button.title = ""
+            item?.length = NSStatusItem.squareLength
+        } else {
+            button.title = " \(c.highlights)·\(c.cards)"
+            button.imagePosition = .imageLeading
+            item?.length = NSStatusItem.variableLength
+        }
+        button.toolTip = "今日回顾还剩 \(c.highlights) 条，记忆卡待学 \(c.cards) 张"
+    }
+
     private func install() {
         guard item == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -36,13 +56,19 @@ final class StatusItemController: NSObject {
         menu.delegate = self
         item.menu = menu
         self.item = item
+        updateCounts()
     }
 
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
         add(menu, "快速录入（\(HotKeyPreset.current.label)）", #selector(quickCapture))
         add(menu, "存档网页…", #selector(addArticle))
-        add(menu, "今日回顾", #selector(review))
+        if let c = QuickCaptureController.shared.store?.todayCounts() {
+            add(menu, "今日回顾（还剩 \(c.highlights) 条）", #selector(review))
+            add(menu, "记忆卡（待学 \(c.cards) 张）", #selector(cards))
+        } else {
+            add(menu, "今日回顾", #selector(review))
+        }
         add(menu, "打开 KongReview", #selector(openMain))
         menu.addItem(.separator())
         add(menu, "立即备份", #selector(backup))
@@ -65,6 +91,11 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func openMain() { WindowOpener.showMain() }
+
+    @objc private func cards() {
+        QuickCaptureController.shared.store?.selection = .cards
+        WindowOpener.showMain()
+    }
 
     @objc private func addArticle() {
         WindowOpener.showMain()

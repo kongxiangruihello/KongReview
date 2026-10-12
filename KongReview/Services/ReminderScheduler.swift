@@ -20,7 +20,26 @@ final class ReminderScheduler {
         let enabled = d.bool(forKey: SettingsKeys.reminderEnabled)
         let hour = d.object(forKey: SettingsKeys.reminderHour) as? Int ?? 8
         let minute = d.object(forKey: SettingsKeys.reminderMinute) as? Int ?? 0
-        let reviewed = QuickCaptureController.shared.store?.reviewedToday ?? false
+        let store = QuickCaptureController.shared.store
+        let reviewed = store?.reviewedToday ?? false
+        let dailyCount = d.object(forKey: SettingsKeys.dailyCount) as? Int ?? 10
+        let today = store?.todayCounts()
+        let calendar = Calendar.current
+        /// 提醒正文：写明当天要看的摘录条数与待学的卡数（未来几天按每日条数与卡片到期日估算）
+        func message(for fire: Date) -> String {
+            let highlights = calendar.isDateInToday(fire) ? (today?.highlights ?? dailyCount) : dailyCount
+            var cards = 0
+            if calendar.isDateInToday(fire) {
+                cards = today?.cards ?? 0
+            } else if let db = store?.db,
+                      let n = try? db.cardsDue(on: fire, newPerDay: CardSettings.newPerDay, reviewsPerDay: CardSettings.reviewsPerDay) {
+                cards = n
+            }
+            var parts: [String] = []
+            if highlights > 0 { parts.append("\(highlights) 条摘录") }
+            if cards > 0 { parts.append("\(cards) 张记忆卡") }
+            return parts.isEmpty ? "几条旧摘录在等你。" : "今天有" + parts.joined(separator: "、") + "等你回顾。"
+        }
         let prefix = self.prefix
         let legacy = legacyIdentifier
         let center = self.center
@@ -42,7 +61,7 @@ final class ReminderScheduler {
             for fire in ReminderPlan.days(now: Date(), hour: hour, minute: minute, reviewedToday: reviewed) {
                 let content = UNMutableNotificationContent()
                 content.title = "今日回顾"
-                content.body = "几条旧摘录在等你。"
+                content.body = message(for: fire)
                 content.sound = .default
                 let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
                 let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)

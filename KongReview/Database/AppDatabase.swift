@@ -37,6 +37,14 @@ extension ReviewEvent: @retroactive FetchableRecord, @retroactive MutablePersist
     }
 }
 
+extension NoteTemplate: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "note_template"
+}
+
+extension DeckOptions: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "deck_options"
+}
+
 extension Highlight: @retroactive FetchableRecord, @retroactive MutablePersistableRecord {
     public static let databaseTableName = "highlight"
     public static let source = belongsTo(Source.self)
@@ -222,13 +230,46 @@ final class AppDatabase {
             let old = try Highlight.filter(sql: "masteryHalfLifeDays IS NOT NULL AND deletedAt IS NULL").fetchAll(db)
             for h in old {
                 let src = try h.sourceId.flatMap { try Source.fetchOne(db, key: $0) }
-                var c = Card.from(h, source: src)
-                c.createdAt = now
-                c.updatedAt = now
-                c.due = now
-                try c.insert(db)
+                // 只写 v5 时就有的列（以后 Card 增加的字段由后续迁移补上默认值）
+                let c = Card.from(h, source: src)
+                try db.execute(sql: """
+                    INSERT INTO card (deck, front, back, tags, highlightId, state, step, interval, ease, due, reps, lapses,
+                                      isSuspended, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, 'new', 0, 0, 2.5, ?, 0, 0, 0, ?, ?)
+                    """, arguments: [c.deck, c.front, c.back, Self.tagsJSON(c.tags), c.highlightId, now, now, now])
             }
             try db.execute(sql: "UPDATE highlight SET masteryHalfLifeDays = NULL, masteryLastReviewedAt = NULL")
+        }
+
+        m.registerMigration("v6-templates-fsrs-deck-options") { db in
+            try db.alter(table: "card") { t in
+                t.add(column: "noteType", .text)
+                t.add(column: "fields", .text).notNull().defaults(to: "[]")
+                t.add(column: "stability", .double)
+                t.add(column: "difficulty", .double)
+                t.add(column: "lastReview", .datetime)
+            }
+            try db.create(table: "note_template") { t in
+                t.column("name", .text).primaryKey()
+                t.column("fieldNames", .text).notNull()
+                t.column("front", .text).notNull()
+                t.column("back", .text).notNull()
+                t.column("collapsed", .text).notNull()
+                t.column("isCloze", .boolean).notNull().defaults(to: false)
+            }
+            try db.create(table: "deck_options") { t in
+                t.column("deck", .text).primaryKey()
+                t.column("newPerDay", .integer)
+                t.column("reviewsPerDay", .integer)
+                t.column("algorithm", .text).notNull().defaults(to: "sm2")
+                t.column("desiredRetention", .double).notNull().defaults(to: 0.9)
+            }
+            try db.alter(table: "review_event") { t in
+                t.add(column: "ankiRevlogId", .integer)
+            }
+            try db.create(index: "review_event_on_ankiRevlogId", on: "review_event", columns: ["ankiRevlogId"],
+                          unique: true, condition: Column("ankiRevlogId") != nil)
+            try db.create(index: "review_event_on_cardId", on: "review_event", columns: ["cardId"])
         }
         return m
     }
@@ -742,5 +783,12 @@ extension AppDatabase {
             return dict
         }
         return (hs, weights)
+    }
+}
+
+extension AppDatabase {
+    /// 与 GRDB 对 Codable 数组的编码一致：JSON 文本
+    static func tagsJSON(_ tags: [String]) -> String {
+        (try? String(data: JSONEncoder().encode(tags), encoding: .utf8)) ?? "[]"
     }
 }

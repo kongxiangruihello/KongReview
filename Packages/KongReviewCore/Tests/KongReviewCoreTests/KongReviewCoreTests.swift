@@ -659,3 +659,108 @@ final class HTMLFragmentTests: XCTestCase {
         XCTAssertEqual(Markdown.markdown(fromHTMLFragments: s), s)
     }
 }
+
+final class FSRSTests: XCTestCase {
+    /// 与 py-fsrs 6.3.2（同样的默认参数、无学习步、无随机扰动）逐步对照
+    func testMatchesReferenceImplementation() {
+        let f = FSRS()
+        let seq: [(Int, Int, Double, Double, Double)] = [
+            (0, 3, 2.3065, 2.1181, 2), (0, 3, 2.3065, 2.1112, 2), (3, 3, 13.8358, 2.1043, 14),
+            (10, 2, 34.0745, 4.7437, 34), (30, 1, 2.4266, 8.2575, 2), (1, 3, 3.9727, 8.2445, 4),
+            (5, 4, 14.2732, 7.6431, 14), (60, 3, 53.0693, 7.6307, 53),
+        ]
+        var m: (s: Double, d: Double)?
+        for (i, (dd, r, s, d, ivl)) in seq.enumerated() {
+            m = f.nextMemory(m, elapsedDays: i == 0 ? 0 : dd, rating: r)
+            XCTAssertEqual(m!.s, s, accuracy: 0.002, "step \(i) S")
+            XCTAssertEqual(m!.d, d, accuracy: 0.002, "step \(i) D")
+            XCTAssertEqual(f.interval(stability: m!.s), ivl, "step \(i) interval")
+        }
+    }
+
+    func testAnswerFlowAndOrdering() {
+        let f = FSRS()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var c = Card(front: "q")
+        c = f.answer(c, .good, now: now)          // 学习第 1 步 → 10 分钟
+        XCTAssertEqual(c.state, .learning)
+        c = f.answer(c, .good, now: now.addingTimeInterval(600))
+        XCTAssertEqual(c.state, .review)
+        XCTAssertNotNil(c.stability)
+        let later = now.addingTimeInterval(86_400 * Double(c.interval))
+        let p = [CardAnswer.hard, .good, .easy].map { f.answer(c, $0, now: later).interval }
+        XCTAssertTrue(p[0] <= p[1] && p[1] < p[2], "\(p)")
+        let lapsed = f.answer(c, .again, now: later)
+        XCTAssertEqual(lapsed.state, .relearning)
+        XCTAssertEqual(lapsed.lapses, 1)
+    }
+
+    func testOptimizerDoesNotWorsen() {
+        // 用“真实参数”略有不同的模型生成模拟记录，看优化后损失下降
+        var truth = FSRS.defaultParameters
+        truth[8] = 2.3; truth[10] = 1.1; truth[20] = 0.3
+        let gen = FSRS(parameters: truth)
+        var rng = SeededGenerator(seed: 7)
+        var histories: [[FSRSReview]] = []
+        for _ in 0..<300 {
+            var h: [FSRSReview] = []
+            var day = 0
+            var m: (s: Double, d: Double)?
+            for k in 0..<6 {
+                var rating = 3
+                if let cur = m {
+                    let gap = Int(max(1, gen.interval(stability: cur.s) * Double.random(in: 0.5...1.6, using: &rng)))
+                    day += gap
+                    let r = gen.retrievability(elapsedDays: Double(gap), stability: cur.s)
+                    rating = Double.random(in: 0...1, using: &rng) < r ? (Double.random(in: 0...1, using: &rng) < 0.15 ? 4 : 3) : 1
+                } else {
+                    rating = [1, 3, 3, 4][k % 4]
+                }
+                h.append(FSRSReview(day: day, rating: rating))
+                m = gen.nextMemory(m, elapsedDays: h.count == 1 ? 0 : h[h.count - 1].day - h[h.count - 2].day, rating: rating)
+            }
+            histories.append(h)
+        }
+        let r = FSRSOptimizer.optimize(histories, maxEvaluations: 1500)
+        XCTAssertGreaterThanOrEqual(r.reviewCount, FSRSOptimizer.minimumReviews)
+        XCTAssertLessThanOrEqual(r.lossAfter, r.lossBefore)
+        XCTAssertEqual(r.parameters.count, 21)
+    }
+}
+
+final class NoteTemplateTests: XCTestCase {
+    func testDefaultTemplateAndRender() {
+        let t = NoteTemplate.defaultTemplate(name: "论语", fieldNames: ["正文", "注释", "译文", "解题", "备注"])
+        XCTAssertEqual(t.front, [0])
+        XCTAssertEqual(t.back, [1, 2, 3, 4])
+        XCTAssertEqual(t.collapsed, [1, 4])
+        var c = Card(front: "x")
+        c.fields = ["子曰", "①子：孔子", "孔子说", "", ""]
+        let f = c.faces(using: t)
+        XCTAssertTrue(f.front.contains("子曰"))
+        XCTAssertTrue(f.back.contains("<details class=\"kr-field\"><summary>注释</summary>①子：孔子</details>"))
+        XCTAssertTrue(f.back.contains("<div class=\"kr-label\">译文</div>孔子说"))
+        XCTAssertFalse(f.back.contains("解题"))   // 空字段不显示
+    }
+
+    func testSHA1() {
+        XCTAssertEqual(SHA1.hex(Data("abc".utf8)), "a9993e364706816aba3e25717850c26c9cd0d89d")
+        XCTAssertEqual(SHA1.hex(Data()), "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+    }
+
+    func testCardDataMemory() {
+        let m = AnkiNote.memory(fromCardData: #"{"s":362.2,"d":8.406,"dr":0.9}"#)
+        XCTAssertEqual(m?.stability ?? 0, 362.2, accuracy: 1e-9)
+        XCTAssertNil(AnkiNote.memory(fromCardData: ""))
+    }
+}
+
+final class RichHTMLTests: XCTestCase {
+    func testRichHTML() {
+        let h = Markdown.richHTML("# 标题\n正文 **粗** <img src=\"https://x.org/a.png\"> [链](https://x.org)")
+        XCTAssertTrue(h.contains("<h1>标题</h1>"), h)
+        XCTAssertTrue(h.contains(#"<img alt="" src="https://x.org/a.png">"#), h)
+        XCTAssertTrue(h.contains(#"<a href="https://x.org">链</a>"#), h)
+        XCTAssertTrue(h.contains("<strong>粗</strong>"), h)
+    }
+}

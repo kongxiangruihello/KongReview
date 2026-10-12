@@ -58,7 +58,9 @@ public enum MarkdownText {
         return inline(mark + t + mark)
     }
 
-    static func inline(_ s: String) -> AttributedString {
+    static func inline(_ raw: String) -> AttributedString {
+        // Text 显示不了图片：换成“［图片］”
+        let s = Markdown.replace(raw, #"!\[[^\]]*\]\([^)\s]+\)"#, "［图片］")
         let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: s, options: opts)) ?? AttributedString(s)
     }

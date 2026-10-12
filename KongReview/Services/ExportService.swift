@@ -153,4 +153,39 @@ enum ExportService {
         guard !notes.isEmpty else { throw ImportFileError("文件里没有可导入的笔记。") }
         return CardImportPreview(fileName: url.lastPathComponent, notes: notes, media: [:])
     }
+
+    // MARK: 导出到 Anki（.apkg）
+
+    static func exportApkg(_ request: ApkgExportRequest, store: LibraryStore) {
+        let panel = NSSavePanel()
+        let name = request.decks.count == 1 ? (request.decks.first ?? "KongReview") : "KongReview记忆卡"
+        panel.nameFieldStringValue = name.replacingOccurrences(of: "::", with: "-") + ".apkg"
+        if let apkg = UTType(filenameExtension: "apkg") { panel.allowedContentTypes = [apkg] }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.apkgExport = nil
+        store.maintenanceProgress = "正在导出 Anki 牌组包…"
+        let db = store.db
+        let params = CardSettings.fsrsParameters
+        let defaults = CardSettings.defaults
+        Task.detached(priority: .userInitiated) {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("kr-apkg-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            do {
+                let r = try db.exportApkg(decks: request.decks, includeScheduling: request.includeScheduling,
+                                          fsrsParameters: params, defaults: defaults, to: tmp)
+                try ApkgWriter.zip(folder: tmp, to: url)
+                await MainActor.run {
+                    store.maintenanceProgress = nil
+                    var lines = ["已导出 \(r.cards) 张卡片到 \(url.lastPathComponent)。"]
+                    if r.media > 0 { lines.append("图片 \(r.media) 个。") }
+                    if r.revlog > 0 { lines.append("复习记录 \(r.revlog) 条。") }
+                    lines.append("把这个文件发到手机（隔空投送、iCloud 云盘等），在 AnkiMobile / AnkiDroid 里打开即可导入。")
+                    store.infoMessage = lines.joined(separator: "\n")
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            } catch {
+                await MainActor.run { store.maintenanceProgress = nil; store.report(error) }
+            }
+        }
+    }
 }

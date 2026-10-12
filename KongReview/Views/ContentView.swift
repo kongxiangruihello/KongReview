@@ -22,7 +22,8 @@ struct ContentView: View {
         }
         .overlay(alignment: .bottom) {
             if let progress = store.importProgress.flatMap({ store.pendingImport == nil ? $0 : nil })
-                ?? store.articleProgress.flatMap({ store.addArticleDraft == nil ? $0 : nil }) {
+                ?? store.articleProgress.flatMap({ store.addArticleDraft == nil ? $0 : nil })
+                ?? store.maintenanceProgress {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(progress).font(.callout)
@@ -88,6 +89,7 @@ struct ContentView: View {
         .sheet(item: $store.articleSourceDraft) { _ in
             ArticleSourceEditorView()
         }
+        .modifier(CardSheets())
         .alert("完成", isPresented: Binding(
             get: { store.infoMessage != nil },
             set: { if !$0 { store.infoMessage = nil } }
@@ -272,5 +274,41 @@ struct SidebarView: View {
         case .ai: return "sparkles"
         case .other: return "square.stack"
         }
+    }
+}
+
+/// 0.8 新增的面板与提示（单独成一个修饰器，避免主视图的修饰链过长、编译器类型检查超时）
+struct CardSheets: ViewModifier {
+    @Environment(LibraryStore.self) private var store
+
+    func body(content: Content) -> some View {
+        @Bindable var store = store
+        return content
+            .sheet(item: $store.deckOptionsEditor) { _ in
+                DeckOptionsView()
+            }
+            .sheet(item: $store.templateEditor) { _ in
+                NoteTemplateEditorView()
+            }
+            .sheet(item: $store.apkgExport) { _ in
+                ApkgExportView()
+            }
+            .alert("同步更新记忆卡？", isPresented: Binding(
+                get: { store.cardSyncOffer != nil },
+                set: { if !$0 { store.cardSyncOffer = nil } }
+            )) {
+                Button("同步") {
+                    if let o = store.cardSyncOffer { store.syncCards(fromHighlight: o.highlightId) }
+                    store.cardSyncOffer = nil
+                }
+                Button("总是同步") {
+                    UserDefaults.standard.set("always", forKey: CardSettings.syncFromHighlightKey)
+                    if let o = store.cardSyncOffer { store.syncCards(fromHighlight: o.highlightId) }
+                    store.cardSyncOffer = nil
+                }
+                Button("不同步", role: .cancel) { store.cardSyncOffer = nil }
+            } message: {
+                Text("这条摘录已做成 \(store.cardSyncOffer?.cardCount ?? 1) 张记忆卡。同步后卡片的正反面换成摘录的新内容，复习进度不变。（可在“设置 → 记忆卡”改为总是同步或从不同步）")
+            }
     }
 }

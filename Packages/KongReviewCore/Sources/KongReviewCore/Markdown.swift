@@ -123,7 +123,9 @@ public enum Markdown {
         t = replace(t, #"`([^`]+)`"#, "<code>$1</code>")
         t = replace(t, #"\*\*([^*]+)\*\*"#, "<strong>$1</strong>")
         t = replace(t, #"(?<!\*)\*([^*\s][^*]*?)\*(?!\*)"#, "<em>$1</em>")
-        t = replace(t, #"\[([^\]]+)\]\((https?://[^)\s]+)\)"#, "<a href=\"$2\">$1</a>")
+        t = replace(t, #"!\[([^\]]*)\]\(([^)\s]+)\)"#, "<img alt=\"$1\" src=\"$2\">")
+        t = replace(t, #"(?<!!)\[([^\]]+)\]\((https?://[^)\s]+)\)"#, "<a href=\"$2\">$1</a>")
+        t = replace(t, #"~~([^~]+)~~"#, "<del>$1</del>")
         return t
     }
 
@@ -145,6 +147,11 @@ public enum Markdown {
             .replacingOccurrences(of: "&#39;", with: "'")
             .replacingOccurrences(of: "&amp;", with: "&")
         return ArticleText.normalize(t)
+    }
+
+    /// 摘录、译文、按语的完整渲染：先把夹杂的 HTML 标签换成 Markdown，再整体转 HTML（标题、列表、图片都按真实样式显示）
+    public static func richHTML(_ source: String) -> String {
+        html(markdown(fromHTMLFragments: source))
     }
 
     // MARK: 混排的 HTML 片段 → Markdown
@@ -170,6 +177,8 @@ public enum Markdown {
             (#"(?is)<code\b[^>]*>(.*?)</code\s*>"#, "`$1`"),
             (#"(?is)<a\b[^>]*?href\s*=\s*"([^"]+)"[^>]*>(.*?)</a\s*>"#, "[$2]($1)"),
             (#"(?is)<a\b[^>]*?href\s*=\s*'([^']+)'[^>]*>(.*?)</a\s*>"#, "[$2]($1)"),
+            (#"(?is)<img\b[^>]*?src\s*=\s*"([^"]+)"[^>]*>"#, "![]($1)"),
+            (#"(?is)<img\b[^>]*?src\s*=\s*'([^']+)'[^>]*>"#, "![]($1)"),
             (#"(?i)<li\b[^>]*>"#, "\n- "),
             (#"(?i)<blockquote\b[^>]*>"#, "\n> "),
             (#"(?i)</li\s*>"#, ""),

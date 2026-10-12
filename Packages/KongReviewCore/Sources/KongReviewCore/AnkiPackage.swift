@@ -67,6 +67,49 @@ public enum AnkiPackage {
         return out
     }
 
+    /// 新格式 decks.kind（protobuf）：Normal 牌组 { config_id = 1 } 在字段 1 里
+    public static func deckConfigID(fromKind data: Data) -> Int64? {
+        let b = [UInt8](data)
+        var p = 0
+        while p < b.count {
+            guard let (f, w) = readTag(b, &p) else { return nil }
+            if f == 1 && w == 2, let len = readVarint(b, &p), p + Int(len) <= b.count {
+                let inner = Array(b[p..<p + Int(len)])
+                var q = 0
+                while q < inner.count {
+                    guard let (f2, w2) = readTag(inner, &q) else { return nil }
+                    if f2 == 1 && w2 == 0 { return readVarint(inner, &q).map { Int64($0) } }
+                    if !skip(inner, &q, wire: w2) { return nil }
+                }
+                return nil
+            }
+            if !skip(b, &p, wire: w) { return nil }
+        }
+        return nil
+    }
+
+    /// 新格式 deck_config.config（protobuf DeckConfig.Config）：
+    /// 字段 9 每日新卡、10 每日复习上限（varint），37 期望保留率（float）
+    public static func deckConfig(fromProto data: Data) -> (newPerDay: Int?, reviewsPerDay: Int?, desiredRetention: Double?) {
+        let b = [UInt8](data)
+        var p = 0
+        var new: Int?, rev: Int?, ret: Double?
+        while p < b.count {
+            guard let (f, w) = readTag(b, &p) else { break }
+            if w == 0, let v = readVarint(b, &p) {
+                if f == 9 { new = Int(v) } else if f == 10 { rev = Int(v) }
+            } else if w == 5 {
+                guard p + 4 <= b.count else { break }
+                let bits = UInt32(b[p]) | UInt32(b[p + 1]) << 8 | UInt32(b[p + 2]) << 16 | UInt32(b[p + 3]) << 24
+                if f == 37 { ret = (Double(Float(bitPattern: bits)) * 1000).rounded() / 1000 }
+                p += 4
+            } else if !skip(b, &p, wire: w) {
+                break
+            }
+        }
+        return (new, rev, ret)
+    }
+
     // MARK: protobuf 线格式
 
     static func readVarint(_ b: [UInt8], _ p: inout Int) -> UInt64? {

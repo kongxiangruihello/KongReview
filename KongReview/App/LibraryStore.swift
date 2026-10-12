@@ -84,6 +84,16 @@ final class LibraryStore {
     var articleSourceDraft: ArticleSourceDraft?
     /// 今天是否已回顾（决定是否还要提醒）
     var reviewedToday = false
+    /// 笔记类型模板（多字段卡片按它显示）
+    var noteTemplates: [String: NoteTemplate] = [:]
+    var deckOptionsEditor: DeckOptions?
+    var templateEditor: NoteTemplate?
+    var apkgExport: ApkgExportRequest?
+    var cardSyncOffer: CardSyncOffer?
+    /// FSRS 优化、整理数据库等后台任务的状态文字
+    var maintenanceProgress: String?
+    /// 每次刷新后调用（菜单栏数字、提醒内容）
+    var onReload: (() -> Void)?
 
     /// 每次写入后递增，列表视图据此重新查询
     private(set) var revision = 0
@@ -104,7 +114,9 @@ final class LibraryStore {
             cardHighlightIDs = try db.cardHighlightIDs()
             cardCount = try db.cards().count
             reviewedToday = try db.reviewedToday()
+            noteTemplates = try db.noteTemplates()
             revision += 1
+            onReload?()
         } catch {
             report(error)
         }
@@ -383,6 +395,11 @@ final class LibraryStore {
         d.card.deck = d.card.deck.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "默认"
         d.card.tags = TagParser.parse(d.tagsText)
         d.card.updatedAt = Date()
+        // 多字段卡片：正面 / 背面存一份字段内容的拼接，供搜索与列表预览（显示仍按模板）
+        if d.card.noteType != nil, !d.card.fields.isEmpty {
+            d.card.front = d.card.fields[0]
+            d.card.back = d.card.fields.dropFirst().filter { !$0.isEmpty }.joined(separator: "<hr>")
+        }
         guard !d.card.front.isEmpty else { return }
         do {
             let saved = try db.save(d.card)
@@ -425,22 +442,38 @@ final class LibraryStore {
         nextCard()
     }
 
-    /// 学习：取下一张
+    /// 学习：取下一张（按牌组自己的每日上限）
     func nextCard(now: Date = Date()) {
         guard let deck = study.deck else { return }
         let cards = (try? db.cards(deck: deck)) ?? []
-        let done = (try? db.studiedToday(now: now)) ?? (new: 0, review: 0)
+        let done = (try? db.studiedToday(deck: deck, now: now)) ?? (new: 0, review: 0)
+        let o = options(for: deck)
         study.current = StudyQueue.next(from: cards, now: now,
-                                        newLimitLeft: CardSettings.newPerDay - done.new,
-                                        reviewLimitLeft: CardSettings.reviewsPerDay - done.review)
+                                        newLimitLeft: (o.newPerDay ?? CardSettings.newPerDay) - done.new,
+                                        reviewLimitLeft: (o.reviewsPerDay ?? CardSettings.reviewsPerDay) - done.review)
         study.showingAnswer = false
         study.finished = study.current == nil
+    }
+
+    /// 牌组的有效选项（未设置的项用全局默认）
+    func options(for deck: String) -> DeckOptions {
+        (try? db.effectiveOptions(deck, defaults: CardSettings.defaults)) ?? DeckOptions(deck: deck)
+    }
+
+    /// 这个牌组用的排程算法
+    func scheduler(forDeck deck: String) -> any CardScheduling {
+        options(for: deck).scheduler(parameters: CardSettings.fsrsParameters)
+    }
+
+    /// 卡片实际显示的正反面（多字段卡片按模板）
+    func faces(of card: Card) -> (front: String, back: String) {
+        card.faces(using: card.noteType.flatMap { noteTemplates[$0] })
     }
 
     func answerCurrent(_ a: CardAnswer) {
         guard let c = study.current else { return }
         do {
-            _ = try db.answer(c, a)
+            _ = try db.answer(c, a, scheduler: scheduler(forDeck: c.deck))
             if !reviewedToday { reviewedToday = true; onReviewedToday?() }
         } catch {
             report(error)
@@ -449,15 +482,112 @@ final class LibraryStore {
         revisionBump()
     }
 
+    // MARK: 牌组选项、模板、FSRS、整理
+
+    func saveDeckOptions(_ o: DeckOptions) {
+        let before = options(for: o.deck).algorithm
+        perform {
+            try db.save(o)
+            // 从 SM-2 改用 FSRS：按复习记录算出各卡的记忆状态
+            if before != .fsrs && o.algorithm == .fsrs {
+                _ = try db.recomputeMemory(parameters: CardSettings.fsrsParameters, decks: [o.deck])
+            }
+        }
+        deckOptionsEditor = nil
+    }
+
+    func saveTemplate(_ t: NoteTemplate) {
+        perform { try db.save(t) }
+        templateEditor = nil
+    }
+
+    /// 用全部复习记录优化 FSRS 参数（后台进行），然后重算使用 FSRS 的牌组的记忆状态
+    func optimizeFSRS() {
+        guard maintenanceProgress == nil else { return }
+        maintenanceProgress = "正在用复习记录优化 FSRS 参数…"
+        let db = self.db
+        Task.detached(priority: .userInitiated) {
+            do {
+                let histories = Array(try db.fsrsHistories().values)
+                let r = FSRSOptimizer.optimize(histories)
+                let fsrsDecks = Set(try db.deckOptions().values.filter { $0.algorithm == .fsrs }.map(\.deck))
+                let updated = r.improved ? try db.recomputeMemory(parameters: r.parameters, decks: fsrsDecks) : 0
+                await MainActor.run {
+                    self.maintenanceProgress = nil
+                    let fmt = { (v: Double) in String(format: "%.4f", v) }
+                    if r.reviewCount < FSRSOptimizer.minimumReviews {
+                        self.infoMessage = "跨日复习记录只有 \(r.reviewCount) 条，至少要 \(FSRSOptimizer.minimumReviews) 条才能可靠地优化。先继续用默认参数。"
+                    } else if r.improved {
+                        CardSettings.fsrsParameters = r.parameters
+                        let info = "\(Date().formatted(date: .abbreviated, time: .omitted)) 用 \(r.reviewCount) 条复习记录优化，对数损失 \(fmt(r.lossBefore)) → \(fmt(r.lossAfter))"
+                        CardSettings.fsrsInfo = info
+                        self.infoMessage = "FSRS 参数已优化。\n\(info)。\n已按新参数重算 \(updated) 张卡的记忆状态（只影响以后的间隔，不改已排好的到期日）。"
+                    } else {
+                        self.infoMessage = "用 \(r.reviewCount) 条复习记录试过，没找到比当前更好的参数（在留出的检验记录上没有改进），参数保持不变。"
+                    }
+                    self.reload()
+                }
+            } catch {
+                await MainActor.run { self.maintenanceProgress = nil; self.report(error) }
+            }
+        }
+    }
+
+    func resetFSRS() {
+        UserDefaults.standard.removeObject(forKey: CardSettings.fsrsParamsKey)
+        CardSettings.fsrsInfo = nil
+        let decks = Set(((try? db.deckOptions()) ?? [:]).values.filter { $0.algorithm == .fsrs }.map(\.deck))
+        perform { _ = try db.recomputeMemory(parameters: FSRS.defaultParameters, decks: decks) }
+        infoMessage = "已恢复 FSRS 默认参数。"
+    }
+
+    /// 整理数据库：先备份，再删掉没有卡片引用的图片、VACUUM 收回空间
+    func compactDatabase() {
+        guard maintenanceProgress == nil else { return }
+        maintenanceProgress = "正在整理数据库…"
+        let db = self.db
+        Task.detached(priority: .userInitiated) {
+            do {
+                try BackupService.backupNow(db: db)
+                let r = try db.compact()
+                await MainActor.run {
+                    self.maintenanceProgress = nil
+                    let f = ByteCountFormatter()
+                    self.infoMessage = "整理完成：\(f.string(fromByteCount: r.bytesBefore)) → \(f.string(fromByteCount: r.bytesAfter))。"
+                        + (r.mediaRemoved > 0 ? "删除没有卡片使用的图片 \(r.mediaRemoved) 个。" : "")
+                        + "\n整理前已自动备份。"
+                    self.reload()
+                }
+            } catch {
+                await MainActor.run { self.maintenanceProgress = nil; self.report(error) }
+            }
+        }
+    }
+
+    /// 菜单栏与提醒用：今天还没看的摘录条数、待学的卡数
+    func todayCounts() -> (highlights: Int, cards: Int) {
+        let rec = ReviewSessionRecordStore.load()
+        let highlights: Int
+        if let rec, rec.day == ReminderPlan.dayKey(Date()) {
+            highlights = max(0, rec.total - rec.position)
+        } else {
+            highlights = reviewedToday ? 0 : (UserDefaults.standard.object(forKey: "review.dailyCount") as? Int ?? 10)
+        }
+        return (highlights, dueCardCount())
+    }
+
     func confirmCardImport() {
         guard let p = cardImport else { return }
         do {
             try BackupService.backupNow(db: db)
             let r = try db.importAnki(p.notes, media: p.media)
             var lines = ["导入 \(r.imported) 张记忆卡。"]
-            if r.duplicates > 0 { lines.append("跳过已导入过的 \(r.duplicates) 张。") }
+            if r.duplicates > 0 { lines.append("已导入过的 \(r.duplicates) 张没有重复建卡\(r.upgraded > 0 ? "，其中 \(r.upgraded) 张补上了字段 / 记忆状态" : "")。") }
             if r.media > 0 { lines.append("图片等媒体文件 \(r.media) 个。") }
-            lines.append("牌组：" + r.decks.joined(separator: "、"))
+            if r.revlog > 0 { lines.append("复习记录 \(r.revlog) 条（用于统计与 FSRS 参数优化）。") }
+            if r.templates > 0 { lines.append("新建笔记类型模板 \(r.templates) 个，可在“记忆卡 → 卡片模板”调整正反面显示哪些字段。") }
+            if !r.fsrsDecks.isEmpty { lines.append("沿用 Anki 的设置，这些牌组使用 FSRS：" + r.fsrsDecks.joined(separator: "、")) }
+            if !r.decks.isEmpty { lines.append("牌组：" + r.decks.joined(separator: "、")) }
             lines.append("导入前的数据已自动备份。")
             infoMessage = lines.joined(separator: "\n")
             cardImport = nil
@@ -524,7 +654,28 @@ final class LibraryStore {
 
     /// 保存编辑面板的内容并关闭面板
     func commit(_ draft: HighlightDraft) {
-        if save(draft: draft) { editorDraft = nil }
+        guard save(draft: draft) else { return }
+        editorDraft = nil
+        // 改的是已做成记忆卡的摘录：按设置同步，或询问
+        if let id = draft.highlight.id, cardHighlightIDs.contains(id) {
+            switch CardSettings.syncFromHighlight {
+            case "always": syncCards(fromHighlight: id)
+            case "never": break
+            default:
+                let n = (try? db.cards(forHighlight: id).count) ?? 0
+                if n > 0 { cardSyncOffer = CardSyncOffer(highlightId: id, cardCount: n) }
+            }
+        }
+    }
+
+    func syncCards(fromHighlight id: Int64) {
+        perform { _ = try db.syncCards(fromHighlight: id, style: CitationSettings.style) }
+    }
+
+    /// 记忆卡对应的原摘录：打开编辑面板
+    func openHighlight(of card: Card) {
+        guard let id = card.highlightId, let h = try? db.highlights(ids: [id]).first else { return }
+        edit(h)
     }
 
     /// 保存一份草稿（主窗口编辑器与快速录入浮窗共用）；成功返回 true

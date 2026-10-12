@@ -60,6 +60,11 @@ struct KongReviewApp: App {
                 Divider()
                 Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
                 Button("导入 Anki 牌组…") { ExportService.importAnki(store: store) }
+                Button("导出记忆卡到 Anki…") {
+                    let decks = (try? store.db.deckNames()) ?? []
+                    store.selection = .cards
+                    store.apkgExport = ApkgExportRequest(allDecks: decks, decks: Set(decks))
+                }
             }
         }
 

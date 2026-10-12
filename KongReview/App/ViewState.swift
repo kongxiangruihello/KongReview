@@ -52,8 +52,49 @@ struct CardDraft: Identifiable {
 enum CardSettings {
     static let newPerDayKey = "cards.newPerDay"
     static let reviewsPerDayKey = "cards.reviewsPerDay"
+    static let fsrsParamsKey = "cards.fsrsParams"
+    static let fsrsInfoKey = "cards.fsrsInfo"
+    static let adjustDarkColorsKey = "cards.adjustDarkColors"
+    static let syncFromHighlightKey = "cards.syncFromHighlight"   // "ask" / "always" / "never"
+    static let menuBarCountsKey = "menubar.showCounts"
+
     static var newPerDay: Int { (UserDefaults.standard.object(forKey: newPerDayKey) as? Int) ?? 20 }
     static var reviewsPerDay: Int { (UserDefaults.standard.object(forKey: reviewsPerDayKey) as? Int) ?? 200 }
+    static var defaults: (new: Int, review: Int) { (newPerDay, reviewsPerDay) }
+
+    /// FSRS 参数（21 个）；没优化过时用默认值
+    static var fsrsParameters: [Double] {
+        get {
+            let v = UserDefaults.standard.array(forKey: fsrsParamsKey) as? [Double] ?? []
+            return v.count == 21 ? v : FSRS.defaultParameters
+        }
+        set { UserDefaults.standard.set(newValue, forKey: fsrsParamsKey) }
+    }
+    static var fsrsIsDefault: Bool { (UserDefaults.standard.array(forKey: fsrsParamsKey) as? [Double] ?? []).count != 21 }
+    /// 上次优化的说明文字
+    static var fsrsInfo: String? {
+        get { UserDefaults.standard.string(forKey: fsrsInfoKey) }
+        set { UserDefaults.standard.set(newValue, forKey: fsrsInfoKey) }
+    }
+    /// 深色模式下自动调亮卡片自带的深色文字
+    static var adjustDarkColors: Bool { UserDefaults.standard.object(forKey: adjustDarkColorsKey) as? Bool ?? true }
+    static var syncFromHighlight: String { UserDefaults.standard.string(forKey: syncFromHighlightKey) ?? "ask" }
+    static var menuBarCounts: Bool { UserDefaults.standard.object(forKey: menuBarCountsKey) as? Bool ?? true }
+}
+
+/// 导出到 Anki 的选择
+struct ApkgExportRequest: Identifiable {
+    let id = UUID()
+    var allDecks: [String]
+    var decks: Set<String>
+    var includeScheduling = true
+}
+
+/// 改了摘录后，询问是否同步更新对应的记忆卡
+struct CardSyncOffer: Identifiable {
+    let id = UUID()
+    var highlightId: Int64
+    var cardCount: Int
 }
 
 /// Anki 导入预览
@@ -63,6 +104,10 @@ struct CardImportPreview: Identifiable {
     var notes: [AnkiNote]
     var media: [String: Data]
     var withSchedule: Int { notes.filter { $0.schedule != nil }.count }
+    var withMemory: Int { notes.filter { $0.memory != nil }.count }
+    var revlogCount: Int { notes.reduce(0) { $0 + $1.revlog.count } }
+    var noteTypes: [String] { Array(Set(notes.compactMap { $0.fieldNames.isEmpty ? nil : $0.noteType })).sorted() }
+    var usesFSRS: Bool { notes.contains { $0.deckOptions?.algorithm == .fsrs } }
     var decks: [String] { Array(Set(notes.map(\.deck))).sorted() }
 }
 
@@ -170,4 +215,20 @@ struct ReviewCard: Identifiable {
     var highlight: Highlight
     var isMastery: Bool
     var id: Int64 { highlight.id ?? -1 }
+}
+
+/// 读取“今日回顾”保存在 UserDefaults 里的进度（全库那一组），供菜单栏与提醒显示剩余条数
+enum ReviewSessionRecordStore {
+    struct Snapshot: Decodable {
+        var day: String
+        var regularIds: [Int64]
+        var masteryIds: [Int64]
+        var position: Int
+        var total: Int { regularIds.count + masteryIds.count }
+    }
+
+    static func load() -> Snapshot? {
+        guard let data = UserDefaults.standard.data(forKey: "review.session._all") else { return nil }
+        return try? JSONDecoder().decode(Snapshot.self, from: data)
+    }
 }

@@ -451,3 +451,70 @@ final class V07DatabaseTests: XCTestCase {
     XCTAssertEqual(b.contentText, "新的正文\n第二段"); XCTAssertEqual(b.wordCount, 7)
   }
 }
+
+final class V08DatabaseTests: XCTestCase {
+  /// 多字段笔记 + 牌组选项 + 复习记录：导入、再次导入补全、导出 .apkg 再读回
+  func testTemplatesOptionsRevlogAndApkgRoundTrip() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    var n = AnkiNote(front: "子曰", back: "注<hr>译", tags: ["论语"], deck: "论语::学而", guid: "g1",
+                     schedule: .init(state: .review, interval: 10, ease: 2.5, due: now, reps: 3, lapses: 0, suspended: false))
+    n.noteType = "论语译注"; n.fieldNames = ["正文", "注释", "译文"]; n.fields = ["子曰", "①子：孔子", "孔子说"]
+    n.memory = .init(stability: 12, difficulty: 5)
+    n.revlog = [.init(id: 1_799_000_000_000, ease: 3), .init(id: 1_799_500_000_000, ease: 3)]
+    n.deckOptions = DeckOptions(deck: "x", newPerDay: 25, reviewsPerDay: 2000, algorithm: .fsrs, desiredRetention: 0.88)
+
+    // 先按 0.7 的方式导入一条（没有字段与记忆状态），再用完整数据重导：应补全而不新建
+    var old = n; old.fields = []; old.noteType = nil; old.memory = nil; old.revlog = []; old.deckOptions = nil
+    XCTAssertEqual(try db.importAnki([old], now: now).imported, 1)
+    let r = try db.importAnki([n], now: now)
+    XCTAssertEqual(r.imported, 0); XCTAssertEqual(r.upgraded, 1); XCTAssertEqual(r.revlog, 2); XCTAssertEqual(r.templates, 1)
+    XCTAssertEqual(try db.importAnki([n], now: now).revlog, 0, "revlog de-duplicated")
+
+    let card = try XCTUnwrap(db.cards().first)
+    XCTAssertEqual(card.fields.count, 3); XCTAssertEqual(card.stability, 12)
+    let tpl = try XCTUnwrap(db.noteTemplates()["论语译注"])
+    XCTAssertEqual(tpl.collapsed, [1])
+    XCTAssertTrue(card.faces(using: tpl).back.contains("<summary>注释</summary>"))
+    let o = try XCTUnwrap(db.deckOptions()["论语::学而"])
+    XCTAssertEqual(o.algorithm, .fsrs); XCTAssertEqual(o.newPerDay, 25); XCTAssertEqual(o.desiredRetention, 0.88, accuracy: 1e-9)
+
+    // 每牌组上限：牌组选项覆盖全局
+    let s = try db.deckSummaries(now: now.addingTimeInterval(86_400 * 30), newPerDay: 0, reviewsPerDay: 0)
+    XCTAssertEqual(s.first?.counts.review, 1)
+
+    // FSRS 历史与重算
+    XCTAssertEqual(try db.fsrsHistories()[card.id!]?.count, 2)
+    XCTAssertEqual(try db.recomputeMemory(parameters: FSRS.defaultParameters, decks: ["论语::学而"]), 1)
+
+    // 导出 .apkg 再用自己的读取器读回
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("exp-\(UUID().uuidString)")
+    let rep = try db.exportApkg(decks: ["论语::学而"], includeScheduling: true, fsrsParameters: FSRS.defaultParameters,
+                                defaults: (20, 200), to: dir)
+    XCTAssertEqual(rep.cards, 1); XCTAssertEqual(rep.revlog, 2); XCTAssertEqual(rep.decks, ["论语", "论语::学而"])
+    let back = try AnkiCollectionReader.read(folder: dir, now: now)
+    XCTAssertEqual(back.notes.count, 1)
+    XCTAssertEqual(back.notes[0].deck, "论语::学而")
+    XCTAssertEqual(back.notes[0].guid, "g1")
+    XCTAssertEqual(back.notes[0].fieldNames, ["正面", "背面"])
+    XCTAssertTrue(back.notes[0].fields[1].contains("孔子说"))
+    XCTAssertEqual(back.notes[0].schedule?.state, .review)
+    XCTAssertNotNil(back.notes[0].memory)
+    XCTAssertEqual(back.notes[0].revlog.count, 2)
+  }
+
+  func testHighlightCardSyncAndCompact() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    var h = try db.save(Highlight(text: "学而时习之"))
+    XCTAssertEqual(try db.makeCards(fromHighlights: [h.id!]), 1)
+    h.text = "学而时习之，不亦说乎"
+    h.note = "开篇"
+    h = try db.save(h)
+    XCTAssertEqual(try db.syncCards(fromHighlight: h.id!, style: .footnote), 1)
+    let c = try XCTUnwrap(db.cards(forHighlight: h.id!).first)
+    XCTAssertEqual(c.front, "学而时习之，不亦说乎"); XCTAssertTrue(c.back.contains("按：开篇"))
+    XCTAssertEqual(try db.syncCards(fromHighlight: h.id!, style: .footnote), 0, "nothing changed")
+    _ = try db.importAnki([], media: ["unused.png": Data([1, 2, 3])])
+    XCTAssertEqual(try db.compact().mediaRemoved, 1)
+  }
+}

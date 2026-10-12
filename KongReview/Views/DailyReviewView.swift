@@ -144,7 +144,7 @@ struct DailyReviewView: View {
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                MarkdownPreview(text: state.noteDraft ?? "", font: .callout)
+                MarkdownPreview(text: state.noteDraft ?? "", font: .callout, slot: "preview-draft")
                 HStack {
                     Spacer()
                     Button("取消") { state.noteDraft = nil }
@@ -322,6 +322,7 @@ struct DailyReviewView: View {
             masteryIds: [],
             position: state.position
         ).save(key: ReviewSessionRecord.key(theme: state.theme))
+        StatusItemController.shared.updateCounts()
     }
 }
 
@@ -336,16 +337,18 @@ enum RichText {
 struct MarkdownPreview: View {
     let text: String
     var font: Font = .body
+    var style: RichWebText.Style = .preview
+    var slot = "preview"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("预览").font(.caption).foregroundStyle(.secondary)
-            Text(text.isEmpty ? AttributedString("（空）") : RichText.attributed(text))
-                .font(font)
-                .foregroundStyle(text.isEmpty ? .secondary : .primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            if text.isEmpty {
+                Text("（空）").font(font).foregroundStyle(.secondary)
+            } else {
+                // 与回顾页同一套网页渲染：标题放大、列表缩进、图片显示
+                RichWebText(text: text, style: style, slot: slot)
+            }
         }
         .padding(8)
         .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
@@ -362,19 +365,16 @@ struct ReviewCardView: View {
             if hasCard {
                 Label("已做成记忆卡", systemImage: "brain").font(.caption).foregroundStyle(.purple)
             }
-            Text(RichText.attributed(card.highlight.text))
-                .font(.system(size: 22, design: .serif))
-                .lineSpacing(8)
-                .textSelection(.enabled)
+            // 用网页内核渲染：Markdown 标题、列表、图片与夹杂的 HTML 都按真实样式显示
+            RichWebText(text: card.highlight.text, style: .highlight, slot: "review-text")
             if let t = card.highlight.translation {
-                Text(RichText.attributed(t)).font(.system(size: 16)).foregroundStyle(.secondary).textSelection(.enabled)
+                RichWebText(text: t, style: .translation, slot: "review-translation")
             }
             if let n = card.highlight.note {
                 HStack(alignment: .top, spacing: 8) {
                     Rectangle().fill(.tint).frame(width: 3)
-                    Text(RichText.attributed(n)).font(.callout).textSelection(.enabled)
+                    RichWebText(text: n, style: .note, slot: "review-note")
                 }
-                .fixedSize(horizontal: false, vertical: true)
             }
             let cite = CitationFormatter.citation(for: card.highlight, source: source, style: CitationSettings.style)
             if !cite.isEmpty {

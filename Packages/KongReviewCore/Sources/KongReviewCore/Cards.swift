@@ -32,6 +32,15 @@ public struct Card: Codable, Identifiable, Hashable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var deletedAt: Date?
+    /// 笔记类型（来自 Anki 的多字段笔记）；非 nil 时按该类型的模板从 fields 生成正反面
+    public var noteType: String?
+    /// 各字段内容（与笔记类型的字段名一一对应）
+    public var fields: [String]
+    /// FSRS 记忆状态：稳定性（天）与难度（1–10）；SM-2 卡片可为 nil
+    public var stability: Double?
+    public var difficulty: Double?
+    /// 上次复习时间（FSRS 据此计算经过的天数）
+    public var lastReview: Date?
 
     public init(id: Int64? = nil, deck: String = "默认", front: String, back: String = "", tags: [String] = [],
                 highlightId: Int64? = nil, state: State = .new, step: Int = 0, interval: Double = 0,
@@ -55,6 +64,11 @@ public struct Card: Codable, Identifiable, Hashable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+        self.noteType = nil
+        self.fields = []
+        self.stability = nil
+        self.difficulty = nil
+        self.lastReview = nil
     }
 }
 
@@ -95,6 +109,7 @@ public struct CardScheduler: Sendable {
         var c = card
         c.reps += 1
         c.updatedAt = now
+        c.lastReview = now
         switch c.state {
         case .new, .learning:
             if c.state == .new { c.ease = startingEase; c.step = 0 }
@@ -170,7 +185,7 @@ public struct CardScheduler: Sendable {
         c.due = dueDate(days: c.interval, from: now)
     }
 
-    func dueDate(days: Double, from now: Date) -> Date {
+    public func dueDate(days: Double, from now: Date) -> Date {
         // 以“天”为单位的间隔：到期日取那一天的凌晨 4 点（与 Anki 的“次日开始时间”默认值一致）
         var cal = Calendar.current
         cal.timeZone = .current
@@ -397,6 +412,40 @@ public struct AnkiNote: Equatable, Sendable {
     public var guid: String?
     /// 来自 .apkg 时带复习进度；纯文本导入为 nil（作为新卡）
     public var schedule: Schedule?
+    /// 多字段笔记：笔记类型名、字段名与各字段原文（来自 .apkg；完形填空也保留）
+    public var noteType: String?
+    public var fieldNames: [String] = []
+    public var fields: [String] = []
+    public var isCloze = false
+    /// Anki 的 FSRS 记忆状态（cards.data 里的 s、d），没有则为 nil
+    public var memory: Memory?
+    /// 这张卡在 Anki 里的复习记录
+    public var revlog: [Revlog] = []
+    /// 该卡所在牌组在 Anki 里的选项（每日上限、算法、期望保留率）
+    public var deckOptions: DeckOptions?
+
+    public struct Memory: Equatable, Sendable {
+        public var stability: Double
+        public var difficulty: Double
+        public init(stability: Double, difficulty: Double) { self.stability = stability; self.difficulty = difficulty }
+    }
+
+    public struct Revlog: Equatable, Sendable {
+        /// Anki revlog 的 id（毫秒时间戳），用于去重
+        public var id: Int64
+        public var ease: Int
+        public var at: Date { Date(timeIntervalSince1970: TimeInterval(id) / 1000) }
+        public init(id: Int64, ease: Int) { self.id = id; self.ease = ease }
+    }
+
+    /// 解析 Anki cards.data 字段（JSON，如 {"s":362.2,"d":8.406,"dr":0.9}）
+    public static func memory(fromCardData data: String?) -> Memory? {
+        guard let data, !data.isEmpty, let d = data.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+              let s = (obj["s"] as? NSNumber)?.doubleValue, let dd = (obj["d"] as? NSNumber)?.doubleValue,
+              s > 0, dd > 0 else { return nil }
+        return Memory(stability: s, difficulty: dd)
+    }
 
     public struct Schedule: Equatable, Sendable {
         public var state: Card.State

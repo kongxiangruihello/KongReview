@@ -23,7 +23,7 @@ struct CardWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ wv: WKWebView, context: Context) {
-        let html = Self.page(front: front, back: back)
+        let html = Self.page(front: front, back: back, adjustDarkColors: CardSettings.adjustDarkColors)
         guard context.coordinator.loaded != html else { return }
         context.coordinator.loaded = html
         wv.loadHTMLString(html, baseURL: nil)
@@ -42,7 +42,7 @@ struct CardWebView: NSViewRepresentable {
         }
     }
 
-    static func page(front: String, back: String?) -> String {
+    static func page(front: String, back: String?, adjustDarkColors: Bool = true) -> String {
         var body = "<div class=\"face\">" + Card.renderHTML(front) + "</div>"
         if let back {
             body += "<hr id=\"answer\"><div class=\"face back\">" + Card.renderHTML(back) + "</div>"
@@ -63,14 +63,47 @@ struct CardWebView: NSViewRepresentable {
         code, pre { font: 14px ui-monospace, Menlo, monospace; background: rgba(128,128,128,.12); border-radius: 4px; }
         pre { padding: 8px 10px; overflow-x: auto; }
         table { border-collapse: collapse; } td, th { border: 1px solid rgba(128,128,128,.35); padding: 4px 8px; }
+        .kr-field + .kr-field { margin-top: 14px; }
+        .kr-label { font-size: 13px; color: #8e8e93; margin-bottom: 2px; }
+        details.kr-field > summary { font-size: 14px; color: #8e8e93; cursor: pointer; }
+        details.kr-field[open] > summary { margin-bottom: 4px; }
         @media (prefers-color-scheme: dark) {
           body { color: #f2f2f7; } .back { color: #d1d1d6; } .cloze { color: #6ea8ff; } blockquote { color: #bbb; }
         }
         </style></head><body>\(body)
         <script>var a=document.getElementById('answer'); if(a){a.scrollIntoView({block:'start'});}</script>
+        \(adjustDarkColors ? darkColorScript : "")
         </body></html>
         """
     }
+}
+
+extension CardWebView {
+    /// 深色模式下处理卡片自带的颜色（从网页复制来的卡片常带 color: rgb(51,51,51) 这类深灰字）：
+    /// 偏灰的深色文字去掉、交给页面的浅色文字；有色彩的深色文字调亮；浅色背景改成透明。
+    static let darkColorScript = """
+    <script>(function(){
+      if (!window.matchMedia('(prefers-color-scheme: dark)').matches) return;
+      function rgb(c){ var m=c&&c.match(/rgba?\\(([\\d.]+),\\s*([\\d.]+),\\s*([\\d.]+)(?:,\\s*([\\d.]+))?/);
+        if(!m||(m[4]!==undefined&&parseFloat(m[4])===0)) return null; return [+m[1],+m[2],+m[3]]; }
+      function lum(c){ return (0.2126*c[0]+0.7152*c[1]+0.0722*c[2])/255; }
+      function sat(c){ var mx=Math.max(c[0],c[1],c[2]), mn=Math.min(c[0],c[1],c[2]); return mx===0?0:(mx-mn)/mx; }
+      document.querySelectorAll('.face *').forEach(function(el){
+        var hasColor = el.style.color || (el.tagName==='FONT' && el.getAttribute('color'));
+        if (hasColor) {
+          var c = rgb(getComputedStyle(el).color);
+          if (c && lum(c) < 0.45) {
+            if (sat(c) < 0.3) { el.style.color=''; el.removeAttribute('color'); if (getComputedStyle(el).color && lum(rgb(getComputedStyle(el).color)||[255,255,255]) < 0.45) el.style.color='inherit'; }
+            else { el.style.color='rgb('+c.map(function(v){return Math.round(v+(255-v)*0.45);}).join(',')+')'; }
+          }
+        }
+        if (el.style.backgroundColor || el.getAttribute('bgcolor')) {
+          var b = rgb(getComputedStyle(el).backgroundColor);
+          if (b && lum(b) > 0.7) { el.style.backgroundColor='transparent'; el.removeAttribute('bgcolor'); }
+        }
+      });
+    })();</script>
+    """
 }
 
 // MARK: - 记忆卡首页：牌组列表 / 学习 / 浏览
@@ -123,7 +156,7 @@ struct CardsHomeView: View {
                             Text("").frame(width: 150)
                         }
                     } footer: {
-                        Text("每天最多学 \(CardSettings.newPerDay) 张新卡、复习 \(CardSettings.reviewsPerDay) 张（在“设置 → 记忆卡”修改）。")
+                        Text("未单独设置的牌组：每天最多学 \(CardSettings.newPerDay) 张新卡、复习 \(CardSettings.reviewsPerDay) 张（“设置 → 记忆卡”）。右键牌组可设置它自己的上限与算法。")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -135,7 +168,22 @@ struct CardsHomeView: View {
                 Button { store.newCard(deck: nil) } label: { Label("新建卡片", systemImage: "plus.rectangle.on.rectangle") }
                     .help("新建记忆卡")
                 Button { ExportService.importAnki(store: store) } label: { Label("导入 Anki", systemImage: "square.and.arrow.down") }
-                    .help("导入 Anki 牌组（.apkg，或“纯文本笔记”导出的 .txt）")
+                    .help("导入 Anki 牌组（.apkg / .colpkg，或“纯文本笔记”导出的 .txt）")
+                Button { store.apkgExport = ApkgExportRequest(allDecks: decks.map(\.name), decks: Set(decks.map(\.name))) } label: {
+                    Label("导出到 Anki", systemImage: "square.and.arrow.up")
+                }
+                .help("导出为 .apkg，在 AnkiMobile / AnkiDroid / Anki 桌面版里导入复习")
+                .disabled(decks.isEmpty)
+                Menu {
+                    let templates = store.noteTemplates.values.sorted { $0.name < $1.name }
+                    if templates.isEmpty { Text("没有多字段的笔记类型（从 Anki 导入后出现）") }
+                    ForEach(templates) { t in
+                        Button("\(t.name)（\(t.fieldNames.count) 个字段）…") { store.templateEditor = t }
+                    }
+                } label: {
+                    Label("卡片模板", systemImage: "rectangle.split.2x1")
+                }
+                .help("多字段卡片：设置正面、背面各显示哪些字段，哪些折叠")
             }
         }
         .alert("重命名牌组", isPresented: Binding(
@@ -157,7 +205,9 @@ struct CardsHomeView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(d.name).font(.headline)
-                Text("共 \(d.total) 张").font(.caption).foregroundStyle(.secondary)
+                let o = store.options(for: d.name)
+                Text("共 \(d.total) 张 · \(o.algorithm == .fsrs ? "FSRS \(Int((o.desiredRetention * 100).rounded()))%" : "SM-2") · 每天新卡 \(o.newPerDay ?? CardSettings.newPerDay)、复习 \(o.reviewsPerDay ?? CardSettings.reviewsPerDay)")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             count(d.counts.new, .blue)
@@ -181,6 +231,13 @@ struct CardsHomeView: View {
                 store.study.renameText = d.name
                 store.study.renamingDeck = d.name
             }
+            Button("牌组选项…") {
+                var o = (try? store.db.deckOptions())?[d.name] ?? DeckOptions(deck: d.name)
+                o.deck = d.name
+                store.deckOptionsEditor = o
+            }
+            Divider()
+            Button("导出到 Anki…") { store.apkgExport = ApkgExportRequest(allDecks: summaries.map(\.name), decks: [d.name]) }
         }
     }
 
@@ -201,7 +258,8 @@ struct StudyView: View {
             header
             Divider()
             if let card = study.current {
-                CardWebView(front: card.front, back: study.showingAnswer ? card.back : nil, store: store)
+                let f = store.faces(of: card)
+                CardWebView(front: f.front, back: study.showingAnswer ? f.back : nil, store: store)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
                 controls(card).padding()
@@ -241,6 +299,16 @@ struct StudyView: View {
             .font(.callout)
             Spacer()
             if let card = study.current {
+                if let deck = study.deck, store.options(for: deck).algorithm == .fsrs,
+                   let r = FSRS(parameters: CardSettings.fsrsParameters).currentRetrievability(card) {
+                    Text("记住概率约 \(Int((r * 100).rounded()))%")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .help("FSRS 估计此刻还记得这张卡的概率（稳定性 \(String(format: "%.1f", card.stability ?? 0)) 天，难度 \(String(format: "%.1f", card.difficulty ?? 0))）")
+                }
+                if card.highlightId != nil {
+                    Button { store.openHighlight(of: card) } label: { Label("原摘录", systemImage: "text.quote") }
+                        .help("打开这张卡对应的摘录（出处、按语、标签）")
+                }
                 Button { store.editCard(card) } label: { Label("编辑", systemImage: "pencil") }
                     .keyboardShortcut("e", modifiers: [])
                     .help("编辑这张卡（E）")
@@ -268,7 +336,7 @@ struct StudyView: View {
             .keyboardShortcut(.space, modifiers: [])
             .help("空格")
         } else {
-            let preview = CardScheduler().preview(card)
+            let preview = store.scheduler(forDeck: card.deck).preview(card, now: Date())
             HStack(spacing: 12) {
                 ForEach(CardAnswer.allCases, id: \.self) { a in
                     Button {
@@ -394,6 +462,9 @@ struct CardBrowseView: View {
     private func menu(for ids: [Int64], deckNames: [String]) -> some View {
         if ids.count == 1, let id = ids.first, let c = try? store.db.card(id: id) {
             Button("编辑…") { store.editCard(c) }
+            if c.highlightId != nil {
+                Button("查看原摘录…") { store.openHighlight(of: c) }
+            }
         }
         Button("暂停") { store.setSuspended(true, cards: ids) }
         Button("恢复") { store.setSuspended(false, cards: ids) }
@@ -438,6 +509,17 @@ struct CardEditorView: View {
                 set: { store.cardEditor?[keyPath: kp] = $0 })
     }
 
+    private func fieldBinding(_ i: Int) -> Binding<String> {
+        Binding(get: {
+            guard let f = store.cardEditor?.card.fields, i < f.count else { return "" }
+            return f[i]
+        }, set: { v in
+            guard var f = store.cardEditor?.card.fields, i < f.count else { return }
+            f[i] = v
+            store.cardEditor?.card.fields = f
+        })
+    }
+
     var body: some View {
         let draft = store.cardEditor
         let decks = (try? store.db.deckNames()) ?? []
@@ -459,6 +541,22 @@ struct CardEditorView: View {
             }
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
+                    if let c = draft?.card, let type = c.noteType, !c.fields.isEmpty {
+                        // 多字段卡片：逐个字段编辑，正反面由“卡片模板”决定
+                        let names = store.noteTemplates[type]?.fieldNames ?? []
+                        Text("笔记类型：\(type)").font(.caption).foregroundStyle(.secondary)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(Array(c.fields.indices), id: \.self) { i in
+                                    Text(i < names.count ? names[i] : "字段\(i + 1)").font(.headline)
+                                    TextEditor(text: fieldBinding(i))
+                                        .font(.system(size: 13))
+                                        .frame(minHeight: 70)
+                                        .border(Color.secondary.opacity(0.3))
+                                }
+                            }
+                        }
+                    } else {
                     Text("正面").font(.headline)
                     TextEditor(text: binding(\.card.front, ""))
                         .font(.system(size: 14))
@@ -467,6 +565,7 @@ struct CardEditorView: View {
                     TextEditor(text: binding(\.card.back, ""))
                         .font(.system(size: 14))
                         .border(Color.secondary.opacity(0.3))
+                    }
                     Text("支持 Markdown（**粗体**、*斜体*、列表、> 引用、`代码`）或直接写 HTML；图片可用 <img src=\"网址\">。")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -474,7 +573,8 @@ struct CardEditorView: View {
                 .frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("预览").font(.headline)
-                    CardWebView(front: draft?.card.front ?? "", back: draft?.card.back ?? "", store: store)
+                    let f: (front: String, back: String) = draft.map { store.faces(of: $0.card) } ?? (front: "", back: "")
+                    CardWebView(front: f.front, back: f.back, store: store)
                         .background(Color(nsColor: .textBackgroundColor))
                         .border(Color.secondary.opacity(0.3))
                 }
@@ -482,8 +582,16 @@ struct CardEditorView: View {
             }
             HStack {
                 if let c = draft?.card, c.id != nil {
-                    Text(c.state == .new ? "新卡" : "已复习 \(c.reps) 次，遗忘 \(c.lapses) 次，间隔 \(Int(c.interval)) 天")
+                    Text(c.state == .new ? "新卡" : "已复习 \(c.reps) 次，遗忘 \(c.lapses) 次，间隔 \(Int(c.interval)) 天"
+                         + (c.stability.map { "，FSRS 稳定性 \(String(format: "%.1f", $0)) 天" } ?? ""))
                         .font(.caption).foregroundStyle(.secondary)
+                    if c.highlightId != nil {
+                        Button("原摘录…") {
+                            store.cardEditor = nil
+                            store.openHighlight(of: c)
+                        }
+                        .controlSize(.small)
+                    }
                 }
                 Spacer()
                 Button("取消", role: .cancel) { store.cardEditor = nil }
@@ -491,7 +599,7 @@ struct CardEditorView: View {
                 Button("保存") { store.commitCardEditor() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
-                    .disabled((draft?.card.front ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled((draft?.card.fields.first ?? draft?.card.front ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)
@@ -513,7 +621,16 @@ struct CardImportPreviewView: View {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                     GridRow { Text("卡片"); Text("\(p.notes.count) 张").monospacedDigit() }
                     GridRow { Text("带复习进度"); Text("\(p.withSchedule) 张（沿用 Anki 的间隔与到期日）").monospacedDigit() }
-                    GridRow { Text("媒体文件"); Text("\(p.media.count) 个").monospacedDigit() }
+                    GridRow { Text("媒体文件"); Text("\(p.media.count) 个（只含卡片里用到的）").monospacedDigit() }
+                    if p.withMemory > 0 || p.usesFSRS {
+                        GridRow { Text("FSRS"); Text("\(p.withMemory) 张带记忆状态\(p.usesFSRS ? "；牌组沿用 Anki 的 FSRS 设置" : "")") }
+                    }
+                    if p.revlogCount > 0 {
+                        GridRow { Text("复习记录"); Text("\(p.revlogCount) 条（进入统计，可用来优化 FSRS 参数）").monospacedDigit() }
+                    }
+                    if !p.noteTypes.isEmpty {
+                        GridRow { Text("笔记类型"); Text(p.noteTypes.joined(separator: "、") + "（保留各字段，可设置正反面）").lineLimit(2) }
+                    }
                     GridRow { Text("牌组"); Text(p.decks.joined(separator: "、")).lineLimit(3) }
                 }
                 Text("示例").font(.headline)
@@ -528,7 +645,7 @@ struct CardImportPreviewView: View {
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                     }
                 }
-                Text("每条 Anki 笔记导入为一张卡（取第一张卡片的正反面；填空题合并为一张）。已导入过的笔记（同一 GUID）会跳过。导入前自动备份。")
+                Text("每条 Anki 笔记导入为一张卡（取第一张卡片；填空题合并为一张）。已导入过的笔记（同一 GUID）不会重复建卡，但会补上字段、记忆状态和复习记录。导入前自动备份。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
