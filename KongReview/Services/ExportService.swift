@@ -107,7 +107,7 @@ enum ExportService {
         panel.allowedContentTypes = types
         panel.allowsMultipleSelection = false
         panel.prompt = "导入"
-        panel.message = "选择 Anki 导出的牌组：.apkg（导出时勾选“支持旧版 Anki”），或“纯文本笔记”.txt"
+        panel.message = "选择 Anki 导出的牌组包 .apkg、集合包 .colpkg，或“纯文本笔记”.txt"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         store.importProgress = "正在读取 \(url.lastPathComponent)…"
         Task.detached(priority: .userInitiated) {

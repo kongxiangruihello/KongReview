@@ -600,3 +600,26 @@ final class V07CardTests: XCTestCase {
         XCTAssertEqual(notes[0].deck, "默认")
     }
 }
+
+final class ZstdTests: XCTestCase {
+    func testDecompressText() throws {
+        let z = Data(base64Encoded: "KLUv/WQOD6UDAAQG5a2m6ICM5pe25Lmg5LmL77yM5LiN5Lqm6K+05LmO77yB5pyJ5pyL6Ieq6L+c5pa55p2l5LmQVGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRsYXp5IGRvZy4gBQAWQfUjCAUeUEjwAOAxp1BQjeeswA==")!
+        XCTAssertTrue(Zstd.isZstd(z))
+        let d = try Zstd.decompress(z)
+        let expected = String(repeating: "学而时习之，不亦说乎！有朋自远方来，不亦乐乎！", count: 40)
+            + String(repeating: "The quick brown fox jumps over the lazy dog. ", count: 30)
+        XCTAssertEqual(String(decoding: d, as: UTF8.self), expected)
+    }
+
+    func testNotZstd() {
+        XCTAssertThrowsError(try Zstd.decompress(Data("hello".utf8)))
+    }
+
+    func testAnkiMediaMap() {
+        let pb = Data(base64Encoded: "KLUv/SAYwQAACgkKBWEuanBnEAUKCwoHYiBjLnBuZxAF")!
+        XCTAssertEqual(AnkiPackage.mediaMap(pb), ["0": "a.jpg", "1": "b c.png"])
+        XCTAssertEqual(AnkiPackage.mediaMap(Data(#"{"0":"x.png"}"#.utf8)), ["0": "x.png"])
+        let refs = AnkiPackage.mediaReferences(in: #"<img src="a.jpg"> <img src='b%20c.png'> [sound:s.mp3]"#)
+        XCTAssertTrue(refs.isSuperset(of: ["a.jpg", "b c.png", "s.mp3"]))
+    }
+}

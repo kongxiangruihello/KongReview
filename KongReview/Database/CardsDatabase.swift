@@ -170,11 +170,14 @@ extension AppDatabase {
 enum AnkiCollectionReader {
     enum ReadError: LocalizedError {
         case newFormatOnly
+        case newFormatUnreadable(String)
         case noCollection
         var errorDescription: String? {
             switch self {
             case .newFormatOnly:
                 return "这个 .apkg 是 Anki 新版压缩格式，暂时读不了。请在 Anki 导出时勾选“支持旧版 Anki（Support older Anki versions）”，或改用“纯文本笔记”导出。"
+            case .newFormatUnreadable(let detail):
+                return "读取 Anki 新格式的集合失败（\(detail)）。可以在 Anki 导出时勾选“支持旧版 Anki（Support older Anki versions）”再试。"
             case .noCollection:
                 return "文件里没有找到 Anki 集合数据，可能不是 .apkg 牌组文件。"
             }
@@ -184,10 +187,22 @@ enum AnkiCollectionReader {
     /// folder 为 .apkg 解压后的目录
     static func read(folder: URL, now: Date = Date()) throws -> (notes: [AnkiNote], media: [String: Data]) {
         let fm = FileManager.default
+        let c21b = folder.appendingPathComponent("collection.anki21b")
         let c21 = folder.appendingPathComponent("collection.anki21")
         let c2 = folder.appendingPathComponent("collection.anki2")
         let path: URL
-        if fm.fileExists(atPath: c21.path) { path = c21 }
+        if fm.fileExists(atPath: c21b.path) {
+            // 新格式：zstd 压缩的 SQLite，先解压成普通数据库文件再读
+            let unpacked = folder.appendingPathComponent("collection.kongreview.sqlite")
+            let packed = try Data(contentsOf: c21b)
+            do {
+                try Zstd.decompress(packed).write(to: unpacked)
+            } catch {
+                throw ReadError.newFormatUnreadable(error.localizedDescription)
+            }
+            path = unpacked
+        }
+        else if fm.fileExists(atPath: c21.path) { path = c21 }
         else if fm.fileExists(atPath: c2.path) { path = c2 }
         else { throw ReadError.noCollection }
 
@@ -213,6 +228,12 @@ enum AnkiCollectionReader {
                     if let d = v as? [String: Any], let name = d["name"] as? String, let id = Int64(k) {
                         deckNames[id] = name.replacingOccurrences(of: "\u{1f}", with: "::")
                     }
+                }
+            }
+            // schema 18（新格式）：笔记类型在 notetypes 表，config 为 protobuf，开头 08 01 表示 kind = 完形填空
+            if try db.tableExists("notetypes") {
+                for id in try Int64.fetchAll(db, sql: "SELECT id FROM notetypes WHERE hex(substr(config, 1, 2)) = '0801'") {
+                    clozeModels.insert(id)
                 }
             }
             if deckNames.isEmpty, try db.tableExists("decks") {
@@ -242,19 +263,23 @@ enum AnkiCollectionReader {
                                 deck: deckNames[did] ?? "Anki", guid: r["guid"], schedule: schedule)
             }
         }
-        // 新版导出：collection.anki21b 才是真数据，collection.anki2 里只有一条“请升级 Anki”的提示
-        if fm.fileExists(atPath: folder.appendingPathComponent("collection.anki21b").path),
-           notes.count <= 1, (notes.first?.front.lowercased().contains("update") ?? true) || (notes.first?.front.contains("升级") ?? false) {
+        // 万一读到的是新版包里那条“请升级 Anki”的占位笔记
+        if notes.count <= 1, let f = notes.first?.front,
+           f.contains("Anki"), f.contains("update") || f.contains("更新") || f.contains("升级") {
             throw ReadError.newFormatOnly
         }
 
-        // 媒体：media 文件为 JSON {"0": "a.jpg", ...}，实际文件名为 0、1、2…
+        // 媒体：只取笔记里真正引用到的文件（包里常有大量已不用的音频）
+        var wanted = Set<String>()
+        for n in notes {
+            wanted.formUnion(AnkiPackage.mediaReferences(in: n.front))
+            wanted.formUnion(AnkiPackage.mediaReferences(in: n.back))
+        }
         var media: [String: Data] = [:]
-        let mediaIndex = folder.appendingPathComponent("media")
-        if let data = try? Data(contentsOf: mediaIndex),
-           let map = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] {
-            for (num, name) in map {
-                if let d = try? Data(contentsOf: folder.appendingPathComponent(num)) { media[name] = d }
+        if !wanted.isEmpty, let index = try? Data(contentsOf: folder.appendingPathComponent("media")) {
+            for (file, name) in AnkiPackage.mediaMap(index) where wanted.contains(name) {
+                guard let d = try? Data(contentsOf: folder.appendingPathComponent(file)) else { continue }
+                media[name] = Zstd.isZstd(d) ? ((try? Zstd.decompress(d)) ?? d) : d
             }
         }
         return (notes, media)
