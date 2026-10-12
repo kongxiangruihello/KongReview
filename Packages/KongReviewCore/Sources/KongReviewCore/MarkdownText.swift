@@ -10,11 +10,14 @@ import Foundation
 /// - ``` 代码块 ``` → 等宽；`---` → 分隔线
 /// - 行内：**粗体**、*斜体*、`代码`、~~删除线~~、[链接](https://…)
 /// 换行与空行原样保留，纯文本看起来与以前完全一样。
+/// 夹在文字里的 HTML 标签先换成 Markdown（见 Markdown.markdown(fromHTMLFragments:)）。
 public enum MarkdownText {
 
     public static func attributed(_ source: String) -> AttributedString {
         var result = AttributedString()
-        let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        // 先把混在文字里的 HTML 标签（<h1>、<b>、<a href>…）换成 Markdown
+        let text = Markdown.markdown(fromHTMLFragments: source)
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var inCode = false
         var emitted = false
         for line in lines {

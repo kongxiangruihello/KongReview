@@ -146,4 +146,70 @@ public enum Markdown {
             .replacingOccurrences(of: "&amp;", with: "&")
         return ArticleText.normalize(t)
     }
+
+    // MARK: 混排的 HTML 片段 → Markdown
+
+    /// 文本里是否夹有 HTML 标签（`a < b` 这类不算）
+    public static func containsHTMLTag(_ s: String) -> Bool {
+        s.range(of: #"</?[a-zA-Z][a-zA-Z0-9]*(\s[^<>]*)?/?>"#, options: .regularExpression) != nil
+    }
+
+    /// 摘录里常混着从网页复制来的 HTML（<h1>、<b>、<a href>、<br>、<p>…），而 SwiftUI 的 Text 不认 HTML。
+    /// 这里把常见标签换成等价的 Markdown，其余标签去掉、实体解码，再交给 Markdown 显示：
+    /// 标题 <h1>–<h6> 与 <b>/<strong> → **粗体**；<i>/<em> → *斜体*；<code> → `代码`；
+    /// <a href> → [文字](网址)；<br>、</p>、</div>、</li> → 换行；<li> → “- ”；<blockquote> → “> ”；<hr> → ---
+    public static func markdown(fromHTMLFragments html: String) -> String {
+        guard containsHTMLTag(html) else { return html }
+        var t = html
+        let rules: [(String, String)] = [
+            (#"(?i)<br\s*/?>"#, "\n"),
+            (#"(?i)<hr\s*/?>"#, "\n---\n"),
+            (#"(?is)<(h[1-6])\b[^>]*>(.*?)</\1\s*>"#, "**$2**"),
+            (#"(?is)<(b|strong)\b[^>]*>(.*?)</\1\s*>"#, "**$2**"),
+            (#"(?is)<(i|em)\b[^>]*>(.*?)</\1\s*>"#, "*$2*"),
+            (#"(?is)<code\b[^>]*>(.*?)</code\s*>"#, "`$1`"),
+            (#"(?is)<a\b[^>]*?href\s*=\s*"([^"]+)"[^>]*>(.*?)</a\s*>"#, "[$2]($1)"),
+            (#"(?is)<a\b[^>]*?href\s*=\s*'([^']+)'[^>]*>(.*?)</a\s*>"#, "[$2]($1)"),
+            (#"(?i)<li\b[^>]*>"#, "\n- "),
+            (#"(?i)<blockquote\b[^>]*>"#, "\n> "),
+            (#"(?i)</li\s*>"#, ""),
+            (#"(?i)</(p|div|tr|blockquote|ul|ol|table|h[1-6])\s*>"#, "\n"),
+            (#"</?[a-zA-Z][a-zA-Z0-9]*(\s[^<>]*)?/?>"#, ""),
+        ]
+        for (pattern, template) in rules { t = replace(t, pattern, template) }
+        t = decodeEntities(t)
+        // 连续 3 个以上换行压成一个空行；去掉开头的空行
+        t = replace(t, #"\n[ \t]*\n([ \t]*\n)+"#, "\n\n")
+        while t.hasPrefix("\n") { t.removeFirst() }
+        while t.hasSuffix("\n") { t.removeLast() }
+        return t
+    }
+
+    static func decodeEntities(_ s: String) -> String {
+        var t = s.replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+        if let re = try? NSRegularExpression(pattern: #"&#(x?)([0-9a-fA-F]+);"#) {
+            let ns = t as NSString
+            var out = ""
+            var last = 0
+            for m in re.matches(in: t, range: NSRange(location: 0, length: ns.length)) {
+                out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+                let hex = m.range(at: 1).length > 0
+                let num = ns.substring(with: m.range(at: 2))
+                if let v = UInt32(num, radix: hex ? 16 : 10), let u = Unicode.Scalar(v) {
+                    out += String(Character(u))
+                } else {
+                    out += ns.substring(with: m.range)
+                }
+                last = m.range.location + m.range.length
+            }
+            out += ns.substring(from: last)
+            t = out
+        }
+        return t.replacingOccurrences(of: "&amp;", with: "&")
+    }
 }

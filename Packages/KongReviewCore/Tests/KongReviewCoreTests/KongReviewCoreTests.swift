@@ -641,3 +641,21 @@ final class MarkdownTextTests: XCTestCase {
     }
 }
 #endif
+
+final class HTMLFragmentTests: XCTestCase {
+    func testScreenshotCase() {
+        let src = "<h1>似乎没人介意</h1>。 <h1>我的朋友告诉我</h1>， 年长的使用者不会批评"
+        XCTAssertEqual(Markdown.markdown(fromHTMLFragments: src), "**似乎没人介意**。 **我的朋友告诉我**， 年长的使用者不会批评")
+    }
+
+    func testCommonTags() {
+        let src = #"<p>甲<b>乙</b><br>丙 <a href="https://x.org/a">链</a> &amp; &lt;t&gt; &#20013;</p><ul><li>一</li><li>二</li></ul>"#
+        XCTAssertEqual(Markdown.markdown(fromHTMLFragments: src), "甲**乙**\n丙 [链](https://x.org/a) & <t> 中\n\n- 一\n- 二")
+    }
+
+    func testPlainUntouched() {
+        let s = "a < b 且 c > d，**已是 Markdown**"
+        XCTAssertFalse(Markdown.containsHTMLTag(s))
+        XCTAssertEqual(Markdown.markdown(fromHTMLFragments: s), s)
+    }
+}
