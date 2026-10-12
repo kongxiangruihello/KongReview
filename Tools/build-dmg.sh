@@ -69,6 +69,11 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>© 孔祥瑞</string>
+  <key>NSAppleEventsUsageDescription</key><string>存档网页时读取浏览器当前标签页的网址，自动填入。</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key><true/>
+  </dict>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

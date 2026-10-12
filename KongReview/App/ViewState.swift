@@ -14,6 +14,63 @@ final class ReviewState {
     var theme: String?
     var cards: [ReviewCard] = []
     var position = 0
+    /// 正在写按语时的草稿（非 nil 表示编辑框打开；此时单键快捷键停用）
+    var noteDraft: String?
+    /// 当前这组回顾是哪一天的（跨日时据此刷新）
+    var day = ""
+}
+
+/// 记忆卡学习界面的状态
+@MainActor
+@Observable
+final class StudyState {
+    /// 正在学习的牌组（nil 显示牌组列表）
+    var deck: String?
+    /// 浏览模式（列出牌组内全部卡片）
+    var browsingDeck: String?
+    var current: Card?
+    var showingAnswer = false
+    var finished = false
+    var browseQuery = ""
+    var browseSelection: Set<Int64> = []
+    /// 最近用过的牌组（新建卡片时默认放这里）
+    var lastDeck: String?
+    /// 正在重命名的牌组与输入框文字
+    var renamingDeck: String?
+    var renameText = ""
+}
+
+/// 记忆卡编辑面板的草稿
+struct CardDraft: Identifiable {
+    let id = UUID()
+    var card: Card
+    var tagsText: String = ""
+    var isNew: Bool { card.id == nil }
+}
+
+/// 记忆卡设置
+enum CardSettings {
+    static let newPerDayKey = "cards.newPerDay"
+    static let reviewsPerDayKey = "cards.reviewsPerDay"
+    static var newPerDay: Int { (UserDefaults.standard.object(forKey: newPerDayKey) as? Int) ?? 20 }
+    static var reviewsPerDay: Int { (UserDefaults.standard.object(forKey: reviewsPerDayKey) as? Int) ?? 200 }
+}
+
+/// Anki 导入预览
+struct CardImportPreview: Identifiable {
+    let id = UUID()
+    var fileName: String
+    var notes: [AnkiNote]
+    var media: [String: Data]
+    var withSchedule: Int { notes.filter { $0.schedule != nil }.count }
+    var decks: [String] { Array(Set(notes.map(\.deck))).sorted() }
+}
+
+/// 网页存档正文编辑
+struct ArticleSourceDraft: Identifiable {
+    let id = UUID()
+    var articleId: Int64
+    var html: String
 }
 
 /// 摘录列表界面的状态
@@ -59,7 +116,7 @@ enum BatchAction {
     case addTags([String])
     case removeTags([String])
     case move(Int64?)
-    case addToMastery
+    case addToMastery   // 做成记忆卡
     case delete
 }
 

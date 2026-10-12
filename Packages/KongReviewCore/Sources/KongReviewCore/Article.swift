@@ -207,7 +207,7 @@ public enum ReaderPage {
           <div class="kg-meta">\(meta)</div>
           <div class="kg-meta"><a href="\(escapeAttribute(article.url))">\(escape(article.url))</a></div>
         </header>
-        <article id="kg-content">\(article.contentHTML)</article>
+        <article id="kg-content">\(ArticleImages.rewrite(article.contentHTML, base: article.url).html)</article>
         <script>\(WebScripts.reader)</script>
         </body></html>
         """
@@ -258,4 +258,77 @@ public enum ReaderPage {
 
 extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+// MARK: - 正文图片
+
+public enum ArticleImages {
+    /// 应用内图片地址的 scheme：阅读器通过它取图（先查本地缓存，没有再带合适的 Referer 下载）
+    public static let scheme = "kr-img"
+
+    /// 把正文里的 <img> 改写为 kr-img://img?u=原地址&r=文章地址：
+    /// - 懒加载图片：优先取 data-src / data-original / data-actualsrc / data-lazy-src
+    /// - 相对地址按文章网址补全；去掉 srcset，避免浏览器绕过改写直接去原站取图
+    public static func rewrite(_ html: String, base: String) -> (html: String, urls: [String]) {
+        guard let re = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: [.caseInsensitive]) else { return (html, []) }
+        let baseURL = URL(string: base)
+        let ns = html as NSString
+        var out = ""
+        var last = 0
+        var urls: [String] = []
+        for m in re.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            let tag = ns.substring(with: m.range)
+            var chosen: String?
+            for attr in ["data-src", "data-original", "data-actualsrc", "data-lazy-src", "src"] {
+                if let v = attribute(attr, in: tag), !v.isEmpty, !v.hasPrefix("data:"), !v.hasPrefix("\(scheme):") {
+                    chosen = v
+                    break
+                }
+            }
+            if let raw = chosen?.replacingOccurrences(of: "&amp;", with: "&"),
+               let abs = URL(string: raw, relativeTo: baseURL)?.absoluteURL,
+               let s = abs.scheme?.lowercased(), s == "http" || s == "https" {
+                urls.append(abs.absoluteString)
+                let alt = attribute("alt", in: tag).map { " alt=\"\($0)\"" } ?? ""
+                out += "<img src=\"\(proxied(abs.absoluteString, referer: base))\"\(alt) loading=\"lazy\">"
+            } else {
+                out += tag
+            }
+            last = m.range.location + m.range.length
+        }
+        out += ns.substring(from: last)
+        return (out, urls)
+    }
+
+    public static func proxied(_ url: String, referer: String) -> String {
+        var c = URLComponents()
+        c.scheme = scheme
+        c.host = "img"
+        c.queryItems = [URLQueryItem(name: "u", value: url), URLQueryItem(name: "r", value: referer)]
+        return (c.string ?? "").replacingOccurrences(of: "&", with: "&amp;")
+    }
+
+    /// 从 kr-img:// 地址取回原图地址与来源页
+    public static func parse(_ url: URL) -> (image: URL, referer: String?)? {
+        guard url.scheme == scheme, let c = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let u = c.queryItems?.first(where: { $0.name == "u" })?.value, let img = URL(string: u) else { return nil }
+        return (img, c.queryItems?.first(where: { $0.name == "r" })?.value)
+    }
+
+    static func attribute(_ name: String, in tag: String) -> String? {
+        let pattern = "\\s\(NSRegularExpression.escapedPattern(for: name))\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))"
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let m = re.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)) else { return nil }
+        for i in 2...4 {
+            if let r = Range(m.range(at: i), in: tag) { return String(tag[r]) }
+        }
+        return nil
+    }
+
+    /// 微信等站点拒绝外站 Referer、但允许空 Referer：这些图片下载时不带 Referer
+    public static func sendsReferer(for imageURL: URL) -> Bool {
+        let host = imageURL.host?.lowercased() ?? ""
+        return !(host.hasSuffix("qpic.cn") || host.hasSuffix("qlogo.cn") || host.hasSuffix("weixin.qq.com"))
+    }
 }

@@ -4,6 +4,7 @@ import KongReviewCore
 struct ContentView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         @Bindable var store = store
@@ -78,6 +79,15 @@ struct ContentView: View {
         .sheet(item: $store.pendingImport) { _ in
             ImportPreviewView()
         }
+        .sheet(item: $store.cardImport) { _ in
+            CardImportPreviewView()
+        }
+        .sheet(item: $store.cardEditor) { _ in
+            CardEditorView()
+        }
+        .sheet(item: $store.articleSourceDraft) { _ in
+            ArticleSourceEditorView()
+        }
         .alert("完成", isPresented: Binding(
             get: { store.infoMessage != nil },
             set: { if !$0 { store.infoMessage = nil } }
@@ -105,6 +115,7 @@ struct ContentView: View {
         .onAppear {
             // 让菜单栏、链接等 AppKit 代码在主窗口关闭后也能重新打开它
             WindowOpener.openMain = { openWindow(id: "main") }
+            WindowOpener.openSettingsAction = { openSettings() }
         }
         .alert("出错了", isPresented: Binding(
             get: { store.errorMessage != nil },
@@ -125,8 +136,10 @@ struct ContentView: View {
             HighlightListView(title: "全部摘录", filter: .init())
         case .favorites:
             HighlightListView(title: "收藏", filter: .init(favoritesOnly: true))
-        case .mastery:
-            HighlightListView(title: "记忆卡", filter: .init(masteryOnly: true))
+        case .cards:
+            CardsHomeView()
+        case .stats:
+            StatsView()
         case .unsorted:
             HighlightListView(title: "未归类", filter: .init(unsortedOnly: true))
         case .trash:
@@ -157,7 +170,15 @@ struct SidebarView: View {
                 Label("今日回顾", systemImage: "sun.max").tag(SidebarItem.review)
                 Label("全部摘录", systemImage: "text.quote").tag(SidebarItem.all)
                 Label("收藏", systemImage: "star").tag(SidebarItem.favorites)
-                Label("记忆卡", systemImage: "brain").tag(SidebarItem.mastery)
+                HStack {
+                    Label("记忆卡", systemImage: "brain")
+                    Spacer()
+                    if store.cardCount > 0 {
+                        Text("\(store.cardCount)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                .tag(SidebarItem.cards)
+                Label("回顾统计", systemImage: "chart.bar.xaxis").tag(SidebarItem.stats)
                 Label("未归类", systemImage: "tray").tag(SidebarItem.unsorted)
                 HStack {
                     Label("网页存档", systemImage: "globe")
@@ -178,7 +199,8 @@ struct SidebarView: View {
                 .tag(SidebarItem.trash)
             }
 
-            Section {
+            // 出处默认折叠（点“出处”标题旁的箭头展开；记住上次状态）
+            Section(isExpanded: Bindable(store).sourcesExpanded) {
                 ForEach(store.sources) { source in
                     if let id = source.id {
                         HStack {
@@ -247,6 +269,7 @@ struct SidebarView: View {
         case .article: return "doc.text"
         case .web: return "globe"
         case .pdf: return "doc.richtext"
+        case .ai: return "sparkles"
         case .other: return "square.stack"
         }
     }

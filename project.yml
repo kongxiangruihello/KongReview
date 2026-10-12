@@ -14,7 +14,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.6.0"
+    MARKETING_VERSION: "0.7.0"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""          # 在 Xcode 的 Signing & Capabilities 里选自己的 Team
 
@@ -44,11 +44,15 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.kongxiangrui.KongReview
             CFBundleURLSchemes: [kongreview, kongglean]   # kongglean：改名前的旧链接
+        NSAppleEventsUsageDescription: 存档网页时读取浏览器当前标签页的网址，自动填入。
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true    # 网页存档里有不少 http 图片
     entitlements:
       path: KongReview/KongReview.entitlements
       properties:
         # 个人自用，不开沙盒：与 DMG 版（Tools/build-dmg.sh）共用同一个数据目录
         com.apple.security.app-sandbox: false
+        com.apple.security.automation.apple-events: true   # 读取浏览器当前网址（开启 Hardened Runtime 时需要）
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kongxiangrui.KongReview

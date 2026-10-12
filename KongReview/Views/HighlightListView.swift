@@ -200,7 +200,7 @@ struct BatchMenu: View {
             Divider()
             Button("收藏") { store.batch(.favorite(true), ids: ids) }
             Button("取消收藏") { store.batch(.favorite(false), ids: ids) }
-            Button("加入记忆卡") { store.batch(.addToMastery, ids: ids) }
+            Button("做成记忆卡") { store.batch(.addToMastery, ids: ids) }
             Button("弃置（不再出现在回顾中）") { store.batch(.discard(true), ids: ids) }
             Button("取消弃置") { store.batch(.discard(false), ids: ids) }
             Divider()
@@ -210,20 +210,21 @@ struct BatchMenu: View {
 }
 
 struct HighlightRow: View {
+    @Environment(LibraryStore.self) private var store
     let highlight: Highlight
     let source: Source?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(highlight.text)
+            Text(RichText.attributed(highlight.text))
                 .font(.system(.body, design: .serif))
                 .lineLimit(6)
                 .textSelection(.enabled)
             if let t = highlight.translation {
-                Text("译：\(t)").font(.callout).foregroundStyle(.secondary).lineLimit(3)
+                Text(RichText.attributed("译：" + t)).font(.callout).foregroundStyle(.secondary).lineLimit(3)
             }
             if let n = highlight.note {
-                Text("按：\(n)").font(.callout).foregroundStyle(.blue).lineLimit(3)
+                Text(RichText.attributed("按：" + n)).font(.callout).foregroundStyle(.blue).lineLimit(3)
             }
             HStack(spacing: 8) {
                 let cite = CitationFormatter.citation(for: highlight, source: source, style: CitationSettings.style)
@@ -235,7 +236,9 @@ struct HighlightRow: View {
                 }
                 Spacer()
                 if highlight.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
-                if highlight.isInMastery { Image(systemName: "brain").foregroundStyle(.purple) }
+                if let id = highlight.id, store.cardHighlightIDs.contains(id) {
+                    Image(systemName: "brain").foregroundStyle(.purple).help("已做成记忆卡")
+                }
             }
         }
         .padding(.vertical, 4)
@@ -246,7 +249,6 @@ struct HighlightRow: View {
 struct HighlightMenu: View {
     @Environment(LibraryStore.self) private var store
     let highlight: Highlight
-    private let scheduler = ReviewScheduler()
 
     var body: some View {
         if highlight.isDeleted {
@@ -269,10 +271,13 @@ struct HighlightMenu: View {
             h.isFavorite.toggle()
             store.save(h)
         }
-        Button(highlight.isInMastery ? "移出记忆卡" : "加入记忆卡") {
-            store.save(highlight.isInMastery
-                       ? scheduler.removeFromMastery(highlight)
-                       : scheduler.addToMastery(highlight))
+        if let id = highlight.id, store.cardHighlightIDs.contains(id) {
+            Button("查看记忆卡") {
+                store.selection = .cards
+                if let c = try? store.db.cards().first(where: { $0.highlightId == id }) { store.editCard(c) }
+            }
+        } else {
+            Button("做成记忆卡") { store.makeCard(from: highlight) }
         }
         if highlight.isDiscarded {
             Button("恢复（取消弃置）") {

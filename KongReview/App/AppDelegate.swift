@@ -21,6 +21,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyCenter.shared.apply(HotKeyPreset.current)
         StatusItemController.shared.apply()
         QuickCaptureController.shared.store?.runStartupMaintenance()
+
+        // 提醒与“今天是否已回顾”挂钩：首次回顾后、跨日时重排通知
+        QuickCaptureController.shared.store?.onReviewedToday = {
+            ReminderScheduler.shared.applySavedSettings()
+        }
+        ReminderScheduler.shared.applySavedSettings()
+
+        // 跨日（含睡眠唤醒后跨了日）与回到前台时检查日期：回顾换新、统计与提醒刷新
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }
+        }
+        nc.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }
+        }
+        // 兜底：每 10 分钟查一次（有些情况下系统不发跨日通知）
+        Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in
+            MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }
+        }
+        BrowserWatcher.shared.start()
     }
 
     /// 关掉主窗口后应用继续在后台运行（快捷键、菜单栏图标仍可用）
@@ -54,6 +77,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum WindowOpener {
     /// 由 SwiftUI 视图在出现时登记（包装 openWindow(id: "main")）
     static var openMain: (() -> Void)?
+    /// 由 SwiftUI 视图登记（包装 @Environment(\.openSettings)）
+    static var openSettingsAction: (() -> Void)?
+
+    /// 打开设置窗口。
+    /// macOS 14 起，旧办法 NSApp.sendAction("showSettingsWindow:") 已失效（系统只在日志里提示改用 SettingsLink / openSettings），
+    /// 所以 0.6 菜单栏里的“设置…”点了没反应。现在优先调用 SwiftUI 的 openSettings；
+    /// 主窗口从没打开过时，退而求其次去点应用菜单里的“设置…”菜单项。
+    static func openSettings() {
+        NSApp.activate()
+        if let action = openSettingsAction {
+            action()
+        } else if let appMenu = NSApp.mainMenu?.items.first?.submenu,
+                  let index = appMenu.items.firstIndex(where: { $0.keyEquivalent == "," && $0.keyEquivalentModifierMask == .command }) {
+            appMenu.performActionForItem(at: index)
+        }
+        // 设置窗口有时开在其他窗口后面：稍后把它提到最前
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            NSApp.activate()
+            let settings = NSApp.windows.first(where: {
+                $0.identifier?.rawValue.contains("Settings") == true || $0.title.contains("设置")
+            })
+            settings?.makeKeyAndOrderFront(nil)
+        }
+    }
 
     static func showMain() {
         NSApp.activate()

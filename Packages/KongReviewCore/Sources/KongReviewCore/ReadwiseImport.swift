@@ -4,11 +4,11 @@ import Foundation
 
 public enum CSV {
     /// 按 UTF-8 字节解析，3 万行、30 MB 级别的文件在一两秒内完成。
-    public static func parse(_ text: String) -> [[String]] {
+    public static func parse(_ text: String, separator: Character = ",") -> [[String]] {
         var bytes = Array(text.utf8)
         if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { bytes.removeFirst(3) }
 
-        let quote: UInt8 = 0x22, comma: UInt8 = 0x2C, cr: UInt8 = 0x0D, lf: UInt8 = 0x0A
+        let quote: UInt8 = 0x22, comma: UInt8 = separator.asciiValue ?? 0x2C, cr: UInt8 = 0x0D, lf: UInt8 = 0x0A
         var rows: [[String]] = []
         var row: [String] = []
         var field: [UInt8] = []

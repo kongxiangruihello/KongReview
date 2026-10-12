@@ -95,4 +95,62 @@ enum ExportService {
             store.report(error)
         }
     }
+
+    // MARK: Anki 导入
+
+    /// 选择 .apkg 或 Anki“纯文本笔记”导出的 .txt，解析后交给预览面板确认
+    static func importAnki(store: LibraryStore) {
+        let panel = NSOpenPanel()
+        var types: [UTType] = [.plainText, .tabSeparatedText, .commaSeparatedText]
+        if let apkg = UTType(filenameExtension: "apkg") { types.insert(apkg, at: 0) }
+        if let colpkg = UTType(filenameExtension: "colpkg") { types.insert(colpkg, at: 1) }
+        panel.allowedContentTypes = types
+        panel.allowsMultipleSelection = false
+        panel.prompt = "导入"
+        panel.message = "选择 Anki 导出的牌组：.apkg（导出时勾选“支持旧版 Anki”），或“纯文本笔记”.txt"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.importProgress = "正在读取 \(url.lastPathComponent)…"
+        Task.detached(priority: .userInitiated) {
+            let outcome: Swift.Result<CardImportPreview, Error>
+            do {
+                outcome = .success(try ExportService.readAnki(url))
+            } catch {
+                outcome = .failure(error)
+            }
+            await MainActor.run {
+                store.importProgress = nil
+                switch outcome {
+                case .success(let p): store.cardImport = p
+                case .failure(let e): store.report(e)
+                }
+            }
+        }
+    }
+
+    nonisolated static func readAnki(_ url: URL) throws -> CardImportPreview {
+        let ext = url.pathExtension.lowercased()
+        if ext == "apkg" || ext == "colpkg" {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("kr-anki-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            // .apkg 就是 zip 包；用系统自带的 ditto 解压
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            p.arguments = ["-x", "-k", url.path, tmp.path]
+            try p.run()
+            p.waitUntilExit()
+            guard p.terminationStatus == 0 else { throw ImportFileError("解压失败：这个文件可能不是有效的 Anki 牌组。") }
+            let r = try AnkiCollectionReader.read(folder: tmp)
+            guard !r.notes.isEmpty else { throw ImportFileError("牌组里没有笔记。") }
+            return CardImportPreview(fileName: url.lastPathComponent, notes: r.notes, media: r.media)
+        }
+        let data = try Data(contentsOf: url)
+        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) else {
+            throw ImportFileError("无法读取文件编码（应为 UTF-8）。")
+        }
+        let parsed = try AnkiTextImporter.parse(text)
+        let notes = AnkiNote.from(parsed, defaultDeck: url.deletingPathExtension().lastPathComponent)
+        guard !notes.isEmpty else { throw ImportFileError("文件里没有可导入的笔记。") }
+        return CardImportPreview(fileName: url.lastPathComponent, notes: notes, media: [:])
+    }
 }

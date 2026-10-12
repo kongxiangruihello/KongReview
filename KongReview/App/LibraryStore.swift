@@ -7,7 +7,8 @@ enum SidebarItem: Hashable {
     case review
     case all
     case favorites
-    case mastery
+    case cards
+    case stats
     case unsorted
     case trash
     case articles
@@ -67,6 +68,22 @@ final class LibraryStore {
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
     let review = ReviewState()
     let list = ListState()
+    let study = StudyState()
+
+    /// 侧边栏“出处”分组是否展开（默认折叠，记住上次状态）
+    var sourcesExpanded: Bool = UserDefaults.standard.bool(forKey: "sidebar.sourcesExpanded") {
+        didSet { UserDefaults.standard.set(sourcesExpanded, forKey: "sidebar.sourcesExpanded") }
+    }
+    /// 当前日期（yyyy-MM-dd）；跨日时更新，回顾页据此换新
+    var today: String = ReminderPlan.dayKey(Date())
+    /// 已做成记忆卡的摘录
+    var cardHighlightIDs: Set<Int64> = []
+    var cardCount = 0
+    var cardImport: CardImportPreview?
+    var cardEditor: CardDraft?
+    var articleSourceDraft: ArticleSourceDraft?
+    /// 今天是否已回顾（决定是否还要提醒）
+    var reviewedToday = false
 
     /// 每次写入后递增，列表视图据此重新查询
     private(set) var revision = 0
@@ -84,6 +101,9 @@ final class LibraryStore {
             tags = try db.allTags()
             trashCount = try db.trashCount()
             articleCount = try db.articleCount()
+            cardHighlightIDs = try db.cardHighlightIDs()
+            cardCount = try db.cards().count
+            reviewedToday = try db.reviewedToday()
             revision += 1
         } catch {
             report(error)
@@ -205,9 +225,9 @@ final class LibraryStore {
             case .move(let sourceId):
                 try db.modifyHighlights(ids: ids) { $0.sourceId = sourceId }
             case .addToMastery:
-                try db.modifyHighlights(ids: ids) { h in
-                    if !h.isInMastery { h = scheduler.addToMastery(h) }
-                }
+                _ = scheduler
+                let n = try db.makeCards(fromHighlights: ids, style: CitationSettings.style)
+                infoMessage = n > 0 ? "已做成 \(n) 张记忆卡（牌组“摘录”）。" : "所选摘录都已经有记忆卡了。"
             case .delete:
                 let now = Date()
                 try db.modifyHighlights(ids: ids) { $0.deletedAt = now }
@@ -301,6 +321,160 @@ final class LibraryStore {
 
     func revisionBump() { revision += 1 }
 
+    // MARK: 回顾日志与提醒
+
+    /// 记一次回顾动作；当天第一次回顾时取消今天的提醒
+    func logReview(_ kind: ReviewEvent.Kind, highlightId: Int64? = nil) {
+        db.log(ReviewEvent(kind: kind, highlightId: highlightId))
+        if kind != .note && !reviewedToday {
+            reviewedToday = true
+            onReviewedToday?()
+        }
+    }
+
+    /// 由提醒模块设置：今天首次回顾后调用（重排提醒，跳过今天）
+    var onReviewedToday: (() -> Void)?
+
+    /// 跨日检查：日期变了就刷新（回顾换新、统计、提醒）
+    func checkDayChange() {
+        let key = ReminderPlan.dayKey(Date())
+        guard key != today else { return }
+        today = key
+        reload()
+        onReviewedToday?()
+    }
+
+    // MARK: 记忆卡
+
+    /// 单条摘录做成记忆卡（牌组“摘录”）；不弹提示，界面上的脑形图标会变色
+    func makeCard(from highlight: Highlight) {
+        guard let id = highlight.id else { return }
+        perform { _ = try db.makeCards(fromHighlights: [id], style: CitationSettings.style) }
+    }
+
+    /// 回顾页顶部提示：所有牌组今天待学的卡片数
+    func dueCardCount() -> Int {
+        let s = (try? db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
+                                       reviewsPerDay: CardSettings.reviewsPerDay)) ?? []
+        return s.reduce(0) { $0 + $1.counts.total }
+    }
+
+    func deleteCards(_ ids: [Int64]) {
+        perform { try db.deleteCards(ids) }
+    }
+
+    func saveCard(_ card: Card) {
+        perform { _ = try db.save(card) }
+    }
+
+    func editCard(_ card: Card) {
+        cardEditor = CardDraft(card: card, tagsText: TagParser.format(card.tags))
+    }
+
+    func newCard(deck: String?) {
+        cardEditor = CardDraft(card: Card(deck: deck ?? study.lastDeck ?? "默认", front: ""))
+    }
+
+    /// 保存卡片编辑面板；若正在学习的就是这张卡，同步刷新
+    func commitCardEditor() {
+        guard var d = cardEditor else { return }
+        d.card.front = d.card.front.trimmingCharacters(in: .whitespacesAndNewlines)
+        d.card.back = d.card.back.trimmingCharacters(in: .whitespacesAndNewlines)
+        d.card.deck = d.card.deck.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "默认"
+        d.card.tags = TagParser.parse(d.tagsText)
+        d.card.updatedAt = Date()
+        guard !d.card.front.isEmpty else { return }
+        do {
+            let saved = try db.save(d.card)
+            study.lastDeck = saved.deck
+            if study.current?.id == saved.id { study.current = saved }
+            cardEditor = nil
+            reload()
+        } catch {
+            report(error)
+        }
+    }
+
+    /// 暂停 / 恢复
+    func setSuspended(_ on: Bool, cards ids: [Int64]) {
+        perform {
+            for id in ids {
+                if var c = try db.card(id: id) { c.isSuspended = on; c.updatedAt = Date(); _ = try db.save(c) }
+            }
+        }
+    }
+
+    func moveCards(_ ids: [Int64], toDeck deck: String) {
+        perform {
+            for id in ids {
+                if var c = try db.card(id: id) { c.deck = deck; c.updatedAt = Date(); _ = try db.save(c) }
+            }
+        }
+    }
+
+    func renameDeck(_ old: String, to new: String) {
+        let name = new.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != old else { return }
+        perform { try db.renameDeck(old, to: name) }
+    }
+
+    func startStudy(deck: String) {
+        study.deck = deck
+        study.lastDeck = deck
+        study.browsingDeck = nil
+        nextCard()
+    }
+
+    /// 学习：取下一张
+    func nextCard(now: Date = Date()) {
+        guard let deck = study.deck else { return }
+        let cards = (try? db.cards(deck: deck)) ?? []
+        let done = (try? db.studiedToday(now: now)) ?? (new: 0, review: 0)
+        study.current = StudyQueue.next(from: cards, now: now,
+                                        newLimitLeft: CardSettings.newPerDay - done.new,
+                                        reviewLimitLeft: CardSettings.reviewsPerDay - done.review)
+        study.showingAnswer = false
+        study.finished = study.current == nil
+    }
+
+    func answerCurrent(_ a: CardAnswer) {
+        guard let c = study.current else { return }
+        do {
+            _ = try db.answer(c, a)
+            if !reviewedToday { reviewedToday = true; onReviewedToday?() }
+        } catch {
+            report(error)
+        }
+        nextCard()
+        revisionBump()
+    }
+
+    func confirmCardImport() {
+        guard let p = cardImport else { return }
+        do {
+            try BackupService.backupNow(db: db)
+            let r = try db.importAnki(p.notes, media: p.media)
+            var lines = ["导入 \(r.imported) 张记忆卡。"]
+            if r.duplicates > 0 { lines.append("跳过已导入过的 \(r.duplicates) 张。") }
+            if r.media > 0 { lines.append("图片等媒体文件 \(r.media) 个。") }
+            lines.append("牌组：" + r.decks.joined(separator: "、"))
+            lines.append("导入前的数据已自动备份。")
+            infoMessage = lines.joined(separator: "\n")
+            cardImport = nil
+            reload()
+            selection = .cards
+        } catch {
+            report(error)
+        }
+    }
+
+    func saveArticleSource() {
+        guard let d = articleSourceDraft else { return }
+        perform { try db.updateArticleContent(id: d.articleId, html: d.html) }
+        if openArticle?.id == d.articleId { openArticle = try? db.article(id: d.articleId) }
+        articleSourceDraft = nil
+    }
+
     /// 启动时的例行维护：清除过期的“最近删除”，并做当天的自动备份
     func runStartupMaintenance() {
         perform { try db.purgeTrash(olderThan: TrashPolicy.cutoff(now: Date())) }
@@ -386,6 +560,8 @@ struct AddArticleDraft: Identifiable {
     let id = UUID()
     var urlText = ""
     var error: String?
+    /// 网址从哪里自动填入的（浏览器当前页 / 剪贴板）
+    var hint: String?
 }
 
 /// Readwise 导入预览

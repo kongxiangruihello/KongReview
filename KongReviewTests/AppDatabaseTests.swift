@@ -357,3 +357,97 @@ final class RenameMigrationTests: XCTestCase {
     d.removePersistentDomain(forName: suite)
   }
 }
+
+final class V07DatabaseTests: XCTestCase {
+  func makeFakeApkgFolder(withNewFormat: Bool = false) throws -> URL {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("apkg-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let q = try DatabaseQueue(path: dir.appendingPathComponent("collection.anki2").path)
+    try q.write { db in
+      try db.execute(sql: "CREATE TABLE col (id integer primary key, crt integer, models text, decks text)")
+      try db.execute(sql: "CREATE TABLE notes (id integer primary key, guid text, mid integer, flds text, tags text)")
+      try db.execute(sql: "CREATE TABLE cards (id integer primary key, nid integer, did integer, ord integer, type integer, queue integer, due integer, ivl integer, factor integer, reps integer, lapses integer)")
+      let models = #"{"111": {"name": "Basic", "type": 0}, "222": {"name": "Cloze", "type": 1}}"#
+      let decks = #"{"1": {"name": "Default"}, "5": {"name": "论语\u001f学而"}}"#
+      try db.execute(sql: "INSERT INTO col VALUES (1, 1600000000, ?, ?)", arguments: [models, decks])
+      if withNewFormat {
+        try db.execute(sql: "INSERT INTO notes VALUES (1, 'x', 111, 'Please update to the latest Anki version\u{1f}', '')")
+        try db.execute(sql: "INSERT INTO cards VALUES (1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0)")
+      } else {
+        try db.execute(sql: "INSERT INTO notes VALUES (1, 'g1', 111, ?, ' 论语 经部 ')", arguments: ["学而时习之<img src=\"a.jpg\">\u{1f}学了按时温习[sound:x.mp3]"])
+        try db.execute(sql: "INSERT INTO notes VALUES (2, 'g2', 222, ?, '')", arguments: ["{{c1::克己复礼}}为仁\u{1f}颜渊"])
+        try db.execute(sql: "INSERT INTO cards VALUES (10, 1, 5, 0, 2, 2, 100, 15, 2300, 6, 1)")
+        try db.execute(sql: "INSERT INTO cards VALUES (11, 1, 5, 1, 0, 0, 1, 0, 0, 0, 0)")  // 反向卡，忽略
+        try db.execute(sql: "INSERT INTO cards VALUES (20, 2, 1, 0, 0, 0, 2, 0, 0, 0, 0)")
+      }
+    }
+    try q.close()
+    if withNewFormat { FileManager.default.createFile(atPath: dir.appendingPathComponent("collection.anki21b").path, contents: Data([1, 2])) }
+    try Data(#"{"0": "a.jpg"}"#.utf8).write(to: dir.appendingPathComponent("media"))
+    try Data([0xFF, 0xD8, 0xFF]).write(to: dir.appendingPathComponent("0"))
+    return dir
+  }
+
+  func testApkgReadAndImport() throws {
+    let folder = try makeFakeApkgFolder()
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let (notes, media) = try AnkiCollectionReader.read(folder: folder, now: now)
+    XCTAssertEqual(notes.count, 2)
+    XCTAssertEqual(notes[0].front, #"学而时习之<img src="a.jpg">"#)
+    XCTAssertEqual(notes[0].back, "学了按时温习")
+    XCTAssertEqual(notes[0].deck, "论语::学而")
+    XCTAssertEqual(notes[0].tags, ["论语", "经部"])
+    XCTAssertEqual(notes[0].schedule?.state, .review)
+    XCTAssertEqual(notes[0].schedule?.interval, 15)
+    XCTAssertEqual(notes[1].front, #"<span class="cloze">[…]</span>为仁"#)
+    XCTAssertNil(notes[1].schedule)
+    XCTAssertEqual(media["a.jpg"], Data([0xFF, 0xD8, 0xFF]))
+
+    let db = try AppDatabase(DatabaseQueue())
+    let r1 = try db.importAnki(notes, media: media, now: now)
+    XCTAssertEqual(r1.imported, 2); XCTAssertEqual(r1.media, 1); XCTAssertEqual(r1.decks, ["Default", "论语::学而"])
+    XCTAssertEqual(try db.importAnki(notes, media: media, now: now).duplicates, 2)
+    XCTAssertEqual(try db.media(named: "a.jpg"), Data([0xFF, 0xD8, 0xFF]))
+    let review = try db.cards(deck: "论语::学而")[0]
+    XCTAssertEqual(review.ease, 2.3); XCTAssertEqual(review.reps, 6)
+    XCTAssertThrowsError(try AnkiCollectionReader.read(folder: makeFakeApkgFolder(withNewFormat: true)))
+  }
+
+  func testCardsStudyLogAndStats() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let s = try db.save(Source(title: "论语译注", author: "杨伯峻"))
+    let h1 = try db.save(Highlight(sourceId: s.id, text: "学而时习之", note: "开篇"))
+    let h2 = try db.save(Highlight(sourceId: s.id, text: "温故而知新"))
+    XCTAssertEqual(try db.makeCards(fromHighlights: [h1.id!, h2.id!]), 2)
+    XCTAssertEqual(try db.makeCards(fromHighlights: [h1.id!]), 0, "no duplicate cards per highlight")
+    XCTAssertEqual(try db.cardHighlightIDs(), [h1.id!, h2.id!])
+    let now = Date()
+    var decks = try db.deckSummaries(now: now, newPerDay: 20, reviewsPerDay: 200)
+    XCTAssertEqual(decks.map(\.name), ["摘录"]); XCTAssertEqual(decks[0].counts.new, 2)
+    let c = try db.cards(deck: "摘录").first { $0.highlightId == h1.id }!
+    XCTAssertTrue(c.back.contains("按：开篇"))
+    _ = try db.answer(c, .good, now: now)
+    XCTAssertEqual(try db.studiedToday(now: now).new, 1)
+    decks = try db.deckSummaries(now: now, newPerDay: 1, reviewsPerDay: 200)
+    XCTAssertEqual(decks[0].counts.new, 0, "daily new limit reached")
+    XCTAssertTrue(try db.reviewedToday(now: now))
+    db.log(ReviewEvent(kind: .keep, highlightId: h2.id, at: now))
+    let sum = ReviewStats.summarize(try db.events(), now: now)
+    XCTAssertEqual(sum.today.cards, 1); XCTAssertEqual(sum.today.highlights, 1)
+    try db.renameDeck("摘录", to: "论语")
+    XCTAssertEqual(try db.deckNames(), ["论语"])
+    try db.deleteCards([c.id!])
+    XCTAssertEqual(try db.cards().count, 1)
+  }
+
+  func testImageCacheAndArticleEdit() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    XCTAssertNil(try db.cachedImage("https://a.cn/x.png"))
+    db.cacheImage("https://a.cn/x.png", data: Data([1, 2, 3]), mime: "image/png")
+    XCTAssertEqual(try db.cachedImage("https://a.cn/x.png")?.mime, "image/png")
+    let a = try db.saveArticle(Article(url: "https://a.cn/1", title: "t", contentHTML: "<p>旧</p>", contentText: "旧", wordCount: 1))
+    try db.updateArticleContent(id: a.id!, html: "<p>新的正文</p><p>第二段</p>")
+    let b = try db.article(id: a.id!)!
+    XCTAssertEqual(b.contentText, "新的正文\n第二段"); XCTAssertEqual(b.wordCount, 7)
+  }
+}

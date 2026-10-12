@@ -73,7 +73,8 @@ private struct QuickCaptureSettings: View {
 
 private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
-    @AppStorage(SettingsKeys.masteryLimit) private var masteryLimit = 5
+    @AppStorage(CardSettings.newPerDayKey) private var newPerDay = 20
+    @AppStorage(CardSettings.reviewsPerDayKey) private var reviewsPerDay = 200
     @AppStorage(SettingsKeys.reminderEnabled) private var reminderEnabled = false
     @AppStorage(SettingsKeys.reminderHour) private var hour = 8
     @AppStorage(SettingsKeys.reminderMinute) private var minute = 0
@@ -81,13 +82,24 @@ private struct ReviewSettings: View {
     var body: some View {
         Form {
             Stepper("每日回顾条数：\(dailyCount)", value: $dailyCount, in: 3...50)
-            Stepper("每日记忆卡上限：\(masteryLimit)", value: $masteryLimit, in: 0...50)
             Text("改动从明天（或点“再抽一组”）开始生效。")
                 .font(.caption).foregroundStyle(.secondary)
 
-            Toggle("每日提醒", isOn: $reminderEnabled)
-            DatePicker("提醒时间", selection: timeBinding, displayedComponents: .hourAndMinute)
-                .disabled(!reminderEnabled)
+            Section("记忆卡（仿 Anki）") {
+                Stepper("每天新卡上限：\(newPerDay)", value: $newPerDay, in: 0...500, step: 5)
+                Stepper("每天复习上限：\(reviewsPerDay)", value: $reviewsPerDay, in: 10...9999, step: 10)
+                Text("排程与 Anki 默认设置一致（SM-2）：学习步长 1 分钟、10 分钟；毕业间隔 1 天，简单 4 天；起始难度系数 250%。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("提醒") {
+                Toggle("每日提醒", isOn: $reminderEnabled)
+                DatePicker("提醒时间", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    .disabled(!reminderEnabled)
+                Text("当天已经回顾过（每日回顾看过一条，或复习过一张记忆卡），就不再提醒。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .onChange(of: reminderEnabled) { ReminderScheduler.shared.applySavedSettings() }

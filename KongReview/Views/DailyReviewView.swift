@@ -1,22 +1,28 @@
 import SwiftUI
 import KongReviewCore
 
-/// 每日回顾：一次一张卡片。同一天内重开应用会回到同一组、同一位置。
+/// 每日回顾：一次一张卡片。同一天内重开应用会回到同一组、同一位置；跨日自动换新。
+///
+/// 快捷键：下一条 空格 / → / J；上一条 ← / K；写按语 N；做成记忆卡 M；收藏 F；弃置 Delete；编辑 E。
+/// 写按语时单键快捷键全部停用，以免打字被当成命令。
 struct DailyReviewView: View {
     @Environment(LibraryStore.self) private var store
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
-    @AppStorage(SettingsKeys.masteryLimit) private var masteryLimit = 5
 
     private var state: ReviewState { store.review }
 
+    /// 记忆卡已独立成“记忆卡”页（仿 Anki），回顾里不再混入
     private var scheduler: ReviewScheduler {
-        ReviewScheduler(config: .init(dailyCount: dailyCount, masteryLimit: masteryLimit))
+        ReviewScheduler(config: .init(dailyCount: dailyCount, masteryLimit: 0))
     }
+
+    private var editingNote: Bool { state.noteDraft != nil }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
+            cardsBanner
             if state.cards.isEmpty {
                 ContentUnavailableView(
                     "暂无可回顾的摘录",
@@ -26,19 +32,24 @@ struct DailyReviewView: View {
             } else if state.position >= state.cards.count {
                 finished
             } else {
+                let card = state.cards[state.position]
                 ScrollView {
-                    ReviewCardView(card: state.cards[state.position], source: store.source(for: state.cards[state.position].highlight))
-                        .padding(40)
-                        .frame(maxWidth: 760)
-                        .frame(maxWidth: .infinity)
+                    VStack(alignment: .leading, spacing: 20) {
+                        ReviewCardView(card: card, source: store.source(for: card.highlight),
+                                       hasCard: store.cardHighlightIDs.contains(card.id))
+                        noteEditor(for: card)
+                    }
+                    .padding(40)
+                    .frame(maxWidth: 760)
+                    .frame(maxWidth: .infinity)
                 }
                 Divider()
-                controls(for: state.cards[state.position])
+                controls(for: card)
                     .padding()
             }
         }
         .navigationTitle(state.theme.map { "主题回顾 · #\($0)" } ?? "今日回顾")
-        .task(id: state.theme) { loadSession(forceNew: false) }
+        .task(id: (state.theme ?? "") + "|" + store.today) { loadSession(forceNew: false) }
         .onChange(of: store.revision) { refreshCards() }
     }
 
@@ -64,12 +75,56 @@ struct DailyReviewView: View {
         .padding(.vertical, 10)
     }
 
+    @ViewBuilder
+    private var cardsBanner: some View {
+        let _ = store.revision
+        let due = store.dueCardCount()
+        if due > 0 {
+            HStack {
+                Image(systemName: "brain").foregroundStyle(.purple)
+                Text("今天有 \(due) 张记忆卡待学习")
+                Spacer()
+                Button("去学习") { store.selection = .cards }
+            }
+            .font(.callout)
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            .background(Color.purple.opacity(0.08))
+            Divider()
+        }
+    }
+
+    @ViewBuilder
+    private func noteEditor(for card: ReviewCard) -> some View {
+        if state.noteDraft != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("按语（支持 Markdown）").font(.caption).foregroundStyle(.secondary)
+                TextEditor(text: Binding(get: { state.noteDraft ?? "" }, set: { state.noteDraft = $0 }))
+                    .font(.system(size: 15))
+                    .frame(minHeight: 90)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                HStack {
+                    Spacer()
+                    Button("取消") { state.noteDraft = nil }
+                        .keyboardShortcut(.cancelAction)
+                    Button("保存按语") { saveNote(for: card) }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+    }
+
     private var finished: some View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.seal").font(.system(size: 48)).foregroundStyle(.tint)
             Text("今日回顾完成").font(.title2)
             Text("共 \(state.cards.count) 条").foregroundStyle(.secondary)
             HStack {
+                Button("上一条") { go(-1) }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
                 Button("从头再看一遍") { state.position = 0; persist() }
                 Button("再抽一组") { loadSession(forceNew: true) }
             }
@@ -77,53 +132,92 @@ struct DailyReviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// 写按语时返回 nil，让单键快捷键失效
+    private func key(_ k: KeyEquivalent) -> KeyboardShortcut? {
+        editingNote ? nil : KeyboardShortcut(k, modifiers: [])
+    }
+
     @ViewBuilder
     private func controls(for card: ReviewCard) -> some View {
+        let hasCard = store.cardHighlightIDs.contains(card.id)
         HStack(spacing: 12) {
             Button { go(-1) } label: { Label("上一条", systemImage: "chevron.left") }
-                .keyboardShortcut(.leftArrow, modifiers: [])
+                .keyboardShortcut(key(.leftArrow))
                 .disabled(state.position == 0)
+                .help("上一条（← 或 K）")
             Button("编辑") { store.edit(card.highlight) }
-                .keyboardShortcut("e", modifiers: [])
+                .keyboardShortcut(key("e"))
+                .help("编辑摘录（E）")
+            Button {
+                state.noteDraft = card.highlight.note ?? ""
+            } label: { Label(card.highlight.note == nil ? "写按语" : "改按语", systemImage: "text.bubble") }
+                .keyboardShortcut(key("n"))
+                .disabled(editingNote)
+                .help("在这条摘录下写自己的评论（N）")
 
             Spacer()
 
-            if card.isMastery {
-                ForEach(ReviewScheduler.MasteryGrade.allCases, id: \.self) { grade in
-                    let number = (ReviewScheduler.MasteryGrade.allCases.firstIndex(of: grade) ?? 0) + 1
-                    Button("\(number). \(grade.label)（\(Int(grade.halfLifeDays))天）") {
-                        update(scheduler.grade(grade, scheduler.markSurfaced(card.highlight)))
-                    }
-                    .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: [])
-                }
-            } else {
-                Button(role: .destructive) {
-                    update(scheduler.apply(.discard, to: card.highlight))
-                } label: { Label("弃置", systemImage: "trash") }
-                    .keyboardShortcut(.delete, modifiers: [])
-                    .help("以后不再出现（可在列表中恢复）")
+            Button(role: .destructive) {
+                act(.discard, card)
+            } label: { Label("弃置", systemImage: "trash") }
+                .keyboardShortcut(key(.delete))
+                .help("以后不再出现（可在列表中恢复）")
 
-                Button {
-                    update(scheduler.apply(.favorite, to: card.highlight))
-                } label: { Label("收藏", systemImage: card.highlight.isFavorite ? "star.fill" : "star") }
-                    .keyboardShortcut("f", modifiers: [])
+            Button {
+                act(.favorite, card)
+            } label: { Label("收藏", systemImage: card.highlight.isFavorite ? "star.fill" : "star") }
+                .keyboardShortcut(key("f"))
+                .help("收藏（F）")
 
-                Button {
-                    update(scheduler.addToMastery(scheduler.markSurfaced(card.highlight)))
-                } label: { Label("加入记忆卡", systemImage: "brain") }
-                    .keyboardShortcut("m", modifiers: [])
-                    .disabled(card.highlight.isInMastery)
+            Button {
+                store.makeCard(from: card.highlight)
+                store.logReview(.toCard, highlightId: card.highlight.id)
+                update(scheduler.apply(.keep, to: card.highlight))
+            } label: { Label(hasCard ? "已是记忆卡" : "做成记忆卡", systemImage: hasCard ? "brain.fill" : "brain") }
+                .keyboardShortcut(key("m"))
+                .disabled(hasCard)
+                .help("做成记忆卡，到“记忆卡”页按 Anki 的方式复习（M）")
 
-                Button {
-                    update(scheduler.apply(.keep, to: card.highlight))
-                } label: { Label("下一条", systemImage: "chevron.right") }
-                    .keyboardShortcut(.space, modifiers: [])
-                    .buttonStyle(.borderedProminent)
+            Button {
+                act(.keep, card)
+            } label: { Label("下一条", systemImage: "chevron.right") }
+                .keyboardShortcut(key(.space))
+                .buttonStyle(.borderedProminent)
+                .help("下一条（空格、→ 或 J）")
+        }
+        .background {
+            // 额外的快捷键：→ / J 下一条，K 上一条
+            Group {
+                Button("") { act(.keep, card) }.keyboardShortcut(key(.rightArrow))
+                Button("") { act(.keep, card) }.keyboardShortcut(key("j"))
+                Button("") { go(-1) }.keyboardShortcut(key("k"))
             }
+            .opacity(0)
+            .allowsHitTesting(false)
         }
     }
 
     // MARK: 逻辑
+
+    private func act(_ action: ReviewScheduler.Action, _ card: ReviewCard) {
+        let kind: ReviewEvent.Kind
+        switch action {
+        case .keep: kind = .keep
+        case .favorite: kind = .favorite
+        case .discard: kind = .discard
+        }
+        store.logReview(kind, highlightId: card.highlight.id)
+        update(scheduler.apply(action, to: card.highlight))
+    }
+
+    private func saveNote(for card: ReviewCard) {
+        guard let draft = state.noteDraft else { return }
+        var h = card.highlight
+        h.note = draft.nilIfBlank
+        store.save(h)
+        store.logReview(.note, highlightId: h.id)
+        state.noteDraft = nil
+    }
 
     private func update(_ highlight: Highlight) {
         store.save(highlight)
@@ -131,6 +225,7 @@ struct DailyReviewView: View {
     }
 
     private func go(_ delta: Int) {
+        state.noteDraft = nil
         state.position = max(0, min(state.cards.count, state.position + delta))
         persist()
     }
@@ -138,15 +233,15 @@ struct DailyReviewView: View {
     private func loadSession(forceNew: Bool) {
         let today = ReviewSessionRecord.dayString(Date())
         let key = ReviewSessionRecord.key(theme: state.theme)
+        state.noteDraft = nil
         do {
             if !forceNew,
                let saved = ReviewSessionRecord.load(key: key),
                saved.day == today {
-                let regular = try store.db.highlights(ids: saved.regularIds)
-                let mastery = try store.db.highlights(ids: saved.masteryIds)
-                state.cards = regular.map { ReviewCard(highlight: $0, isMastery: false) }
-                    + mastery.map { ReviewCard(highlight: $0, isMastery: true) }
+                let hs = try store.db.highlights(ids: saved.regularIds + saved.masteryIds)
+                state.cards = hs.map { ReviewCard(highlight: $0, isMastery: false) }
                 state.position = min(saved.position, state.cards.count)
+                state.day = today
                 return
             }
 
@@ -159,9 +254,9 @@ struct DailyReviewView: View {
                 var rng = SeededGenerator.forDay(Date())
                 session = scheduler.makeSession(highlights: highlights, sourceWeights: weights, using: &rng)
             }
-            state.cards = session.regular.map { ReviewCard(highlight: $0, isMastery: false) }
-                + session.mastery.map { ReviewCard(highlight: $0, isMastery: true) }
+            state.cards = session.all.map { ReviewCard(highlight: $0, isMastery: false) }
             state.position = 0
+            state.day = today
             persist()
         } catch {
             store.report(error)
@@ -182,34 +277,43 @@ struct DailyReviewView: View {
 
     private func persist() {
         ReviewSessionRecord(
-            day: ReviewSessionRecord.dayString(Date()),
-            regularIds: state.cards.filter { !$0.isMastery }.compactMap(\.highlight.id),
-            masteryIds: state.cards.filter(\.isMastery).compactMap(\.highlight.id),
+            day: state.day.isEmpty ? ReviewSessionRecord.dayString(Date()) : state.day,
+            regularIds: state.cards.compactMap(\.highlight.id),
+            masteryIds: [],
             position: state.position
         ).save(key: ReviewSessionRecord.key(theme: state.theme))
+    }
+}
+
+/// 把 Markdown 行内格式（**粗体**、*斜体*、`代码`、[链接](url)）渲染出来；纯文本原样显示
+enum RichText {
+    static func attributed(_ s: String) -> AttributedString {
+        let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: s, options: opts)) ?? AttributedString(s)
     }
 }
 
 struct ReviewCardView: View {
     let card: ReviewCard
     let source: Source?
+    var hasCard = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            if card.isMastery {
-                Label("记忆卡", systemImage: "brain").font(.caption).foregroundStyle(.purple)
+            if hasCard {
+                Label("已做成记忆卡", systemImage: "brain").font(.caption).foregroundStyle(.purple)
             }
-            Text(card.highlight.text)
+            Text(RichText.attributed(card.highlight.text))
                 .font(.system(size: 22, design: .serif))
                 .lineSpacing(8)
                 .textSelection(.enabled)
             if let t = card.highlight.translation {
-                Text(t).font(.system(size: 16)).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(RichText.attributed(t)).font(.system(size: 16)).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if let n = card.highlight.note {
                 HStack(alignment: .top, spacing: 8) {
                     Rectangle().fill(.tint).frame(width: 3)
-                    Text(n).font(.callout).textSelection(.enabled)
+                    Text(RichText.attributed(n)).font(.callout).textSelection(.enabled)
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -239,8 +343,7 @@ struct ReviewSessionRecord: Codable {
     }
 
     static func dayString(_ date: Date) -> String {
-        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        ReminderPlan.dayKey(date)
     }
 
     static func load(key: String) -> ReviewSessionRecord? {

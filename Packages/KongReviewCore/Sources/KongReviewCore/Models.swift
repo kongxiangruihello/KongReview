@@ -3,7 +3,7 @@ import Foundation
 // MARK: - 出处（书、文章、网页……）
 
 public enum SourceKind: String, Codable, CaseIterable, Sendable {
-    case book, article, web, pdf, other
+    case book, article, web, pdf, ai, other
 
     public var label: String {
         switch self {
@@ -11,6 +11,7 @@ public enum SourceKind: String, Codable, CaseIterable, Sendable {
         case .article: return "论文/文章"
         case .web: return "网页"
         case .pdf: return "PDF"
+        case .ai: return "人工智能"
         case .other: return "其他"
         }
     }

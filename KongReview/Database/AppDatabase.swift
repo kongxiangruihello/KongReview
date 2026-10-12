@@ -21,6 +21,22 @@ extension Article: @retroactive FetchableRecord, @retroactive MutablePersistable
     }
 }
 
+extension Card: @retroactive FetchableRecord, @retroactive MutablePersistableRecord {
+    public static let databaseTableName = "card"
+
+    public mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
+extension ReviewEvent: @retroactive FetchableRecord, @retroactive MutablePersistableRecord {
+    public static let databaseTableName = "review_event"
+
+    public mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
 extension Highlight: @retroactive FetchableRecord, @retroactive MutablePersistableRecord {
     public static let databaseTableName = "highlight"
     public static let source = belongsTo(Source.self)
@@ -158,6 +174,61 @@ final class AppDatabase {
                 t.add(column: "container", .text)
                 t.add(column: "issue", .text)
             }
+        }
+
+        // v0.7：记忆卡（仿 Anki）、媒体、回顾日志、图片缓存
+        m.registerMigration("v5-cards-log-cache") { db in
+            try db.create(table: "card") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("deck", .text).notNull().defaults(to: "默认").indexed()
+                t.column("front", .text).notNull()
+                t.column("back", .text).notNull().defaults(to: "")
+                t.column("tags", .text).notNull().defaults(to: "[]")
+                t.belongsTo("highlight", onDelete: .setNull)
+                t.column("state", .text).notNull().defaults(to: "new")
+                t.column("step", .integer).notNull().defaults(to: 0)
+                t.column("interval", .double).notNull().defaults(to: 0)
+                t.column("ease", .double).notNull().defaults(to: 2.5)
+                t.column("due", .datetime).notNull().indexed()
+                t.column("reps", .integer).notNull().defaults(to: 0)
+                t.column("lapses", .integer).notNull().defaults(to: 0)
+                t.column("isSuspended", .boolean).notNull().defaults(to: false)
+                t.column("ankiGuid", .text).unique()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+            try db.create(table: "card_media") { t in
+                t.column("name", .text).primaryKey()
+                t.column("data", .blob).notNull()
+            }
+            try db.create(table: "review_event") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("kind", .text).notNull()
+                t.column("highlightId", .integer)
+                t.column("cardId", .integer)
+                t.column("answer", .integer)
+                t.column("at", .datetime).notNull().indexed()
+            }
+            try db.create(table: "image_cache") { t in
+                t.column("url", .text).primaryKey()
+                t.column("data", .blob).notNull()
+                t.column("mime", .text)
+                t.column("fetchedAt", .datetime).notNull()
+            }
+
+            // 旧版“记忆卡”（摘录上的半衰期标记）转成真正的卡片，放进“摘录”牌组
+            let now = Date()
+            let old = try Highlight.filter(sql: "masteryHalfLifeDays IS NOT NULL AND deletedAt IS NULL").fetchAll(db)
+            for h in old {
+                let src = try h.sourceId.flatMap { try Source.fetchOne(db, key: $0) }
+                var c = Card.from(h, source: src)
+                c.createdAt = now
+                c.updatedAt = now
+                c.due = now
+                try c.insert(db)
+            }
+            try db.execute(sql: "UPDATE highlight SET masteryHalfLifeDays = NULL, masteryLastReviewedAt = NULL")
         }
         return m
     }

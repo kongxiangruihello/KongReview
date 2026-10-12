@@ -435,3 +435,168 @@ final class RenameTests: XCTestCase {
         XCTAssertTrue(CaptureRequest.saveBookmarklet.contains("kongreview://save"))
     }
 }
+
+final class V07CoreTests: XCTestCase {
+    func testAIKindCitation() {
+        let s = Source(id: 1, title: "关于“克己复礼”的解释", author: "Claude", kind: .ai, publisher: "Anthropic", year: "2026")
+        XCTAssertEqual(CitationFormatter.citation(for: Highlight(text: "x"), source: s), "Claude：《关于“克己复礼”的解释》，Anthropic，人工智能生成内容，2026年。")
+        XCTAssertTrue(CitationFormatter.citation(for: Highlight(text: "x"), source: s, style: .gbt7714).contains("[Z]"))
+        XCTAssertEqual(SourceKind.ai.label, "人工智能")
+    }
+
+    func testMarkdown() {
+        XCTAssertEqual(Markdown.html("# 标题\n正文**加粗**和*斜体*\n第二行"), "<h1>标题</h1>\n<p>正文<strong>加粗</strong>和<em>斜体</em><br>第二行</p>")
+        XCTAssertEqual(Markdown.html("- 甲\n- 乙\n\n1. 一\n2. 二"), "<ul>\n<li>甲</li>\n<li>乙</li>\n</ul>\n<ol>\n<li>一</li>\n<li>二</li>\n</ol>")
+        XCTAssertEqual(Markdown.html("> 引文\n\n`a<b`"), "<blockquote>引文</blockquote>\n<p><code>a&lt;b</code></p>")
+        XCTAssertEqual(Markdown.html("[链接](https://a.cn)"), "<p><a href=\"https://a.cn\">链接</a></p>")
+        XCTAssertEqual(Markdown.html("<div>已是 HTML</div>"), "<div>已是 HTML</div>")
+        XCTAssertTrue(Markdown.looksLikeHTML("正面<br>第二行"))
+        XCTAssertFalse(Markdown.looksLikeHTML("2 < 3 而 4 > 1"))
+        XCTAssertEqual(Markdown.plainText(fromHTML: "<p>甲<br>乙</p><div>丙&amp;丁</div>"), "甲\n乙\n丙&丁")
+    }
+
+    func testImageRewrite() {
+        let html = #"<p>x</p><img src="data:image/gif;base64,R0" data-src="/a/1.jpg" srcset="a 2x"><img src='http://b.cn/2.png' alt="图"><img src="https://mmbiz.qpic.cn/x?wx_fmt=png&amp;from=1">"#
+        let r = ArticleImages.rewrite(html, base: "https://site.cn/post/9")
+        XCTAssertEqual(r.urls, ["https://site.cn/a/1.jpg", "http://b.cn/2.png", "https://mmbiz.qpic.cn/x?wx_fmt=png&from=1"])
+        XCTAssertFalse(r.html.contains("srcset"))
+        XCTAssertTrue(r.html.contains(#"alt="图""#))
+        XCTAssertEqual(r.html.components(separatedBy: "kr-img://img?").count, 4)
+        // round-trip
+        let m = try! NSRegularExpression(pattern: #"src="([^"]+)""#).firstMatch(in: r.html, range: NSRange(r.html.startIndex..., in: r.html))!
+        let src = String(r.html[Range(m.range(at: 1), in: r.html)!]).replacingOccurrences(of: "&amp;", with: "&")
+        let parsed = ArticleImages.parse(URL(string: src)!)!
+        XCTAssertEqual(parsed.image.absoluteString, "https://site.cn/a/1.jpg")
+        XCTAssertEqual(parsed.referer, "https://site.cn/post/9")
+        XCTAssertFalse(ArticleImages.sendsReferer(for: URL(string: "https://mmbiz.qpic.cn/x")!))
+        XCTAssertTrue(ArticleImages.sendsReferer(for: URL(string: "https://site.cn/a.jpg")!))
+    }
+
+    func testSchedulerLearningAndReview() {
+        let s = CardScheduler()
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        var c = Card(front: "学而时习之", due: t0)
+        let p = s.preview(c, now: t0)
+        XCTAssertEqual(p[.again], "1分钟"); XCTAssertEqual(p[.hard], "6分钟"); XCTAssertEqual(p[.good], "10分钟"); XCTAssertEqual(p[.easy], "4天")
+        c = s.answer(c, .good, now: t0)                       // 步骤 1 → 10 分钟
+        XCTAssertEqual(c.state, .learning); XCTAssertEqual(c.step, 1)
+        XCTAssertEqual(c.due.timeIntervalSince(t0), 600, accuracy: 0.1)
+        c = s.answer(c, .good, now: t0 + 600)                 // 毕业 → 1 天
+        XCTAssertEqual(c.state, .review); XCTAssertEqual(c.interval, 1)
+        c = s.answer(c, .good, now: c.due)                    // 1 天 × 2.5 → 3 天（≥ 当前+1）
+        XCTAssertEqual(c.interval, 3)
+        c = s.answer(c, .easy, now: c.due)                    // 3 × 2.65 × 1.3 ≈ 10
+        XCTAssertEqual(c.interval, 10); XCTAssertEqual(c.ease, 2.65, accuracy: 1e-9)
+        c = s.answer(c, .again, now: c.due)                   // 遗忘：重学 10 分钟，难度 -0.2
+        XCTAssertEqual(c.state, .relearning); XCTAssertEqual(c.lapses, 1); XCTAssertEqual(c.ease, 2.45, accuracy: 1e-9)
+        let lapseAt = c.due
+        c = s.answer(c, .good, now: lapseAt)                  // 重学完成 → 间隔 1 天
+        XCTAssertEqual(c.state, .review); XCTAssertEqual(c.interval, 1)
+        c = s.answer(c, .hard, now: c.due)
+        XCTAssertEqual(c.interval, 2); XCTAssertEqual(c.ease, 2.30, accuracy: 1e-9)
+        XCTAssertEqual(c.reps, 7)
+    }
+
+    func testStudyQueue() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cards = [
+            Card(id: 1, front: "新1", createdAt: now - 100),
+            Card(id: 2, front: "新2", createdAt: now - 50),
+            Card(id: 3, front: "复习", state: .review, interval: 3, due: now - 3600),
+            Card(id: 4, front: "学习中", state: .learning, step: 1, due: now - 10),
+            Card(id: 5, front: "未到期", state: .review, interval: 3, due: now + 3 * 86_400),
+            Card(id: 6, front: "暂停", isSuspended: true),
+        ]
+        XCTAssertEqual(StudyQueue.next(from: cards, now: now, newLimitLeft: 20, reviewLimitLeft: 200)?.id, 4)
+        XCTAssertEqual(StudyQueue.next(from: cards.filter { $0.id != 4 }, now: now, newLimitLeft: 20, reviewLimitLeft: 200)?.id, 3)
+        XCTAssertEqual(StudyQueue.next(from: cards.filter { $0.id != 4 && $0.id != 3 }, now: now, newLimitLeft: 20, reviewLimitLeft: 200)?.id, 1)
+        XCTAssertNil(StudyQueue.next(from: cards.filter { $0.id! >= 5 }, now: now, newLimitLeft: 20, reviewLimitLeft: 200))
+        XCTAssertEqual(StudyQueue.counts(cards, now: now, newLimitLeft: 1, reviewLimitLeft: 200), StudyQueue.Counts(new: 1, learning: 1, review: 1))
+    }
+
+    func testClozeAndFaces() {
+        let c = AnkiContent.cloze("{{c1::克己复礼::四字}}为仁。一日{{c2::克己复礼}}")
+        XCTAssertEqual(c.front, #"<span class="cloze">[四字]</span>为仁。一日<span class="cloze">[…]</span>"#)
+        XCTAssertEqual(c.back, #"<span class="cloze">克己复礼</span>为仁。一日<span class="cloze">克己复礼</span>"#)
+        let f = AnkiContent.faces(fields: ["问[sound:a.mp3]", "答", "", "补充"], isClozeModel: false)
+        XCTAssertEqual(f.front, "问"); XCTAssertEqual(f.back, "答<hr>补充")
+    }
+
+    func testAnkiTextImport() throws {
+        let txt = "#separator:tab\n#html:true\n#guid column:1\n#notetype column:2\n#deck column:3\n#tags column:6\n"
+            + "abc\tBasic\t论语\t学而时习之\t<b>学</b>了按时温习\t论语 经部\n"
+            + "def\tCloze\t论语\t\"{{c1::仁}}者\t爱人\"\t\t\n"
+        let r = try AnkiTextImporter.parse(txt)
+        XCTAssertEqual(r.notes.count, 2)
+        XCTAssertEqual(r.notes[0].fields, ["学而时习之", "<b>学</b>了按时温习"])
+        XCTAssertEqual(r.notes[0].tags, ["论语", "经部"])
+        XCTAssertEqual(r.notes[0].deck, "论语"); XCTAssertEqual(r.notes[0].guid, "abc"); XCTAssertEqual(r.notes[0].notetype, "Basic")
+        XCTAssertEqual(r.notes[1].fields, ["{{c1::仁}}者\t爱人", ""])
+        let plain = try AnkiTextImporter.parse("问题;答案\n")
+        XCTAssertEqual(plain.notes.count, 1)  // 默认 tab：整行一个字段
+        let semi = try AnkiTextImporter.parse("#separator:semicolon\n#html:false\n问题;a<b\n")
+        XCTAssertEqual(semi.notes[0].fields, ["问题", "a&lt;b"])
+        XCTAssertThrowsError(try AnkiTextImporter.parse("#separator:tab\n\n"))
+    }
+
+    func testReminderPlan() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let morning = cal.date(from: DateComponents(year: 2026, month: 10, day: 13, hour: 7))!
+        let d1 = ReminderPlan.days(now: morning, hour: 8, minute: 30, reviewedToday: false, horizon: 3, calendar: cal)
+        XCTAssertEqual(d1.map { ReminderPlan.dayKey($0, calendar: cal) }, ["2026-10-13", "2026-10-14", "2026-10-15"])
+        let d2 = ReminderPlan.days(now: morning, hour: 8, minute: 30, reviewedToday: true, horizon: 3, calendar: cal)
+        XCTAssertEqual(d2.map { ReminderPlan.dayKey($0, calendar: cal) }, ["2026-10-14", "2026-10-15"])
+        let evening = cal.date(from: DateComponents(year: 2026, month: 10, day: 13, hour: 21))!
+        XCTAssertEqual(ReminderPlan.days(now: evening, hour: 8, minute: 30, reviewedToday: false, horizon: 2, calendar: cal).count, 1)
+        XCTAssertEqual(ReminderPlan.identifier(for: morning, calendar: cal), "kongreview.review.2026-10-13")
+    }
+
+    func testStats() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        func at(_ d: Int, _ h: Int = 9) -> Date { cal.date(from: DateComponents(year: 2026, month: 10, day: d, hour: h))! }
+        let ev = [
+            ReviewEvent(kind: .keep, at: at(13)), ReviewEvent(kind: .favorite, at: at(13)),
+            ReviewEvent(kind: .card, answer: 1, at: at(13)), ReviewEvent(kind: .card, answer: 3, at: at(12)),
+            ReviewEvent(kind: .keep, at: at(11)), ReviewEvent(kind: .note, at: at(10)),
+            ReviewEvent(kind: .keep, at: at(5)), ReviewEvent(kind: .keep, at: at(6)), ReviewEvent(kind: .keep, at: at(7)), ReviewEvent(kind: .keep, at: at(8)),
+        ]
+        let s = ReviewStats.summarize(ev, now: at(13, 20), days: 7, calendar: cal)
+        XCTAssertEqual(s.today.highlights, 2); XCTAssertEqual(s.today.cards, 1)
+        XCTAssertEqual(s.currentStreak, 3)          // 11, 12, 13（10 日只写了按语，不算）
+        XCTAssertEqual(s.longestStreak, 4)          // 5–8
+        XCTAssertEqual(s.activeDays, 7)
+        XCTAssertEqual(s.lastDays.count, 7); XCTAssertEqual(s.lastDays.last?.key, "2026-10-13")
+        XCTAssertEqual(s.cardAccuracy!, 0.5, accuracy: 1e-9)
+        let s2 = ReviewStats.summarize(ev, now: at(14, 8), days: 7, calendar: cal)
+        XCTAssertEqual(s2.currentStreak, 3, "today not yet reviewed: count from yesterday")
+    }
+}
+
+final class V07CardTests: XCTestCase {
+    func testCardFromHighlightAndRender() {
+        let s = Source(id: 1, title: "论语译注", author: "杨伯峻")
+        let h = Highlight(id: 9, sourceId: 1, text: "**克己复礼**为仁", translation: "约束自己", note: "颜渊篇", tags: ["仁"])
+        let c = Card.from(h, source: s)
+        XCTAssertEqual(c.front, "**克己复礼**为仁")
+        XCTAssertEqual(c.back, "约束自己\n\n按：颜渊篇\n\n—— 杨伯峻：《论语译注》。")
+        XCTAssertEqual(c.highlightId, 9); XCTAssertEqual(c.deck, "摘录"); XCTAssertEqual(c.tags, ["仁"])
+        XCTAssertEqual(Card.renderHTML(c.front), "<p><strong>克己复礼</strong>为仁</p>")
+        XCTAssertEqual(Card.renderHTML(#"图<img src="paste-1.jpg">和<img src="https://a.cn/x.png">"#),
+                       #"图<img src="kr-media://media/paste-1.jpg">和<img src="https://a.cn/x.png">"#)
+    }
+
+    func testAnkiScheduleConversion() {
+        let crt = Date(timeIntervalSince1970: 1_600_000_000)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertNil(AnkiNote.schedule(type: 0, queue: 0, due: 5, ivl: 0, factor: 0, reps: 0, lapses: 0, collectionCreated: crt, now: now))
+        let r = AnkiNote.schedule(type: 2, queue: 2, due: 100, ivl: 15, factor: 2300, reps: 6, lapses: 1, collectionCreated: crt, now: now)!
+        XCTAssertEqual(r.state, .review); XCTAssertEqual(r.interval, 15); XCTAssertEqual(r.ease, 2.3)
+        XCTAssertEqual(r.due, crt.addingTimeInterval(100 * 86_400))
+        let l = AnkiNote.schedule(type: 1, queue: 1, due: 1_799_999_000, ivl: 0, factor: 2500, reps: 1, lapses: 0, collectionCreated: crt, now: now)!
+        XCTAssertEqual(l.state, .learning); XCTAssertEqual(l.due, Date(timeIntervalSince1970: 1_799_999_000))
+        XCTAssertTrue(AnkiNote.schedule(type: 2, queue: -1, due: 1, ivl: 3, factor: 2500, reps: 2, lapses: 0, collectionCreated: crt, now: now)!.suspended)
+        let notes = AnkiNote.from(try! AnkiTextImporter.parse("#notetype column:1\nCloze\t{{c1::仁}}\n"), defaultDeck: "默认")
+        XCTAssertEqual(notes[0].front, #"<span class="cloze">[…]</span>"#)
+        XCTAssertEqual(notes[0].deck, "默认")
+    }
+}

@@ -45,6 +45,12 @@ public enum CitationFormatter {
         case .web:
             if let site = (s.container ?? s.publisher)?.nonEmpty { parts.append(site) }
             if let y = s.year?.nonEmpty { parts.append(y.hasSuffix("年") ? y : "\(y)年") }
+        case .ai:
+            // 作者栏填模型名（如 Claude、ChatGPT），出版者栏填平台或提问人
+            var gen = "人工智能生成内容"
+            if let p = s.publisher?.nonEmpty { gen = "\(p)，" + gen }
+            parts.append(gen)
+            if let y = s.year?.nonEmpty { parts.append(y.hasSuffix("年") ? y : "\(y)年") }
         default:
             var pub = ""
             if let place = s.place?.nonEmpty { pub = place + "：" }
@@ -66,7 +72,7 @@ public enum CitationFormatter {
         case .book, .pdf: return "M"
         case .article: return "J"
         case .web: return "EB/OL"
-        case .other: return "Z"
+        case .ai, .other: return "Z"
         }
     }
 

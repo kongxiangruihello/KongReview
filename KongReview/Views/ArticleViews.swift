@@ -132,6 +132,14 @@ struct ArticleReaderView: View {
                         Label("在浏览器中打开", systemImage: "safari")
                     }
                     Button {
+                        if let id = article.id {
+                            store.articleSourceDraft = ArticleSourceDraft(articleId: id, html: article.contentHTML)
+                        }
+                    } label: {
+                        Label("编辑正文", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    .help("以 HTML 编辑存档正文（删去无关段落、改错字等）")
+                    Button {
                         store.selection = article.sourceId.map(SidebarItem.source) ?? .all
                         store.openArticle = nil
                     } label: {
@@ -164,6 +172,8 @@ struct ReaderWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.userContentController.add(WeakScriptHandler(context.coordinator), name: "kg")
+        // 图片经由本地处理器取：先查缓存，没有再带合适的 Referer 下载（解决防盗链、http 图片不显示）
+        LocalSchemeHandler.register(on: config, store: store)
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.navigationDelegate = context.coordinator
         wv.allowsMagnification = true
@@ -272,6 +282,9 @@ struct AddArticleView: View {
             TextField("https://", text: urlBinding)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { store.saveArticle(from: urlBinding.wrappedValue) }
+            if let hint = store.addArticleDraft?.hint {
+                Label(hint, systemImage: "safari").font(.caption).foregroundStyle(.secondary)
+            }
             if let err = store.addArticleDraft?.error {
                 Text(err).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
@@ -291,5 +304,46 @@ struct AddArticleView: View {
         }
         .padding(24)
         .frame(width: 520)
+    }
+}
+
+
+// MARK: - 编辑存档正文（HTML / Markdown）
+
+struct ArticleSourceEditorView: View {
+    @Environment(LibraryStore.self) private var store
+
+    private var html: Binding<String> {
+        Binding(get: { store.articleSourceDraft?.html ?? "" }, set: { store.articleSourceDraft?.html = $0 })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("编辑存档正文").font(.title2.bold())
+            Text("这里是正文的 HTML。也可以整段换成 Markdown（标题 #、**粗体**、列表、> 引用），保存时会自动转成 HTML。已划下的摘录不受影响。")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextEditor(text: html)
+                .font(.system(size: 12, design: .monospaced))
+                .border(Color.secondary.opacity(0.3))
+            HStack {
+                Button("把全文转成 Markdown 便于修改") {
+                    html.wrappedValue = Markdown.plainText(fromHTML: html.wrappedValue)
+                }
+                .help("会丢掉图片、链接等格式，只保留文字与分段")
+                Spacer()
+                Button("取消", role: .cancel) { store.articleSourceDraft = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("保存") {
+                    let text = html.wrappedValue
+                    if !Markdown.looksLikeHTML(text) { html.wrappedValue = Markdown.html(text) }
+                    store.saveArticleSource()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 760, minHeight: 560)
     }
 }

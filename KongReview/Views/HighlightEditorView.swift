@@ -18,10 +18,15 @@ struct HighlightEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Form {
-                Section("原文") {
+                Section {
                     TextEditor(text: draftBinding.highlight.text)
                         .font(.system(.body, design: .serif))
                         .frame(minHeight: 140)
+                } header: {
+                    Text("原文")
+                } footer: {
+                    Text("原文、译文、按语都支持 Markdown 行内格式：**粗体**、*斜体*、`代码`、[链接](https://…)。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("出处") {

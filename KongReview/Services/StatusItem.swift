@@ -76,8 +76,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func openSettings() {
-        NSApp.activate()
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        WindowOpener.openSettings()
     }
 
     @objc private func quit() { NSApp.terminate(nil) }

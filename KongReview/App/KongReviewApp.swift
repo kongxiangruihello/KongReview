@@ -31,7 +31,6 @@ struct KongReviewApp: App {
         Window("KongReview", id: "main") {
             ContentView()
                 .environment(store)
-                .task { ReminderScheduler.shared.applySavedSettings() }
         }
         .defaultSize(width: 1100, height: 720)
         .commands {
@@ -50,6 +49,9 @@ struct KongReviewApp: App {
             CommandMenu("回顾") {
                 Button("今日回顾") { store.selection = .review }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
+                Button("记忆卡") { store.selection = .cards }
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("回顾统计") { store.selection = .stats }
             }
             CommandGroup(after: .importExport) {
                 Button("导出全部为 Markdown…") { ExportService.exportAll(store: store) }
@@ -57,6 +59,7 @@ struct KongReviewApp: App {
                 Button("立即备份") { ExportService.backupNow(store: store) }
                 Divider()
                 Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
+                Button("导入 Anki 牌组…") { ExportService.importAnki(store: store) }
             }
         }
 
