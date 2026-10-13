@@ -246,6 +246,16 @@ extension AppDatabase {
         try writer.write { db in try template.save(db) }
     }
 
+    /// 模板编辑器的示例卡：这个笔记类型下第一张有字段的卡（不读出全部卡片）
+    func sampleCard(noteType: String) throws -> Card? {
+        try writer.read { db in
+            try Card.fetchOne(db, sql: """
+                SELECT * FROM card WHERE noteType = ? AND deletedAt IS NULL AND fields IS NOT NULL AND fields NOT IN ('', '[]')
+                ORDER BY id LIMIT 1
+                """, arguments: [noteType])
+        }
+    }
+
     func cardCount(noteType: String) throws -> Int {
         try writer.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM card WHERE noteType = ? AND deletedAt IS NULL", arguments: [noteType]) ?? 0 }
     }
@@ -334,7 +344,7 @@ extension AppDatabase {
         var mediaRemoved: Int
     }
 
-    /// 删除没有卡片引用的媒体文件，再用 VACUUM 收回空间
+    /// 删除没有卡片、摘录引用的媒体文件，再用 VACUUM 收回空间
     func compact() throws -> CompactReport {
         let before = fileSize()
         let removed: Int = try writer.write { db in
@@ -343,6 +353,10 @@ extension AppDatabase {
                 for key in ["front", "back", "fields"] {
                     if let s: String = r[key] { used.formUnion(AnkiPackage.mediaReferences(in: s)) }
                 }
+            }
+            // 摘录正文里的图片（如 LiquidText 导入的图片摘录）也算在用
+            for text in try String.fetchAll(db, sql: "SELECT text FROM highlight WHERE text LIKE '%kr-media://%'") {
+                used.formUnion(AnkiPackage.krMediaReferences(in: text))
             }
             var n = 0
             for name in try String.fetchAll(db, sql: "SELECT name FROM card_media") where !used.contains(name) {

@@ -17,7 +17,8 @@ struct StatsView: View {
         _ = store.revision
         _ = store.today
         let s = store.stats
-        let cards = (try? store.db.cards()) ?? []
+        let insights = store.cardInsights
+        let cards = insights?.counts ?? CardStateCounts()
         let bars = s.lastDays.flatMap { d -> [Bar] in
             let date = Self.parse(d.key)
             return [Bar(day: date, kind: "摘录", count: d.highlights), Bar(day: date, kind: "记忆卡", count: d.cards)]
@@ -44,6 +45,10 @@ struct StatsView: View {
                     .frame(height: 220)
                 }
 
+                if let insights, insights.counts.total > 0 {
+                    CardInsightsSection(insights: insights)
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("库存").font(.headline)
                     Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
@@ -52,7 +57,7 @@ struct StatsView: View {
                         GridRow { Text("网页存档"); Text("\(store.articleCount) 篇") }
                         GridRow {
                             Text("记忆卡")
-                            Text("\(cards.count) 张：新卡 \(cards.filter { $0.state == .new }.count)，学习中 \(cards.filter { $0.state == .learning || $0.state == .relearning }.count)，复习中 \(cards.filter { $0.state == .review }.count)，已暂停 \(cards.filter(\.isSuspended).count)")
+                            Text("\(cards.total) 张：新卡 \(cards.new)，学习中 \(cards.learning)，复习中 \(cards.review)，已暂停 \(cards.suspended)")
                         }
                     }
                     .monospacedDigit()
@@ -67,6 +72,8 @@ struct StatsView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle("回顾统计")
+        // 卡片统计只在打开本页、数据变化时重算（SQL 汇总，不读出全部卡片）
+        .task(id: store.revision) { store.refreshCardInsights() }
     }
 
     private func tile(_ title: String, _ value: String, _ icon: String) -> some View {
@@ -86,5 +93,109 @@ struct StatsView: View {
         f.calendar = Calendar.current
         f.dateFormat = "yyyy-MM-dd"
         return f.date(from: key) ?? Date()
+    }
+}
+
+// MARK: - 1.1：记忆卡负荷预测与实际保留率
+
+struct CardInsightsSection: View {
+    let insights: LibraryStore.CardInsights
+
+    var body: some View {
+        let load = insights.load
+        let ret = insights.retention
+        let weeks = ret.weeks.filter { $0.reviews > 0 }
+        return VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("记忆卡：未来 30 天的复习量").font(.headline)
+                    Spacer()
+                    Text(summary(load)).font(.caption).foregroundStyle(.secondary)
+                }
+                Chart(load.days) { d in
+                    BarMark(x: .value("日期", d.date, unit: .day), y: .value("到期", d.count))
+                        .foregroundStyle(ReviewPalette.accent.opacity(d.date == load.days.first?.date ? 1 : 0.7))
+                        .cornerRadius(2)
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .day, count: 7)) { _ in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+                    }
+                }
+                .frame(height: 170)
+                Text("只算已学过的卡（新卡按每日上限另外引入）；已过期未复习的 \(load.overdue) 张计入今天。哪天特别高，可以提前在“记忆卡”里多复习一些，或调低新卡上限。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("实际保留率（每周）").font(.headline)
+                    Spacer()
+                    Text(retentionSummary(ret)).font(.caption).foregroundStyle(.secondary)
+                }
+                if weeks.isEmpty {
+                    Text("还没有隔天以上的复习记录。复习几天后这里会显示每周记住的比例。")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 80)
+                } else {
+                    Chart {
+                        RuleMark(y: .value("目标", insights.target * 100))
+                            .foregroundStyle(.secondary)
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .annotation(position: .top, alignment: .leading) {
+                                Text("目标 \(Int((insights.target * 100).rounded()))%").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        ForEach(weeks) { w in
+                            LineMark(x: .value("周", w.start, unit: .weekOfYear), y: .value("保留率", (w.retention ?? 0) * 100))
+                                .foregroundStyle(ReviewPalette.accent)
+                                .interpolationMethod(.monotone)
+                            PointMark(x: .value("周", w.start, unit: .weekOfYear), y: .value("保留率", (w.retention ?? 0) * 100))
+                                .foregroundStyle(ReviewPalette.accent)
+                                .symbolSize(w.reviews < 20 ? 14 : 30)
+                        }
+                    }
+                    .chartYScale(domain: yDomain(weeks, target: insights.target))
+                    .chartYAxis {
+                        AxisMarks { v in
+                            AxisGridLine()
+                            AxisValueLabel { if let n = v.as(Double.self) { Text("\(Int(n))%") } }
+                        }
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .weekOfYear, count: 2)) { _ in
+                            AxisGridLine()
+                            AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+                        }
+                    }
+                    .frame(height: 170)
+                }
+                Text("只算隔天以上再见到的复习（同一天的学习步、重学步不算），答“困难 / 良好 / 简单”算记住。明显低于目标线：间隔偏长，可调高期望保留率或优化 FSRS 参数；明显高于：可适当调低以减少复习量。小点表示当周复习不足 20 次，参考价值有限。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func summary(_ l: CardForecast.Load) -> String {
+        var parts = ["今天 \(l.days.first?.count ?? 0)", "7 天日均 \(String(format: "%.0f", l.average(first: 7)))",
+                     "30 天共 \(l.total)"]
+        if let p = l.peak, p.count > 0 {
+            parts.append("最多 \(p.date.formatted(.dateTime.month(.defaultDigits).day())) \(p.count) 张")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func retentionSummary(_ r: CardForecast.Retention) -> String {
+        guard let v = r.last30 else { return "近 30 天暂无复习" }
+        return String(format: "近 30 天 %.1f%%（%d 次复习）", v * 100, r.last30Reviews)
+    }
+
+    private func yDomain(_ weeks: [CardForecast.Week], target: Double) -> ClosedRange<Double> {
+        let values = weeks.compactMap(\.retention).map { $0 * 100 } + [target * 100]
+        let lo = max(0, (values.min() ?? 70) - 5)
+        let hi = min(100, (values.max() ?? 100) + 3)
+        return lo...max(hi, lo + 10)
     }
 }

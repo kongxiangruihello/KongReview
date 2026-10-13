@@ -245,6 +245,17 @@ enum ReviewSessionRecordStore {
     }
 }
 
+/// 1.1：标签改名 / 合并 / 删除
+struct TagEditRequest: Identifiable {
+    enum Mode { case rename, delete }
+    let id = UUID()
+    var tag: String
+    var mode: Mode
+    var newName: String
+    /// 受影响的摘录数（含子标签）
+    var affected: Int
+}
+
 /// 填空卡制作
 struct ClozeDraft: Identifiable {
     let id = UUID()

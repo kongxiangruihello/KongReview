@@ -263,3 +263,131 @@ extension AppDatabase {
         }
     }
 }
+
+// MARK: - 摘录图片
+
+extension AppDatabase {
+    /// 把导入的图片存进媒体表（与记忆卡图片同表，经 kr-media:// 显示；同名覆盖）
+    func saveMedia(_ media: [String: Data]) throws {
+        guard !media.isEmpty else { return }
+        try writer.write { db in
+            for (name, data) in media {
+                try db.execute(sql: "INSERT OR REPLACE INTO card_media (name, data) VALUES (?, ?)", arguments: [name, data])
+            }
+        }
+    }
+}
+
+// MARK: - 1.1：记忆卡统计（SQL 汇总）
+
+extension AppDatabase {
+    /// 各状态卡片张数（不读出全部卡片）
+    func cardStateCounts() throws -> CardStateCounts {
+        try writer.read { db in
+            guard let r = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN state = 'new' THEN 1 ELSE 0 END) AS n,
+                       SUM(CASE WHEN state IN ('learning', 'relearning') THEN 1 ELSE 0 END) AS l,
+                       SUM(CASE WHEN state = 'review' THEN 1 ELSE 0 END) AS r,
+                       SUM(CASE WHEN isSuspended THEN 1 ELSE 0 END) AS s
+                FROM card WHERE deletedAt IS NULL
+                """) else { return CardStateCounts() }
+            return CardStateCounts(total: r["total"] ?? 0, new: r["n"] ?? 0, learning: r["l"] ?? 0,
+                                   review: r["r"] ?? 0, suspended: r["s"] ?? 0)
+        }
+    }
+
+    /// 已学过、未暂停的卡片的到期时间（负荷预测用）
+    func studiedCardDues() throws -> [Date] {
+        try writer.read { db in
+            try Date.fetchAll(db, sql: """
+                SELECT due FROM card WHERE deletedAt IS NULL AND NOT isSuspended AND state <> 'new'
+                """)
+        }
+    }
+
+    /// 某时刻以来的记忆卡作答（保留率用；多取 days 天之前的作答作“上一次”参照）
+    func cardAnswers(since: Date) throws -> [CardForecast.Answer] {
+        try writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT cardId, answer, at FROM review_event
+                WHERE kind = 'card' AND cardId IS NOT NULL AND answer IS NOT NULL AND at >= ?
+                ORDER BY cardId, at
+                """, arguments: [since]).map {
+                CardForecast.Answer(cardId: $0["cardId"], answer: $0["answer"], at: $0["at"])
+            }
+        }
+    }
+
+    /// 平均期望保留率：用 FSRS 的牌组取平均，没有则 0.9
+    func targetRetention() throws -> Double {
+        let fsrs = try deckOptions().values.filter { $0.algorithm == .fsrs }
+        guard !fsrs.isEmpty else { return 0.9 }
+        return fsrs.map(\.desiredRetention).reduce(0, +) / Double(fsrs.count)
+    }
+}
+
+// MARK: - 1.1：标签整理
+
+extension AppDatabase {
+    /// 标签 → 摘录数（不含弃置、已删除）
+    func tagCounts() throws -> [String: Int] {
+        try writer.read { db in
+            var out: [String: Int] = [:]
+            for r in try Row.fetchAll(db, sql: """
+                SELECT json_each.value AS tag, COUNT(*) AS n FROM highlight, json_each(highlight.tags)
+                WHERE highlight.isDiscarded = 0 AND highlight.deletedAt IS NULL
+                GROUP BY json_each.value
+                """) {
+                if let t: String = r["tag"] { out[t] = r["n"] ?? 0 }
+            }
+            return out
+        }
+    }
+
+    /// 带有这个标签（或其子标签）的全部摘录 id，包括弃置和最近删除里的
+    func highlightIDs(withTag tag: String) throws -> [Int64] {
+        try writer.read { db in
+            try Int64.fetchAll(db, sql: """
+                SELECT DISTINCT highlight.id FROM highlight, json_each(highlight.tags)
+                WHERE json_each.value = ? OR substr(json_each.value, 1, ?) = ?
+                """, arguments: [tag, tag.unicodeScalars.count + 1, tag + "/"])
+        }
+    }
+
+    /// 标签改名或合并（新名已存在即合并）；子标签一并改。返回改动的摘录数。
+    @discardableResult
+    func renameTag(_ old: String, to new: String, now: Date = Date()) throws -> Int {
+        let ids = try highlightIDs(withTag: old)
+        return try writer.write { db in
+            var n = 0
+            for var h in try Highlight.fetchAll(db, keys: ids) {
+                let tags = TagOps.rename(h.tags, from: old, to: new)
+                guard tags != h.tags else { continue }
+                h.tags = tags
+                h.updatedAt = now
+                try h.update(db)
+                n += 1
+            }
+            return n
+        }
+    }
+
+    /// 从所有摘录上去掉这个标签（连同子标签），摘录本身保留。返回改动的摘录数。
+    @discardableResult
+    func deleteTag(_ tag: String, now: Date = Date()) throws -> Int {
+        let ids = try highlightIDs(withTag: tag)
+        return try writer.write { db in
+            var n = 0
+            for var h in try Highlight.fetchAll(db, keys: ids) {
+                let tags = TagOps.remove(h.tags, tag: tag)
+                guard tags != h.tags else { continue }
+                h.tags = tags
+                h.updatedAt = now
+                try h.update(db)
+                n += 1
+            }
+            return n
+        }
+    }
+}

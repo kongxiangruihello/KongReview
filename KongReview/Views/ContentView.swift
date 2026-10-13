@@ -11,7 +11,7 @@ struct ContentView: View {
         @Bindable var store = store
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240)
+                .navigationSplitViewColumnWidth(min: 168, ideal: 196, max: 280)
         } detail: {
             detail
         }
@@ -91,6 +91,7 @@ struct ContentView: View {
             ArticleSourceEditorView()
         }
         .modifier(CardSheets())
+        .modifier(TagSheets())
         .alert("完成", isPresented: Binding(
             get: { store.infoMessage != nil },
             set: { if !$0 { store.infoMessage = nil } }
@@ -187,7 +188,7 @@ struct SidebarView: View {
                     Label("记忆卡", systemImage: "brain")
                     Spacer()
                     if store.cardCount > 0 {
-                        Text("\(store.cardCount)").foregroundStyle(.secondary).monospacedDigit()
+                        SidebarCount(store.cardCount)
                     }
                 }
                 .tag(SidebarItem.cards)
@@ -197,7 +198,7 @@ struct SidebarView: View {
                     Label("网页存档", systemImage: "globe")
                     Spacer()
                     if store.articleCount > 0 {
-                        Text("\(store.articleCount)").foregroundStyle(.secondary).monospacedDigit()
+                        SidebarCount(store.articleCount)
                     }
                 }
                 .tag(SidebarItem.articles)
@@ -206,7 +207,7 @@ struct SidebarView: View {
                     Label("最近删除", systemImage: "trash")
                     Spacer()
                     if store.trashCount > 0 {
-                        Text("\(store.trashCount)").foregroundStyle(.secondary).monospacedDigit()
+                        SidebarCount(store.trashCount)
                     }
                 }
                 .tag(SidebarItem.trash)
@@ -221,9 +222,7 @@ struct SidebarView: View {
                             Label(source.title, systemImage: icon(for: source.kind))
                                 .lineLimit(1)
                             Spacer()
-                            Text("\(store.highlightCounts[id] ?? 0)")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
+                            SidebarCount(store.highlightCounts[id] ?? 0)
                         }
                         .tag(SidebarItem.source(id))
                         .contextMenu {
@@ -268,15 +267,30 @@ struct SidebarView: View {
             }
 
             if !store.tags.isEmpty {
-                // 标签默认折叠（记住上次状态）
-                Section("标签", isExpanded: Bindable(store).tagsExpanded) {
-                    ForEach(store.tags, id: \.self) { tag in
-                        Label(tag, systemImage: "number").tag(SidebarItem.tag(tag))
+                // 标签默认折叠（记住上次状态）；1.1 起按“/”分层显示，右键可改名、合并、删除
+                Section(isExpanded: Bindable(store).tagsExpanded) {
+                    OutlineGroup(store.tagTree, children: \.childrenOrNil) { node in
+                        TagSidebarRow(node: node)
+                    }
+                } header: {
+                    HStack {
+                        Text("标签")
+                        Spacer()
+                        Button {
+                            store.showTagManager = true
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("整理标签：改名、合并、删除、分层")
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        // 1.1：侧边栏收紧——字号比正文小一号、行高更矮，计数用小号灰字
+        .font(.system(size: 12.5))
+        .environment(\.defaultMinListRowHeight, 22)
         .toolbar {
             ToolbarItem {
                 Button {
@@ -298,6 +312,18 @@ struct SidebarView: View {
         case .ai: return "sparkles"
         case .other: return "square.stack"
         }
+    }
+}
+
+/// 侧边栏行尾的计数：小号灰色等宽数字
+struct SidebarCount: View {
+    let value: Int
+    init(_ value: Int) { self.value = value }
+    var body: some View {
+        Text("\(value)")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
     }
 }
 

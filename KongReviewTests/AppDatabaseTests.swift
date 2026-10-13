@@ -666,3 +666,104 @@ final class V10UndoTests: XCTestCase {
     XCTAssertEqual(try db.count(HighlightQuery()), 2)
   }
 }
+
+final class V11DatabaseTests: XCTestCase {
+  func makeDB() throws -> AppDatabase {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("v11-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return try AppDatabase(DatabasePool(path: dir.appendingPathComponent("a.sqlite").path))
+  }
+
+  func testLiquidTextImportKeepsSameTextOnDifferentPagesAndImages() throws {
+    let db = try makeDB()
+    let parsed = LiquidTextImporter.parse([
+      .init(text: "Notes in ‘革命造反年代 (李逊) ’", indent: 0),
+      .init(text: "Excerpt:\t朱維錚\n(革命造反年代 (李逊) , p.461)"),
+      .init(text: "Excerpt:\t朱維錚\n(革命造反年代 (李逊) , p.471)"),
+      .init(text: "Excerpt:\t[Image]\n(革命造反年代 (李逊) , p.17)", images: ["rId10"]),
+    ])
+    let png = Data([0x89, 0x50, 0x4E, 0x47, 1, 2, 3])
+    var media: [String: Data] = [:]
+    let result = LiquidTextImporter.result(parsed, fallbackTitle: "x") { _, loc in
+      media["liquidtext-1.png"] = png
+      return "![\(loc ?? "")](kr-media://media/liquidtext-1.png)"
+    }
+    XCTAssertEqual(result.highlightCount, 3)
+    try db.saveMedia(media)
+    let r1 = try db.importReadwise(result, extraTag: "LiquidText")
+    XCTAssertEqual(r1.highlightsImported, 3, "同一人名在不同页码各算一条")
+    let r2 = try db.importReadwise(result, extraTag: "LiquidText")
+    XCTAssertEqual(r2.highlightsImported, 0)
+    XCTAssertEqual(r2.duplicatesSkipped, 3, "重复导入同一文件不产生重复")
+    let src = try XCTUnwrap(try db.allSources().first)
+    XCTAssertEqual(src.title, "革命造反年代"); XCTAssertEqual(src.author, "李逊")
+
+    // 整理数据库时，摘录正文引用的图片要保留
+    XCTAssertEqual(try db.media(named: "liquidtext-1.png"), png)
+    let report = try db.compact()
+    XCTAssertEqual(report.mediaRemoved, 0)
+    XCTAssertEqual(try db.media(named: "liquidtext-1.png"), png)
+    try db.saveMedia(["orphan.png": png])
+    XCTAssertEqual(try db.compact().mediaRemoved, 1)
+  }
+
+  func testTagRenameMergeDeleteAndHierarchy() throws {
+    let db = try makeDB()
+    let a = try db.save(Highlight(text: "孟子曰", tags: ["孟子", "儒家"]))
+    let b = try db.save(Highlight(text: "荀子曰", tags: ["儒家/荀子"]))
+    _ = try db.save(Highlight(text: "论语", tags: ["論語"]))
+    _ = try db.save(Highlight(text: "论语二", tags: ["论语"]))
+    _ = try db.save(Highlight(text: "学派", tags: ["儒家学派"]))
+
+    // 父标签包含子标签，但不包含“儒家学派”
+    XCTAssertEqual(try db.count(HighlightQuery(tag: "儒家")), 2)
+    XCTAssertEqual(Set(try db.highlightIDs(withTag: "儒家")), Set([a.id!, b.id!]))
+
+    // 改名为子标签
+    XCTAssertEqual(try db.renameTag("孟子", to: "儒家/孟子"), 1)
+    XCTAssertEqual(try db.count(HighlightQuery(tag: "儒家")), 2)
+    XCTAssertEqual(try db.count(HighlightQuery(tag: "儒家/孟子")), 1)
+
+    // 合并
+    XCTAssertEqual(try db.renameTag("論語", to: "论语"), 1)
+    XCTAssertEqual(try db.tagCounts()["论语"], 2)
+    XCTAssertNil(try db.tagCounts()["論語"])
+
+    // 父标签改名，子标签跟着改
+    try db.renameTag("儒家", to: "先秦儒家")
+    let counts = try db.tagCounts()
+    XCTAssertEqual(counts["先秦儒家/荀子"], 1)
+    XCTAssertEqual(counts["先秦儒家/孟子"], 1)
+    XCTAssertEqual(counts["儒家学派"], 1)
+    let tree = TagNode.tree(counts)
+    XCTAssertEqual(tree.first { $0.name == "先秦儒家" }?.count, 3)
+
+    // 删除（连同子标签），摘录保留
+    XCTAssertEqual(try db.deleteTag("先秦儒家"), 2)
+    XCTAssertEqual(try db.count(HighlightQuery()), 5)
+    XCTAssertTrue(try db.tagCounts().keys.allSatisfy { !$0.hasPrefix("先秦儒家") })
+  }
+
+  func testCardInsightsQueries() throws {
+    let db = try makeDB()
+    let now = Date()
+    var c1 = Card(deck: "论语", front: "a", back: "b", due: now.addingTimeInterval(-86400), createdAt: now, updatedAt: now)
+    c1.state = .review
+    var c2 = Card(deck: "论语", front: "c", back: "d", due: now.addingTimeInterval(3 * 86400), createdAt: now, updatedAt: now)
+    c2.state = .review; c2.isSuspended = true
+    let c3 = Card(deck: "论语", front: "e", back: "f", due: now, createdAt: now, updatedAt: now)
+    let saved = try [c1, c2, c3].map { try db.save($0) }
+    let counts = try db.cardStateCounts()
+    XCTAssertEqual(counts, CardStateCounts(total: 3, new: 1, learning: 0, review: 2, suspended: 1))
+    XCTAssertEqual(try db.studiedCardDues().count, 1, "新卡、暂停的卡不计入负荷")
+    db.log(ReviewEvent(kind: .card, cardId: saved[0].id, answer: 3, at: now.addingTimeInterval(-3 * 86400)))
+    db.log(ReviewEvent(kind: .card, cardId: saved[0].id, answer: 1, at: now.addingTimeInterval(-86400)))
+    let answers = try db.cardAnswers(since: now.addingTimeInterval(-30 * 86400))
+    XCTAssertEqual(answers.count, 2)
+    let r = CardForecast.retention(answers, now: now, weeks: 4)
+    XCTAssertEqual(r.last30Reviews, 1); XCTAssertEqual(r.last30Passed, 0)
+    XCTAssertEqual(try db.targetRetention(), 0.9)
+    try db.save(DeckOptions(deck: "论语", algorithm: .fsrs, desiredRetention: 0.85))
+    XCTAssertEqual(try db.targetRetention(), 0.85, accuracy: 1e-9)
+  }
+}

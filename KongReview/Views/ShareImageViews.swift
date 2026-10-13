@@ -140,10 +140,11 @@ struct ShareImageView: View {
                         store.shareImageHighlight = nil
                     }
                     Button("存为 PNG…") { savePNG(h) }
-                    if let img = render(h) {
-                        ShareLink(item: Image(nsImage: img), preview: SharePreview("摘录", image: Image(nsImage: img))) {
-                            Label("分享…", systemImage: "square.and.arrow.up")
-                        }
+                    // 1.1：点“分享”时才生成大图（以前每勾一个选项就重新渲染一次 1080×1350 的图）
+                    Button {
+                        share(h)
+                    } label: {
+                        Label("分享…", systemImage: "square.and.arrow.up")
                     }
                     Spacer()
                     Button("关闭", role: .cancel) { store.shareImageHighlight = nil }
@@ -153,6 +154,13 @@ struct ShareImageView: View {
         }
         .padding(20)
         .frame(width: 500)
+    }
+
+    private func share(_ h: Highlight) {
+        guard let img = render(h), let view = NSApp.keyWindow?.contentView else { return }
+        let picker = NSSharingServicePicker(items: [img])
+        let anchor = NSRect(x: view.bounds.midX, y: 40, width: 1, height: 1)
+        picker.show(relativeTo: anchor, of: view, preferredEdge: .minY)
     }
 
     private func savePNG(_ h: Highlight) {

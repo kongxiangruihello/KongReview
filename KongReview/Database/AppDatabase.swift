@@ -601,7 +601,7 @@ struct ImportReport: Equatable {
 extension AppDatabase {
     /// 导入 Readwise CSV 的解析结果。整个导入在一个事务里完成：要么全部成功，要么什么都不改。
     /// - 同一出处（书名 + 作者完全相同）沿用已有记录；
-    /// - 同一出处下正文完全相同的摘录视为重复，跳过（可重复导入同一个文件而不产生重复）；
+    /// - 同一出处下正文与位置都相同的摘录视为重复，跳过（可重复导入同一个文件而不产生重复）；
     /// - extraTag 会加到每条导入的摘录上，方便日后筛选或批量处理。
     @discardableResult
     func importReadwise(_ result: ReadwiseCSVImporter.Result, extraTag: String? = nil, now: Date = Date()) throws -> ImportReport {
@@ -622,8 +622,8 @@ extension AppDatabase {
 
                 for item in src.highlights {
                     let exists = try Bool.fetchOne(db, sql: """
-                        SELECT EXISTS (SELECT 1 FROM highlight WHERE sourceId = ? AND text = ?)
-                        """, arguments: [source.id, item.text]) ?? false
+                        SELECT EXISTS (SELECT 1 FROM highlight WHERE sourceId = ? AND text = ? AND COALESCE(location, '') = ?)
+                        """, arguments: [source.id, item.text, item.location ?? ""]) ?? false
                     if exists {
                         report.duplicatesSkipped += 1
                         continue
@@ -690,14 +690,12 @@ struct HighlightQuery: Hashable {
             clauses.append("highlight.sourceId = ?")
             args.append(sourceId)
         }
-        if let tag, !tag.isEmpty {
-            // tags 以 JSON 数组存储，用 json_each 精确匹配
-            clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ?)")
-            args.append(tag)
-        }
-        for t in tags where !t.isEmpty {
-            clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ?)")
+        // tags 以 JSON 数组存储，用 json_each 匹配；1.1 起父标签包含子标签（“儒家”也找出“儒家/孟子”）
+        for t in ([tag].compactMap { $0 } + tags) where !t.isEmpty {
+            clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ? OR substr(json_each.value, 1, ?) = ?)")
             args.append(t)
+            args.append(t.unicodeScalars.count + 1)
+            args.append(t + "/")
         }
         if let dateFrom {
             clauses.append("highlight.createdAt >= ?")

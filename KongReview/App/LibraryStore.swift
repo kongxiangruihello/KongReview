@@ -28,6 +28,11 @@ final class LibraryStore {
     var sources: [Source] = []
     var highlightCounts: [Int64: Int] = [:]
     var tags: [String] = []
+    /// 1.1：分层标签树（“儒家/孟子”），含各标签摘录数
+    var tagTree: [TagNode] = []
+    var tagCountMap: [String: Int] = [:]
+    var tagEditor: TagEditRequest?
+    var showTagManager = false
     var trashCount = 0
     var articleCount = 0
 
@@ -43,6 +48,8 @@ final class LibraryStore {
     var pendingImport: ImportPreview?
     /// 导入时给每条摘录加上 #Readwise 标签
     var importAddTag = true
+    /// LiquidText 导入：跳过很短的摘录
+    var importSkipShort = false
     /// 操作完成后的提示
     var infoMessage: String?
     /// 后台导入进行中时的状态文字（非空表示正忙）
@@ -127,6 +134,8 @@ final class LibraryStore {
             highlightCounts = try db.highlightCounts()
             sortSources()
             tags = try db.allTags()
+            tagCountMap = try db.tagCounts()
+            tagTree = TagNode.tree(tagCountMap)
             trashCount = try db.trashCount()
             articleCount = try db.articleCount()
             cardHighlightIDs = try db.cardHighlightIDs()
@@ -197,15 +206,18 @@ final class LibraryStore {
     func confirmImport() {
         guard let preview = pendingImport, importProgress == nil else { return }
         let db = self.db
-        let tag = importAddTag ? "Readwise" : nil
+        let tag = importAddTag ? preview.tag : nil
+        let result = preview.origin == .liquidText && importSkipShort ? preview.withoutShort() : preview.result
         importProgress = "正在备份现有数据…"
         Task.detached(priority: .userInitiated) {
             do {
                 try BackupService.backupNow(db: db)
                 await MainActor.run {
-                    self.importProgress = "正在导入 \(preview.result.highlightCount) 条摘录，请稍候…"
+                    self.importProgress = "正在导入 \(result.highlightCount) 条摘录，请稍候…"
                 }
-                let r = try db.importReadwise(preview.result, extraTag: tag)
+                if !preview.media.isEmpty { try db.saveMedia(preview.media) }
+                let r = try db.importReadwise(result, extraTag: tag)
+                AppLog.write("导入\(preview.tag)：\(r.highlightsImported) 条，重复跳过 \(r.duplicatesSkipped) 条")
                 await MainActor.run { self.finishImport(r, preview: preview) }
             } catch {
                 await MainActor.run {
@@ -220,7 +232,11 @@ final class LibraryStore {
         var lines = ["导入 \(r.highlightsImported) 条摘录。"]
         lines.append("新建出处 \(r.sourcesCreated) 个，并入已有出处 \(r.sourcesReused) 个。")
         if r.duplicatesSkipped > 0 { lines.append("跳过重复摘录 \(r.duplicatesSkipped) 条（已存在，或文件内重复）。") }
-        if preview.result.skippedRows > 0 { lines.append("跳过没有正文的行 \(preview.result.skippedRows) 行。") }
+        if preview.result.skippedRows > 0 {
+            lines.append(preview.origin == .readwise ? "跳过没有正文的行 \(preview.result.skippedRows) 行。"
+                                                     : "文件内重复或没有内容的笔记 \(preview.result.skippedRows) 条未导入。")
+        }
+        if !preview.media.isEmpty { lines.append("图片 \(preview.media.count) 张。") }
         lines.append("导入前的数据已自动备份。")
         importProgress = nil
         pendingImport = nil
@@ -369,6 +385,77 @@ final class LibraryStore {
         guard let id = article.id else { return }
         perform { try db.deleteArticle(id: id) }
         if openArticle?.id == id { openArticle = nil }
+    }
+
+    // MARK: 1.1：记忆卡负荷预测与保留率（统计页打开时计算）
+
+    struct CardInsights {
+        var counts: CardStateCounts
+        var load: CardForecast.Load
+        var retention: CardForecast.Retention
+        var target: Double
+        var computedAt: Date
+    }
+    var cardInsights: CardInsights?
+
+    func refreshCardInsights(now: Date = Date()) {
+        do {
+            let counts = try db.cardStateCounts()
+            let load = CardForecast.load(dues: try db.studiedCardDues(), now: now, days: 30)
+            // 取 13 周 + 半年的作答：半年内的上一次作答足以判断“隔天复习”
+            let since = Calendar.current.date(byAdding: .day, value: -(12 * 7 + 7 + 180), to: now) ?? now
+            let retention = CardForecast.retention(try db.cardAnswers(since: since), now: now, weeks: 12)
+            cardInsights = CardInsights(counts: counts, load: load, retention: retention,
+                                        target: try db.targetRetention(), computedAt: now)
+        } catch {
+            report(error)
+        }
+    }
+
+    // MARK: 1.1：标签整理
+
+    func beginRenameTag(_ tag: String) {
+        let n = (try? db.highlightIDs(withTag: tag).count) ?? 0
+        tagEditor = TagEditRequest(tag: tag, mode: .rename, newName: tag, affected: n)
+    }
+
+    func beginDeleteTag(_ tag: String) {
+        let n = (try? db.highlightIDs(withTag: tag).count) ?? 0
+        tagEditor = TagEditRequest(tag: tag, mode: .delete, newName: "", affected: n)
+    }
+
+    /// 改名或合并（新名已存在即合并）；子标签、已存搜索、当前选中项一并更新。可撤销。
+    func renameTag(_ old: String, to newName: String) {
+        let new = TagOps.normalize(newName)
+        guard !new.isEmpty, new != old else { return }
+        let ids = (try? db.highlightIDs(withTag: old)) ?? []
+        let merging = tags.contains(new)
+        undoable(merging ? "合并标签" : "标签改名", highlights: ids) {
+            perform { try db.renameTag(old, to: new) }
+        }
+        for i in savedSearches.indices {
+            savedSearches[i].filter.tags = TagOps.rename(savedSearches[i].filter.tags, from: old, to: new)
+        }
+        SavedSearch.save(savedSearches)
+        if case .tag(let t)? = selection, TagOps.isWithin(t, old) {
+            selection = .tag(TagOps.rename([t], from: old, to: new).first ?? new)
+        }
+        AppLog.write("标签\(merging ? "合并" : "改名")：\(ids.count) 条摘录")
+        revisionBump()
+    }
+
+    /// 从所有摘录上去掉这个标签（及其子标签）；摘录保留。可撤销。
+    func deleteTag(_ tag: String) {
+        let ids = (try? db.highlightIDs(withTag: tag)) ?? []
+        undoable("删除标签", highlights: ids) {
+            perform { try db.deleteTag(tag) }
+        }
+        for i in savedSearches.indices {
+            savedSearches[i].filter.tags = TagOps.remove(savedSearches[i].filter.tags, tag: tag)
+        }
+        SavedSearch.save(savedSearches)
+        if case .tag(let t)? = selection, TagOps.isWithin(t, tag) { selection = .all }
+        revisionBump()
     }
 
     func revisionBump() {
@@ -987,11 +1074,34 @@ struct AddArticleDraft: Identifiable {
     var hint: String?
 }
 
-/// Readwise 导入预览
+/// 摘录导入预览（Readwise CSV、LiquidText 笔记共用）
 struct ImportPreview: Identifiable {
+    enum Origin { case readwise, liquidText }
     let id = UUID()
     var fileName: String
     var result: ReadwiseCSVImporter.Result
+    var origin: Origin = .readwise
+    /// 导入时一并存进数据库的图片（文件名 → 数据），正文里以 kr-media:// 引用
+    var media: [String: Data] = [:]
+
+    var title: String { origin == .readwise ? "从 Readwise 导入" : "从 LiquidText 导入" }
+    var tag: String { origin == .readwise ? "Readwise" : "LiquidText" }
+
+    /// 很短的摘录（如只摘了一个人名，不足 minLength 个字、且不含图片）的条数
+    static let shortLength = 4
+    var shortCount: Int {
+        result.sources.reduce(0) { $0 + $1.highlights.filter(Self.isShort).count }
+    }
+    static func isShort(_ h: ReadwiseCSVImporter.ImportedHighlight) -> Bool {
+        !h.text.contains("kr-media://") && h.text.count < shortLength
+    }
+    /// 去掉很短摘录后的结果
+    func withoutShort() -> ReadwiseCSVImporter.Result {
+        var r = result
+        for i in r.sources.indices { r.sources[i].highlights.removeAll(where: Self.isShort) }
+        r.sources.removeAll { $0.highlights.isEmpty }
+        return r
+    }
 }
 
 /// 编辑面板的草稿

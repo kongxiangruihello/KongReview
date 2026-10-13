@@ -61,8 +61,18 @@ final class CitationLookupController: NSObject, NSSearchFieldDelegate {
         model.selected = hs.isEmpty ? nil : 0
     }
 
+    /// 1.1：输入时防抖 150 毫秒再查库，打字快时不卡
+    private var pendingSearch: Task<Void, Never>?
+
     func controlTextDidChange(_ obj: Notification) {
-        search(field.stringValue)
+        pendingSearch?.cancel()
+        let q = field.stringValue
+        pendingSearch = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            self?.pendingSearch = nil
+            self?.search(q)
+        }
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -90,6 +100,12 @@ final class CitationLookupController: NSObject, NSSearchFieldDelegate {
 
     func choose(index: Int? = nil, format: Format = Format.current, paste: Bool = true) {
         guard let store = QuickCaptureController.shared.store else { return }
+        // 还有没执行的搜索（刚打完字就回车）：先按当前输入搜一次，免得选中旧结果
+        if let p = pendingSearch {
+            p.cancel()
+            pendingSearch = nil
+            if index == nil { search(field.stringValue) }
+        }
         let i = index ?? model.selected ?? 0
         guard model.results.indices.contains(i) else { NSSound.beep(); return }
         let h = model.results[i]

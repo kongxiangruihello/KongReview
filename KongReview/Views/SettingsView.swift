@@ -279,6 +279,13 @@ private struct DataSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Section("导入") {
+                HStack {
+                    Button("从 LiquidText 导入笔记…") { ExportService.importLiquidText(store: store) }
+                    Button("从剪贴板导入") { ExportService.importLiquidTextFromClipboard(store: store) }
+                }
+                Text("在 LiquidText 里导出笔记为 Word（.docx），这里选中即可（可多选）；图片摘录一并导入。也可以在 LiquidText 里选中笔记 ⌘C，再点“从剪贴板导入”。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
                 Text("在 readwise.io/export 选择 CSV 下载。可重复导入同一文件，已存在的摘录会自动跳过。")
                     .font(.caption).foregroundStyle(.secondary)

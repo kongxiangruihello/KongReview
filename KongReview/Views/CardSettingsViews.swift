@@ -117,9 +117,7 @@ struct NoteTemplateEditorView: View {
 
     var body: some View {
         let t = store.templateEditor
-        let sample = t.flatMap { tpl in
-            (try? store.db.cards())?.first { $0.noteType == tpl.name && !$0.fields.isEmpty }
-        }
+        let sample = t.flatMap { tpl in try? store.db.sampleCard(noteType: tpl.name) }
         let count = t.flatMap { try? store.db.cardCount(noteType: $0.name) } ?? 0
         return VStack(alignment: .leading, spacing: 12) {
             Text("卡片模板").font(.title2.bold())

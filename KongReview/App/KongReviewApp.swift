@@ -67,6 +67,9 @@ struct KongReviewApp: App {
                 Button("立即备份") { ExportService.backupNow(store: store) }
                 Divider()
                 Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
+                Button("从 LiquidText 导入笔记…") { ExportService.importLiquidText(store: store) }
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
+                Button("从剪贴板导入 LiquidText 笔记") { ExportService.importLiquidTextFromClipboard(store: store) }
                 Button("导入 Anki 牌组…") { ExportService.importAnki(store: store) }
                 Button("导出记忆卡到 Anki…") {
                     let decks = (try? store.db.deckNames()) ?? []

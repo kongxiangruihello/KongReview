@@ -49,6 +49,19 @@ public enum AnkiPackage {
         return map
     }
 
+    /// Markdown / HTML 里 kr-media://media/文件名 形式引用的媒体（摘录正文里的图片）
+    public static func krMediaReferences(in text: String) -> Set<String> {
+        var out = Set<String>()
+        guard let re = try? NSRegularExpression(pattern: #"kr-media://media/([^)\s"'<>]+)"#) else { return out }
+        let ns = text as NSString
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let name = ns.substring(with: m.range(at: 1))
+            out.insert(name)
+            if let decoded = name.removingPercentEncoding { out.insert(decoded) }
+        }
+        return out
+    }
+
     /// 笔记内容里引用到的媒体文件名（<img src>、[sound:]）
     public static func mediaReferences(in html: String) -> Set<String> {
         var out = Set<String>()
