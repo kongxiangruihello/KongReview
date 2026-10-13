@@ -52,13 +52,13 @@ struct CardWebView: NSViewRepresentable {
         <style>
         :root { color-scheme: light dark; }
         html, body { background: transparent; }
-        body { font: 20px/1.7 -apple-system, "PingFang SC", "Songti SC", serif; color: #1d1d1f;
+        body { font: 20px/1.75 "Songti SC", "STSong", serif; color: #1F1E1C;
                max-width: 720px; margin: 24px auto; padding: 0 24px; text-align: center; }
         .face { text-align: left; }
-        .back { font-size: 17px; color: #3a3a3c; }
+        .back { font-size: 17px; color: #3B3833; }
         img { max-width: 100%; height: auto; }
         hr#answer { border: none; border-top: 1px solid rgba(128,128,128,.35); margin: 24px 0; }
-        .cloze { font-weight: 600; color: #2f6fe4; }
+        .cloze { font-weight: 600; color: #3B73EF; }
         blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgba(128,128,128,.4); color: #555; }
         code, pre { font: 14px ui-monospace, Menlo, monospace; background: rgba(128,128,128,.12); border-radius: 4px; }
         pre { padding: 8px 10px; overflow-x: auto; }
@@ -68,7 +68,7 @@ struct CardWebView: NSViewRepresentable {
         details.kr-field > summary { font-size: 14px; color: #8e8e93; cursor: pointer; }
         details.kr-field[open] > summary { margin-bottom: 4px; }
         @media (prefers-color-scheme: dark) {
-          body { color: #f2f2f7; } .back { color: #d1d1d6; } .cloze { color: #6ea8ff; } blockquote { color: #bbb; }
+          body { color: #EDEBE6; } .back { color: #D6D2CA; } .cloze { color: #5B8CF5; } blockquote { color: #bbb; }
         }
         </style></head><body>\(body)
         <script>var a=document.getElementById('answer'); if(a){a.scrollIntoView({block:'start'});}</script>
@@ -322,8 +322,8 @@ struct StudyView: View {
     /// 卡片顶部：牌组、状态、记住概率；右侧原摘录、编辑、暂停
     private func cardHeader(_ card: Card) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "brain.head.profile").foregroundStyle(.purple)
-            Text(card.deck).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+            Image(systemName: "brain.head.profile").foregroundStyle(ReviewPalette.accent)
+            Text(card.deck).font(.system(size: 14, weight: .semibold)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
             Text(stateLabel(card))
                 .font(.caption)
                 .padding(.horizontal, 7).padding(.vertical, 2)
@@ -365,23 +365,20 @@ struct StudyView: View {
         }
     }
 
-    /// 卡片下方的圆形按钮：先“显示答案”，再四个评分
+    /// 卡片下方：先“显示答案”，再四个评分（每个按钮写着下次间隔与数字键）
     @ViewBuilder
     private func controls(_ card: Card) -> some View {
         if !study.showingAnswer {
-            CircleActionButton(icon: "eye", title: "显示答案", hint: "空格", kind: .filled, diameter: 70) {
+            PillButton(icon: "eye", title: "显示答案", key: "空格", style: .primary) {
                 study.showingAnswer = true
             }
             .keyboardShortcut(.space, modifiers: [])
         } else {
             let preview = store.scheduler(forDeck: card.deck).preview(card, now: Date())
-            HStack(alignment: .top, spacing: 40) {
+            HStack(spacing: 10) {
                 ForEach(CardAnswer.allCases, id: \.self) { a in
-                    CircleActionButton(icon: answerIcon(a), title: a.label,
-                                       hint: "\(preview[a] ?? "") · \(a.rawValue)",
-                                       kind: a == .good ? .filled : .outline,
-                                       tint: a == .good ? .accentColor : answerColor(a),
-                                       diameter: a == .good ? 70 : 60) {
+                    GradeButton(title: a.label, detail: "\(preview[a] ?? "") · \(a.rawValue)",
+                                dot: answerColor(a), primary: a == .good) {
                         store.answerCurrent(a)
                     }
                     .keyboardShortcut(KeyEquivalent(Character(String(a.rawValue))), modifiers: [])
@@ -397,39 +394,81 @@ struct StudyView: View {
         }
     }
 
-    private func answerIcon(_ a: CardAnswer) -> String {
-        switch a {
-        case .again: return "arrow.counterclockwise"
-        case .hard: return "tortoise"
-        case .good: return "checkmark"
-        case .easy: return "hare"
-        }
-    }
-
     private func answerColor(_ a: CardAnswer) -> Color {
         switch a {
-        case .again: return .red
-        case .hard: return .orange
-        case .good: return .green
-        case .easy: return .blue
+        case .again: return ReviewPalette.again
+        case .hard: return ReviewPalette.hard
+        case .good: return ReviewPalette.accent
+        case .easy: return ReviewPalette.easy
         }
     }
 
+    /// 学完：页面中部的总结卡——今日复习次数、正确率、明天到期
     private var finished: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark.seal").font(.system(size: 48)).foregroundStyle(.tint)
-            Text("这个牌组今天学完了").font(.title2)
+        let _ = store.revision
+        let start = Calendar.current.startOfDay(for: Date())
+        let today = ((try? store.db.events()) ?? []).filter { $0.kind == .card && $0.at >= start }
+        let correct = today.filter { ($0.answer ?? 0) > 1 }.count
+        let accuracy = today.isEmpty ? "—" : "\(Int((Double(correct) / Double(today.count) * 100).rounded()))"
+        let tomorrowEnd = Calendar.current.date(byAdding: .day, value: 2, to: start) ?? start
+        let deckCards = study.deck.flatMap { try? store.db.cards(deck: $0) } ?? []
+        let dueTomorrow = deckCards.filter { $0.state != .new && !$0.isSuspended && $0.due < tomorrowEnd }.count
+        return VStack(spacing: 0) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(ReviewPalette.accent)
+            Text("这个牌组今天学完了")
+                .font(.system(size: 26, weight: .semibold, design: .serif))
+                .foregroundStyle(ReviewPalette.ink)
+                .padding(.top, 12)
+            Text(study.deck ?? "")
+                .font(.system(size: 13))
+                .foregroundStyle(ReviewPalette.sub)
+                .padding(.top, 6)
+                .padding(.bottom, 24)
+            HStack(spacing: 0) {
+                summaryStat("\(today.count)", unit: "次", label: "今日复习（全部牌组）")
+                Rectangle().fill(ReviewPalette.hair).frame(width: 1)
+                summaryStat(accuracy, unit: today.isEmpty ? "" : "%", label: "答对率（非“重来”）")
+                Rectangle().fill(ReviewPalette.hair).frame(width: 1)
+                summaryStat("\(dueTomorrow)", unit: "张", label: "明天到期", accent: true)
+            }
+            .frame(height: 100)
+            .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
+            .overlay(alignment: .bottom) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
             Text("学习中的卡片到时间会再出现；新卡与复习数量受每日上限约束。")
-                .foregroundStyle(.secondary)
-            HStack {
-                Button("返回牌组") {
+                .font(.system(size: 12.5))
+                .foregroundStyle(ReviewPalette.sub)
+                .padding(.top, 18)
+            HStack(spacing: 8) {
+                PillButton(icon: "chevron.left", title: "返回牌组", style: .primary) {
                     study.deck = nil
                     study.finished = false
                 }
-                Button("再查一次") { store.nextCard() }
+                PillButton(icon: "arrow.clockwise", title: "再查一次") { store.nextCard() }
             }
+            .padding(.top, 22)
         }
+        .padding(.horizontal, 48)
+        .padding(.vertical, 36)
+        .frame(width: 600)
+        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ReviewPalette.hair))
+        .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.08), radius: 20, y: 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func summaryStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(number)
+                    .font(.system(size: 36, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
+                Text(unit).font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.sub)
+            }
+            Text(label).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

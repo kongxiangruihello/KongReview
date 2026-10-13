@@ -88,14 +88,15 @@ struct HelpView: View {
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.15)))
+                    .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ReviewPalette.hair))
                 }
             }
             .padding(28)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
+        .background(ReviewPalette.page)
         .navigationTitle("使用说明")
     }
 }

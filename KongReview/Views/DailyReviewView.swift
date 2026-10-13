@@ -21,9 +21,7 @@ struct DailyReviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
-            cardsBanner
+            topBar
             if state.cards.isEmpty {
                 ContentUnavailableView(
                     "暂无可回顾的摘录",
@@ -46,8 +44,8 @@ struct DailyReviewView: View {
                     .frame(maxWidth: .infinity)
                 }
                 controls(for: card)
-                    .padding(.top, 6)
-                    .padding(.bottom, 18)
+                    .padding(.top, 4)
+                    .padding(.bottom, 22)
             }
         }
         .background(ReviewPalette.page)
@@ -58,81 +56,45 @@ struct DailyReviewView: View {
 
     // MARK: 子视图
 
-    private var header: some View {
-        HStack {
-            Picker("范围", selection: Bindable(store.review).theme) {
-                Text("全部").tag(String?.none)
-                ForEach(store.tags, id: \.self) { Text("#\($0)").tag(String?.some($0)) }
-            }
-            .frame(maxWidth: 220)
-            Spacer()
-            if !state.cards.isEmpty {
-                ProgressView(value: Double(min(state.position, state.cards.count)), total: Double(state.cards.count))
-                    .frame(width: 160)
-                Text("\(min(state.position + 1, state.cards.count)) / \(state.cards.count)")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-    }
-
-    /// 首页顶部的统计条：今日回顾、连续天数、近 7 天、记忆卡待学；点“全部统计”进统计页
-    private var cardsBanner: some View {
+    /// 顶部细条：范围、进度、连续天数、待学卡片、全部统计（不抢正文的视线）
+    private var topBar: some View {
         let _ = store.revision
         let _ = store.today
         let s = ReviewStats.summarize((try? store.db.events()) ?? [], now: Date(), days: 7)
         let due = store.dueCardCount()
-        let week = s.lastDays
-        let peak = max(1, week.map(\.total).max() ?? 1)
         return VStack(spacing: 0) {
-            HStack(spacing: 18) {
-                statItem("今日回顾", "\(s.today.highlights) 条", s.today.cards > 0 ? "记忆卡 \(s.today.cards) 次" : nil,
-                         icon: s.today.total > 0 ? "checkmark.circle.fill" : "sun.max",
-                         color: s.today.total > 0 ? .green : .orange)
-                statItem("连续回顾", "\(s.currentStreak) 天", "最长 \(s.longestStreak) 天", icon: "flame", color: .red)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("近 7 天").font(.caption).foregroundStyle(.secondary)
-                    HStack(alignment: .bottom, spacing: 3) {
-                        ForEach(Array(week.enumerated()), id: \.offset) { idx, d in
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(idx == week.count - 1 ? Color.accentColor : Color.accentColor.opacity(0.45))
-                                .frame(width: 8, height: max(2, 22 * CGFloat(d.total) / CGFloat(peak)))
-                                .help("\(d.key)：摘录 \(d.highlights) 条，记忆卡 \(d.cards) 次")
-                        }
-                    }
-                    .frame(height: 22, alignment: .bottom)
+            HStack(spacing: 22) {
+                Picker("范围", selection: Bindable(store.review).theme) {
+                    Text("全部摘录").tag(String?.none)
+                    ForEach(store.tags, id: \.self) { Text("#\($0)").tag(String?.some($0)) }
                 }
-                Button {
-                    store.selection = .cards
-                } label: {
-                    statItem("记忆卡待学", "\(due) 张", due > 0 ? "去学习 ›" : "今天学完了",
-                             icon: "brain", color: .purple)
+                .labelsHidden()
+                .fixedSize()
+                if !state.cards.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView(value: Double(min(state.position, state.cards.count)), total: Double(state.cards.count))
+                            .tint(ReviewPalette.accent)
+                            .frame(width: 90)
+                        Text("\(min(state.position + 1, state.cards.count)) / \(state.cards.count)")
+                            .font(.system(size: 12.5).monospacedDigit())
+                            .foregroundStyle(ReviewPalette.sub)
+                    }
+                }
+                StatChip(icon: "flame.fill", iconColor: ReviewPalette.hard, label: "连续", value: "\(s.currentStreak) 天")
+                Button { store.selection = .cards } label: {
+                    StatChip(icon: "brain", iconColor: ReviewPalette.accent, label: "记忆卡待学", value: "\(due)")
                 }
                 .buttonStyle(.plain)
                 .help("打开记忆卡")
                 Spacer()
                 Button("全部统计 ›") { store.selection = .stats }
-                    .buttonStyle(.link)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(ReviewPalette.accent)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color.secondary.opacity(0.05))
-            Divider()
-        }
-    }
-
-    private func statItem(_ title: String, _ value: String, _ detail: String?, icon: String, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon).foregroundStyle(color).font(.title3)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.caption).foregroundStyle(.secondary)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(value).font(.headline).monospacedDigit()
-                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
-                }
-            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 10)
+            Rectangle().fill(ReviewPalette.hair).frame(height: 1)
         }
     }
 
@@ -162,19 +124,137 @@ struct DailyReviewView: View {
         }
     }
 
+    /// 回顾完成：页面中部的一张总结卡——日期、三项大数字、近 7 天、今日一句、下一步
     private var finished: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "checkmark.seal").font(.system(size: 48)).foregroundStyle(.tint)
-            Text("今日回顾完成").font(.title2)
-            Text("共 \(state.cards.count) 条").foregroundStyle(.secondary)
-            HStack {
-                Button("上一条") { go(-1) }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                Button("从头再看一遍") { state.position = 0; persist() }
-                Button("再抽一组") { loadSession(forceNew: true) }
+        let _ = store.revision
+        let s = ReviewStats.summarize((try? store.db.events()) ?? [], now: Date(), days: 7)
+        let due = store.dueCardCount()
+        let peak = max(1, s.lastDays.map(\.total).max() ?? 1)
+        let quote = todaysQuote()
+        return ScrollView {
+            VStack(spacing: 0) {
+                Text(Self.longDate(Date()))
+                    .font(.system(size: 12.5))
+                    .tracking(1)
+                    .foregroundStyle(ReviewPalette.sub)
+                Text("今日回顾完成")
+                    .font(.system(size: 30, weight: .semibold, design: .serif))
+                    .foregroundStyle(ReviewPalette.ink)
+                    .padding(.top, 10)
+                    .padding(.bottom, 26)
+
+                // 三项大数字
+                HStack(spacing: 0) {
+                    bigStat("\(s.today.highlights)", unit: "条", label: s.today.cards > 0 ? "今日回顾 · 记忆卡 \(s.today.cards) 次" : "今日回顾摘录")
+                    Rectangle().fill(ReviewPalette.hair).frame(width: 1)
+                    bigStat("\(s.currentStreak)", unit: "天", label: "连续回顾 · 最长 \(s.longestStreak) 天")
+                    Rectangle().fill(ReviewPalette.hair).frame(width: 1)
+                    bigStat("\(due)", unit: "张", label: due > 0 ? "记忆卡待学" : "记忆卡今天学完了", accent: due > 0)
+                }
+                .frame(height: 104)
+                .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
+                .overlay(alignment: .bottom) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
+
+                // 近 7 天
+                HStack(alignment: .bottom, spacing: 14) {
+                    ForEach(Array(s.lastDays.enumerated()), id: \.offset) { i, d in
+                        let isToday = i == s.lastDays.count - 1
+                        VStack(spacing: 6) {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(isToday ? ReviewPalette.accent : ReviewPalette.accentSoft)
+                                .frame(width: 16, height: max(6, 52 * CGFloat(d.total) / CGFloat(peak)))
+                            Text(isToday ? "今天" : Self.weekday(d.key))
+                                .font(.system(size: 11))
+                                .foregroundStyle(isToday ? ReviewPalette.ink : ReviewPalette.sub)
+                        }
+                        .help("\(d.key)：摘录 \(d.highlights) 条，记忆卡 \(d.cards) 次")
+                    }
+                }
+                .frame(height: 82, alignment: .bottom)
+                .padding(.top, 22)
+
+                // 今日一句
+                if let q = quote {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("“\(q.text)”")
+                            .font(.system(size: 16, design: .serif))
+                            .lineSpacing(6)
+                            .foregroundStyle(ReviewPalette.ink.opacity(0.88))
+                            .lineLimit(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("今日一句" + (q.source.isEmpty ? "" : " · " + q.source))
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(ReviewPalette.sub)
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ReviewPalette.soft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.top, 24)
+                }
+
+                // 下一步
+                HStack(spacing: 8) {
+                    PillButton(icon: "chevron.left", title: "上一条", key: "←", style: .ghost) { go(-1) }
+                        .keyboardShortcut(.leftArrow, modifiers: [])
+                    if due > 0 {
+                        PillButton(icon: "brain", title: "去学习记忆卡 · \(due)", style: .primary) { store.selection = .cards }
+                    }
+                    PillButton(title: "从头再看") { state.position = 0; persist() }
+                    PillButton(title: "再抽一组", style: due > 0 ? .normal : .primary) { loadSession(forceNew: true) }
+                }
+                .padding(.top, 26)
             }
+            .padding(.horizontal, 48)
+            .padding(.top, 40)
+            .padding(.bottom, 34)
+            .frame(width: 640)
+            .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ReviewPalette.hair))
+            .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.08), radius: 20, y: 10)
+            .padding(.vertical, 48)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func bigStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(number)
+                    .font(.system(size: 40, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
+                Text(unit).font(.system(size: 15, weight: .medium)).foregroundStyle(ReviewPalette.sub)
+            }
+            Text(label).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 今日一句：今天这组里收藏的那条；没有收藏就按日期固定取一条（同一天总是同一句）
+    private func todaysQuote() -> (text: String, source: String)? {
+        guard !state.cards.isEmpty else { return nil }
+        let pick = state.cards.first { $0.highlight.isFavorite }
+            ?? state.cards[store.today.unicodeScalars.reduce(0) { $0 + Int($1.value) } % state.cards.count]
+        let plain = Markdown.plainText(fromHTML: Markdown.richHTML(pick.highlight.text))
+            .replacingOccurrences(of: "\n", with: " ")
+        let text = plain.count > 120 ? String(plain.prefix(118)) + "…" : plain
+        let src = store.source(for: pick.highlight)
+        let source = [src?.author ?? "", src.map { "《\($0.title)》" } ?? ""].filter { !$0.isEmpty }.joined()
+        return (text, source)
+    }
+
+    static func longDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日 · EEEE"
+        return f.string(from: d)
+    }
+
+    static func weekday(_ key: String) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: key) else { return "" }
+        return ["日", "一", "二", "三", "四", "五", "六"][Calendar.current.component(.weekday, from: d) - 1]
     }
 
     /// 写按语时返回 nil，让单键快捷键失效
@@ -187,19 +267,26 @@ struct DailyReviewView: View {
         let h = card.highlight
         let source = store.source(for: h)
         let hasCard = store.cardHighlightIDs.contains(card.id)
-        return ReviewCardContainer(padding: 36) {
-            HStack(alignment: .top, spacing: 16) {
+        return ReviewCardContainer(padding: 34) {
+            HStack(alignment: .center, spacing: 14) {
                 SourceThumb(source: source)
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(source?.title ?? "未归类")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(ReviewPalette.ink)
                         .lineLimit(2)
-                    Text([source?.author ?? "", h.location ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.system(size: 15))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    if hasCard {
-                        Label("已做成记忆卡", systemImage: "brain").font(.caption).foregroundStyle(.purple)
+                    HStack(spacing: 8) {
+                        let byline = [source?.author ?? "", h.location ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+                        if !byline.isEmpty {
+                            Text(byline).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+                        }
+                        if hasCard {
+                            Label("记忆卡", systemImage: "brain")
+                                .font(.system(size: 11))
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .foregroundStyle(ReviewPalette.accent)
+                                .background(ReviewPalette.accentSoft, in: Capsule())
+                        }
                     }
                 }
                 Spacer(minLength: 12)
@@ -212,7 +299,7 @@ struct DailyReviewView: View {
                     state.showDetails.toggle()
                 }
             }
-            .padding(.bottom, 26)
+            .padding(.bottom, 24)
 
             // 正文与译文、按语（网页渲染：Markdown 标题、列表、图片都按真实样式显示）
             RichWebText(text: h.text, style: .highlight, slot: "review-text")
@@ -243,13 +330,15 @@ struct DailyReviewView: View {
                             }
                         }
                     }
-                    Text("添加于 \(h.createdAt.formatted(date: .abbreviated, time: .omitted))，回顾过 \(h.surfacedCount) 次")
-                        .font(.caption).foregroundStyle(.tertiary)
+                    Text("回顾过 \(h.surfacedCount) 次").font(.caption).foregroundStyle(ReviewPalette.sub)
                 }
                 .padding(.top, 20)
             }
 
-            HStack(spacing: 28) {
+            Rectangle().fill(ReviewPalette.hair).frame(height: 1).padding(.top, 26)
+            HStack(spacing: 14) {
+                Text("添加于 \(h.createdAt.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub.opacity(0.8))
                 Spacer()
                 CardIconButton(icon: h.isFavorite ? "heart.fill" : "heart", help: "收藏（F）", active: h.isFavorite) {
                     act(.favorite, card)
@@ -260,36 +349,36 @@ struct DailyReviewView: View {
                 }
                 CardIconButton(icon: "doc.on.doc", help: "复制（含出处）") { copy(h, source: source) }
                 ShareLink(item: shareText(h, source: source)) {
-                    Image(systemName: "square.and.arrow.up").font(.system(size: 18))
-                        .foregroundStyle(Color.accentColor.opacity(0.85))
-                        .frame(width: 34, height: 30)
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 14))
+                        .foregroundStyle(ReviewPalette.sub)
+                        .frame(width: 28, height: 26)
                 }
                 .buttonStyle(.plain)
                 .help("分享")
             }
-            .padding(.top, 28)
+            .padding(.top, 12)
         }
     }
 
-    /// 卡片下方的一排圆形按钮（参照 Readwise：弃置 · 中间操作 · 保留）
+    /// 卡片下方的操作条：上一条 ｜ 弃置 · 按语 · 记忆卡 ｜ 保留（主操作）
     @ViewBuilder
     private func controls(for card: ReviewCard) -> some View {
         let hasCard = store.cardHighlightIDs.contains(card.id)
-        HStack(alignment: .top, spacing: 44) {
-            CircleActionButton(icon: "chevron.left", title: "上一条", hint: "← / K", kind: .plain, diameter: 44,
-                               disabled: state.position == 0) { go(-1) }
+        HStack(spacing: 8) {
+            PillButton(icon: "chevron.left", title: "上一条", key: "←", style: .ghost, disabled: state.position == 0) { go(-1) }
                 .keyboardShortcut(key(.leftArrow))
-            CircleActionButton(icon: "xmark", title: "弃置", hint: "Delete", kind: .outline) { act(.discard, card) }
+            BarSeparator()
+            PillButton(icon: "xmark", title: "弃置", key: "⌫") { act(.discard, card) }
                 .keyboardShortcut(key(.delete))
                 .help("以后不再出现（可在列表中恢复）")
-            CircleActionButton(icon: "text.bubble", title: "按语", hint: "N", kind: .plain, diameter: 52,
-                               disabled: editingNote) { state.noteDraft = card.highlight.note ?? "" }
+            PillButton(icon: "text.bubble", title: "按语", key: "N", disabled: editingNote) { state.noteDraft = card.highlight.note ?? "" }
                 .keyboardShortcut(key("n"))
-            CircleActionButton(icon: "brain", title: hasCard ? "已是卡片" : "记忆卡", hint: "M", kind: .plain, diameter: 52,
-                               disabled: hasCard) { makeCard(card) }
+            PillButton(icon: "brain", title: hasCard ? "已是记忆卡" : "记忆卡", key: "M", disabled: hasCard) { makeCard(card) }
                 .keyboardShortcut(key("m"))
-            CircleActionButton(icon: "checkmark", title: "保留", hint: "空格 / → / J", kind: .filled) { act(.keep, card) }
+            BarSeparator()
+            PillButton(icon: "checkmark", title: "保留", key: "空格", style: .primary) { act(.keep, card) }
                 .keyboardShortcut(key(.space))
+                .help("保留并看下一条（空格、→ 或 J）")
         }
         .frame(maxWidth: .infinity)
         .background {

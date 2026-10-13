@@ -45,8 +45,8 @@ struct RichWebText: View {
         }
         return """
         <!doctype html><html><head><meta charset="utf-8"><style>
-        :root { color-scheme: light dark; --text: #1d1d1f; --secondary: #6e6e73; --accent: #2f6fe4; }
-        @media (prefers-color-scheme: dark) { :root { --text: #f2f2f7; --secondary: #a1a1a6; --accent: #6ea8ff; } }
+        :root { color-scheme: light dark; --text: #1F1E1C; --secondary: #8A857C; --accent: #3B73EF; }
+        @media (prefers-color-scheme: dark) { :root { --text: #EDEBE6; --secondary: #9C978E; --accent: #5B8CF5; } }
         html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
         body { color: var(--text); \(font) -webkit-user-select: text; word-wrap: break-word; }
         p { margin: 0 0 .6em; } p:last-child { margin-bottom: 0; }

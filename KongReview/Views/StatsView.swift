@@ -66,6 +66,7 @@ struct StatsView: View {
             .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .background(ReviewPalette.page)
         .navigationTitle("回顾统计")
     }
 
@@ -77,7 +78,8 @@ struct StatsView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
         .padding(12)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ReviewPalette.hair))
     }
 
     static func parse(_ key: String) -> Date {
