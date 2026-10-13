@@ -617,47 +617,39 @@ struct CardEditorView: View {
                 TextField("用逗号或空格分隔", text: binding(\.tagsText, ""))
                     .textFieldStyle(.roundedBorder)
             }
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
+            // 1.2：所见即所得编辑（去掉右侧预览）；背面可加多个自定义栏目
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
                     if let c = draft?.card, let type = c.noteType, !c.fields.isEmpty {
                         // 多字段卡片：逐个字段编辑，正反面由“卡片模板”决定
                         let names = store.noteTemplates[type]?.fieldNames ?? []
-                        Text("笔记类型：\(type)").font(.caption).foregroundStyle(.secondary)
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(Array(c.fields.indices), id: \.self) { i in
-                                    Text(i < names.count ? names[i] : "字段\(i + 1)").font(.headline)
-                                    TextEditor(text: fieldBinding(i))
-                                        .font(.system(size: 13))
-                                        .frame(minHeight: 70)
-                                        .border(Color.secondary.opacity(0.3))
-                                }
-                            }
+                        Text("笔记类型：\(type)（正反面怎么排由“记忆卡 → 卡片模板”决定）")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(Array(c.fields.indices), id: \.self) { i in
+                            Text(i < names.count ? names[i] : "字段\(i + 1)").font(.headline)
+                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: i == 0, autoHeight: true, minHeight: 56,
+                                       slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel)
+                                .richEditorFrame()
                         }
                     } else {
-                    Text("正面").font(.headline)
-                    TextEditor(text: binding(\.card.front, ""))
-                        .font(.system(size: 14))
-                        .border(Color.secondary.opacity(0.3))
-                    Text("背面").font(.headline)
-                    TextEditor(text: binding(\.card.back, ""))
-                        .font(.system(size: 14))
-                        .border(Color.secondary.opacity(0.3))
+                        Text("正面").font(.headline)
+                        RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: "问题、字词或章句",
+                                   autoHeight: true, minHeight: 90, focus: draft?.isNew == true, slot: "card-front",
+                                   onSubmit: submit, onCancel: cancel)
+                            .richEditorFrame()
+                        Text("背面").font(.headline).padding(.top, 6)
+                        RichEditor(text: binding(\.card.back, ""), mode: .card, placeholder: "答案",
+                                   autoHeight: true, minHeight: 90, slot: "card-back",
+                                   onSubmit: submit, onCancel: cancel)
+                            .richEditorFrame()
+                        sectionsEditor
                     }
-                    Text("支持 Markdown（**粗体**、*斜体*、列表、> 引用、`代码`）或直接写 HTML；图片可用 <img src=\"网址\">。")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("预览").font(.headline)
-                    let f: (front: String, back: String) = draft.map { store.faces(of: $0.card) } ?? (front: "", back: "")
-                    CardWebView(front: f.front, back: f.back, store: store)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .border(Color.secondary.opacity(0.3))
-                }
-                .frame(maxWidth: .infinity)
+                .padding(.trailing, 6)
             }
+            Text("所见即所得：⌘B 粗体、⌘I 斜体、⌘K 链接、⌘1/⌘2 标题、⇧⌘8 列表；也可直接敲 Markdown。从网页、Word、Anki 粘贴时保留格式。⌘↩ 保存。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 if let c = draft?.card, c.id != nil {
                     Text(c.state == .new ? "新卡" : "已复习 \(c.reps) 次，遗忘 \(c.lapses) 次，间隔 \(Int(c.interval)) 天"
@@ -681,8 +673,103 @@ struct CardEditorView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 820, minHeight: 560)
+        .frame(minWidth: 680, idealWidth: 720, minHeight: 600, idealHeight: 720)
     }
+
+    // MARK: 背面栏目（1.2）
+
+    /// 背面的自定义栏目：名称、内容、是否默认折叠；可增删、上下移动
+    @ViewBuilder
+    private var sectionsEditor: some View {
+        let secs = store.cardEditor?.card.sections ?? []
+        ForEach(secs) { sec in
+            let i = secs.firstIndex(where: { $0.id == sec.id }) ?? 0
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    TextField("栏目名称", text: sectionBinding(sec.id, \.name, ""))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.headline)
+                        .frame(width: 150)
+                    Menu("常用") {
+                        ForEach(CardSettings.sectionNames, id: \.self) { n in
+                            Button(n) { sectionBinding(sec.id, \.name, "").wrappedValue = n }
+                        }
+                    }
+                    .fixedSize()
+                    Toggle("默认折叠（点开才显示）", isOn: sectionBinding(sec.id, \.folded, false))
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                    Spacer()
+                    Button { moveSection(sec.id, by: -1) } label: { Image(systemName: "arrow.up") }
+                        .buttonStyle(.borderless).disabled(i == 0).help("上移")
+                    Button { moveSection(sec.id, by: 1) } label: { Image(systemName: "arrow.down") }
+                        .buttonStyle(.borderless).disabled(i == secs.count - 1).help("下移")
+                    Button { removeSection(sec.id) } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless).help("删除这个栏目")
+                }
+                RichEditor(text: sectionBinding(sec.id, \.text, ""), mode: .card, placeholder: "栏目内容",
+                           toolbar: false, autoHeight: true, minHeight: 56, slot: "card-section-" + sec.id,
+                           onSubmit: submit, onCancel: cancel)
+                    .richEditorFrame()
+            }
+            .padding(.top, 8)
+        }
+        Menu {
+            ForEach(CardSettings.sectionNames, id: \.self) { n in
+                Button(n) { addSection(n) }
+            }
+            Divider()
+            Button("自定义名称") { addSection("") }
+        } label: {
+            Label("添加背面栏目", systemImage: "plus.circle")
+        } primaryAction: {
+            addSection("")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .padding(.top, 8)
+        .help("在背面答案之后再加一栏，如“释义”“出处”“例句”；可加多个。点按直接添加，按住选常用名称。")
+    }
+
+    private func sectionBinding<T>(_ id: String, _ kp: WritableKeyPath<CardSection, T>, _ fallback: T) -> Binding<T> {
+        Binding(get: {
+            store.cardEditor?.card.sections?.first(where: { $0.id == id })?[keyPath: kp] ?? fallback
+        }, set: { v in
+            guard var secs = store.cardEditor?.card.sections, let i = secs.firstIndex(where: { $0.id == id }) else { return }
+            secs[i][keyPath: kp] = v
+            store.cardEditor?.card.sections = secs
+        })
+    }
+
+    private func addSection(_ name: String) {
+        var secs = store.cardEditor?.card.sections ?? []
+        secs.append(CardSection(name: name))
+        store.cardEditor?.card.sections = secs
+    }
+
+    private func removeSection(_ id: String) {
+        var secs = store.cardEditor?.card.sections ?? []
+        secs.removeAll { $0.id == id }
+        store.cardEditor?.card.sections = secs.isEmpty ? nil : secs
+    }
+
+    private func moveSection(_ id: String, by delta: Int) {
+        guard var secs = store.cardEditor?.card.sections, let i = secs.firstIndex(where: { $0.id == id }) else { return }
+        let j = i + delta
+        guard secs.indices.contains(j) else { return }
+        secs.swapAt(i, j)
+        store.cardEditor?.card.sections = secs
+    }
+
+    /// 编辑器里按 ⌘↩
+    private func submit() {
+        let c = store.cardEditor?.card
+        let first = (c?.fields.first ?? c?.front ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !first.isEmpty else { NSSound.beep(); return }
+        store.commitCardEditor()
+    }
+
+    private func cancel() { store.cardEditor = nil }
 }
 
 // MARK: - Anki 导入预览

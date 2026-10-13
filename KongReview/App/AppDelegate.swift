@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyCenter.shared.lookupAction = { CitationLookupController.shared.show() }
         HotKeyCenter.shared.applyLookup(HotKeyPreset.lookup)
         StatusItemController.shared.apply()
+        PointerCursor.install()
         QuickCaptureController.shared.store?.runStartupMaintenance()
 
         // 提醒与“今天是否已回顾”挂钩：首次回顾后、跨日时重排通知

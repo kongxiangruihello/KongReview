@@ -154,3 +154,74 @@ extension String {
         return t.isEmpty ? nil : t
     }
 }
+
+// MARK: - 参考文献表（1.2）
+
+/// 按 GB/T 7714—2015 生成参考文献表（整部文献，不含页码）。
+/// - numbered：顺序编码制，按给出的顺序编号 [1] [2] …；
+/// - authorYear：著者-出版年制，“著者,出版年.题名[M].出版地:出版者.”，按著者排序（中文按拼音）。
+public enum Bibliography {
+    public enum Order: String, CaseIterable, Sendable {
+        case numbered, authorYear
+        public var label: String { self == .numbered ? "顺序编码制（编号）" : "著者-出版年制（按著者排序）" }
+    }
+
+    /// 去重：同一 id，或标题 + 作者相同
+    public static func unique(_ sources: [Source]) -> [Source] {
+        var seen = Set<String>()
+        var out: [Source] = []
+        for s in sources {
+            let key = s.id.map { "id:\($0)" } ?? "t:\(s.title)|\(s.author)"
+            let key2 = "t:\(s.title)|\(s.author)"
+            if seen.contains(key) || seen.contains(key2) { continue }
+            seen.insert(key); seen.insert(key2)
+            out.append(s)
+        }
+        return out
+    }
+
+    public static func entries(_ sources: [Source], order: Order = .numbered, accessed: Date = Date()) -> [String] {
+        let list = unique(sources)
+        switch order {
+        case .numbered:
+            return list.enumerated().map { "[\($0.offset + 1)] " + CitationFormatter.gbt($0.element, location: nil, accessed: accessed) }
+        case .authorYear:
+            let zh = Locale(identifier: "zh_Hans_CN")
+            let sorted = list.sorted { a, b in
+                let ka = a.author.isEmpty ? a.title : a.author
+                let kb = b.author.isEmpty ? b.title : b.author
+                let r = ka.compare(kb, options: [.caseInsensitive], range: nil, locale: zh)
+                if r != .orderedSame { return r == .orderedAscending }
+                return (a.year ?? "") < (b.year ?? "")
+            }
+            return sorted.map { authorYear($0, accessed: accessed) }
+        }
+    }
+
+    /// 著者-出版年制的单条
+    static func authorYear(_ s: Source, accessed: Date) -> String {
+        let authors = CitationFormatter.gbtAuthors(s.author)
+        let year = s.year?.nonEmpty
+        var out = ""
+        if !authors.isEmpty { out += authors + (year.map { "," + $0 } ?? "") + "." }
+        else if let year { out += year + "." }
+        out += "\(s.title)[\(CitationFormatter.typeCode(s.kind))]."
+        switch s.kind {
+        case .article:
+            var tail: [String] = []
+            if let c = s.container?.nonEmpty { tail.append(c) }
+            if let i = s.issue?.nonEmpty { tail.append(i) }
+            if !tail.isEmpty { out += tail.joined(separator: ",") + "." }
+        case .web:
+            out += "[\(CitationFormatter.isoDay(accessed))]."
+            if let u = s.url?.nonEmpty { out += u + "." }
+        default:
+            if let e = s.edition?.nonEmpty { out += e + "." }
+            var pub = ""
+            if let place = s.place?.nonEmpty { pub = place + ":" }
+            if let p = s.publisher?.nonEmpty { pub += p }
+            if !pub.isEmpty { out += pub + "." }
+        }
+        return out
+    }
+}

@@ -120,10 +120,10 @@ struct ClozeEditorView: View {
                         .fixedSize()
                     }
                     Text("背面附加").font(.headline)
-                    TextEditor(text: Binding(get: { store.clozeDraft?.extra ?? "" }, set: { store.clozeDraft?.extra = $0 }))
-                        .font(.system(size: 13))
-                        .frame(minHeight: 70)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(ReviewPalette.hair))
+                    RichEditor(text: Binding(get: { store.clozeDraft?.extra ?? "" }, set: { store.clozeDraft?.extra = $0 }),
+                               mode: .card, placeholder: "（可选）释义、出处等", toolbar: false, minHeight: 80, slot: "cloze-extra")
+                        .frame(height: 90)
+                        .richEditorFrame()
                 }
                 .frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: 6) {

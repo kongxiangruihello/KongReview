@@ -112,64 +112,9 @@ enum ExportService {
     }
 
     nonisolated static func readLiquidText(_ url: URL) throws -> ImportPreview {
-        let name = url.lastPathComponent
-        // 文件名一般是“文档名 Notes.docx”，没有出处行时用它作标题
-        var fallback = url.deletingPathExtension().lastPathComponent
-        if fallback.hasSuffix(" Notes") { fallback = String(fallback.dropLast(6)) }
-        fallback = fallback.trimmingCharacters(in: .whitespaces)
-
-        guard url.pathExtension.lowercased() == "docx" else {
-            let data = try Data(contentsOf: url)
-            let text: String
-            if url.pathExtension.lowercased() == "rtf",
-               let attr = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf],
-                                                  documentAttributes: nil) {
-                text = attr.string
-            } else if let t = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
-                text = t
-            } else {
-                throw ImportFileError("无法读取文件编码（应为 UTF-8）。")
-            }
-            let parsed = LiquidTextImporter.parse(LiquidTextImporter.blocks(plainText: text))
-            return ImportPreview(fileName: name, result: LiquidTextImporter.result(parsed, fallbackTitle: fallback),
-                                 origin: .liquidText)
-        }
-
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("kr-lt-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        // .docx 就是 zip 包；用系统自带的 ditto 解压
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        p.arguments = ["-x", "-k", url.path, tmp.path]
-        try p.run()
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else { throw ImportFileError("解压失败：\(name) 可能不是有效的 Word 文件。") }
-        let word = tmp.appendingPathComponent("word")
-        let xml = try Data(contentsOf: word.appendingPathComponent("document.xml"))
-        let rels = (try? Data(contentsOf: word.appendingPathComponent("_rels/document.xml.rels")))
-            .map(LiquidTextImporter.relationships) ?? [:]
-        let parsed = LiquidTextImporter.parse(try LiquidTextImporter.blocks(documentXML: xml))
-
-        var media: [String: Data] = [:]
-        let result = LiquidTextImporter.result(parsed, fallbackTitle: fallback) { rid, location in
-            guard let target = rels[rid] else { return nil }
-            let file = word.appendingPathComponent(target).standardizedFileURL
-            guard file.path.hasPrefix(tmp.standardizedFileURL.path), let data = try? Data(contentsOf: file) else { return nil }
-            let ext = file.pathExtension.isEmpty ? "png" : file.pathExtension.lowercased()
-            // 按内容取名：同一张图重复导入不会多存
-            let mediaName = "liquidtext-\(SHA1.hex(data).prefix(16)).\(ext)"
-            media[mediaName] = data
-            return "![\(location ?? "图片")](kr-media://media/\(mediaName))"
-        }
-        return ImportPreview(fileName: name, result: result, origin: .liquidText, media: media)
+        try LiquidTextReader.read(url)
     }
 
-    struct ImportFileError: LocalizedError {
-        let message: String
-        init(_ message: String) { self.message = message }
-        var errorDescription: String? { message }
-    }
 
     static func backupNow(store: LibraryStore) {
         do {

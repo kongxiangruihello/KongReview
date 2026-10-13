@@ -19,16 +19,14 @@ struct HighlightEditorView: View {
         VStack(alignment: .leading, spacing: 0) {
             Form {
                 Section {
-                    TextEditor(text: draftBinding.highlight.text)
-                        .font(.system(.body, design: .serif))
-                        .frame(minHeight: 140)
-                    if !draft.highlight.text.isEmpty {
-                        MarkdownPreview(text: draft.highlight.text, style: .highlight, slot: "preview-text")
-                    }
+                    RichEditor(text: draftBinding.highlight.text, font: .highlight, placeholder: "摘录原文",
+                               autoHeight: true, minHeight: 150, focus: draft.isNew, slot: "hl-text",
+                               onSubmit: submit, onCancel: cancel)
+                        .richEditorFrame()
                 } header: {
                     Text("原文")
                 } footer: {
-                    Text("原文、译文、按语都支持 Markdown：# 标题、- 列表、> 引用、**粗体**、*斜体*、`代码`、[链接](https://…)，下方实时预览（与回顾页显示一致）。")
+                    Text("所见即所得：⌘B 粗体、⌘I 斜体、⌘K 链接、⌘1/⌘2 标题、⇧⌘8 列表、⇧⌘. 引用；也可直接敲 Markdown（行首“# ”“- ”“> ”，或 **粗体**）。从网页、Word 粘贴时保留粗体、标题、列表等格式。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -58,19 +56,17 @@ struct HighlightEditorView: View {
                 }
 
                 Section("译文 / 白话（可选）") {
-                    TextEditor(text: optional(draftBinding.highlight.translation))
-                        .frame(minHeight: 50)
-                    if let t = draft.highlight.translation, !t.isEmpty {
-                        MarkdownPreview(text: t, slot: "preview-translation")
-                    }
+                    RichEditor(text: optional(draftBinding.highlight.translation), placeholder: "译文或白话",
+                               toolbar: false, autoHeight: true, minHeight: 60, slot: "hl-translation",
+                               onSubmit: submit, onCancel: cancel)
+                        .richEditorFrame()
                 }
 
                 Section("按语（可选）") {
-                    TextEditor(text: optional(draftBinding.highlight.note))
-                        .frame(minHeight: 60)
-                    if let n = draft.highlight.note, !n.isEmpty {
-                        MarkdownPreview(text: n, slot: "preview-note")
-                    }
+                    RichEditor(text: optional(draftBinding.highlight.note), font: .note, placeholder: "按语",
+                               autoHeight: true, minHeight: 70, slot: "hl-note",
+                               onSubmit: submit, onCancel: cancel)
+                        .richEditorFrame()
                 }
 
                 Section("标签") {
@@ -112,6 +108,13 @@ struct HighlightEditorView: View {
     private func cancel() {
         store.editorDraft = nil
         dismiss()
+    }
+
+    /// 编辑器里按 ⌘↩
+    private func submit() {
+        guard let d = store.editorDraft,
+              !d.highlight.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        store.commit(d)
     }
 
     private func appendTag(_ tag: String) {

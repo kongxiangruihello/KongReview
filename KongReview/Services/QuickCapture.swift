@@ -15,7 +15,20 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
 
     private var panel: QuickCapturePanel?
     /// 系统配置好的可滚动文本视图（自动换行、随宽度伸缩）
-    private let scroll = NSTextView.scrollableTextView()
+    /// 1.2：粘贴时把网页、Word 的格式转成 Markdown 保留（MarkdownPasteTextView）
+    private let scroll: NSScrollView = {
+        let s = NSScrollView()
+        let tv = MarkdownPasteTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 170))
+        tv.minSize = .zero
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+        tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.containerSize = NSSize(width: 540, height: CGFloat.greatestFiniteMagnitude)
+        s.documentView = tv
+        return s
+    }()
     private var textView: NSTextView { scroll.documentView as! NSTextView }
     private let sourceField = NSComboBox()
     private let authorField = NSTextField()
@@ -80,7 +93,7 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
 
         let pb = NSPasteboard.general
         if pb.changeCount != lastChangeCount,
-           let clip = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let clip = RichClipboard.markdown(pb)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !clip.isEmpty, clip.count <= 20_000 {
             textView.string = clip
             textView.selectAll(nil)
@@ -259,5 +272,46 @@ final class QuickCapturePanel: NSPanel {
 
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
+    }
+}
+
+// MARK: - 1.2：带格式粘贴
+
+/// 剪贴板 → Markdown：有 HTML（网页、Word、Pages）时保留标题、粗体、斜体、列表、链接等格式；
+/// 只有 RTF 时先转成 HTML；都没有就用纯文本。
+enum RichClipboard {
+    @MainActor
+    static func markdown(_ pb: NSPasteboard = .general) -> String? {
+        if let html = pb.string(forType: .html), !html.isEmpty {
+            let md = Markdown.markdown(fromClipboardHTML: html)
+            if !md.isEmpty { return md }
+        }
+        if pb.string(forType: .string) == nil,
+           let rtf = pb.data(forType: .rtf),
+           let attr = NSAttributedString(rtf: rtf, documentAttributes: nil),
+           let data = try? attr.data(from: NSRange(location: 0, length: attr.length),
+                                     documentAttributes: [.documentType: NSAttributedString.DocumentType.html]),
+           let html = String(data: data, encoding: .utf8) {
+            let md = Markdown.markdown(fromClipboardHTML: html)
+            if !md.isEmpty { return md }
+        }
+        return pb.string(forType: .string)
+    }
+
+    /// 剪贴板里是否有带格式的内容
+    @MainActor
+    static func hasFormatting(_ pb: NSPasteboard = .general) -> Bool {
+        pb.availableType(from: [.html, .rtf]) != nil
+    }
+}
+
+/// 纯文本框，但粘贴时保留格式（转成 Markdown）；⌥⇧⌘V 仍粘贴纯文本
+final class MarkdownPasteTextView: NSTextView {
+    override func paste(_ sender: Any?) {
+        if RichClipboard.hasFormatting(), let md = RichClipboard.markdown() {
+            insertText(md, replacementRange: selectedRange())
+        } else {
+            super.paste(sender)
+        }
     }
 }

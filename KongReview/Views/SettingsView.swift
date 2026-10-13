@@ -32,6 +32,7 @@ struct SettingsView: View {
 private struct QuickCaptureSettings: View {
     @Environment(LibraryStore.self) private var store
     @AppStorage("menubar.visible") private var showMenuBarIcon = true
+    @AppStorage(PointerCursor.enabledKey) private var handCursor = true
     @AppStorage(HotKeyPreset.defaultsKey) private var presetRaw = HotKeyPreset.ctrlOptK.rawValue
 
     var body: some View {
@@ -93,6 +94,7 @@ private struct QuickCaptureSettings: View {
                         store.reload()
                     }
                 ))
+                Toggle("鼠标移到按钮、链接上时显示手形光标", isOn: $handCursor)
                 Text("关闭主窗口后 KongReview 仍在后台运行，快捷键与菜单栏图标照常可用；要完全退出请用 ⌘Q。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -196,6 +198,9 @@ private struct CaptureSettings: View {
 
 private struct DataSettings: View {
     @Environment(LibraryStore.self) private var store
+    @AppStorage(LiquidTextFolder.enabledKey) private var ltEnabled = false
+    @AppStorage(LiquidTextFolder.folderKey) private var ltFolder = ""
+    @AppStorage(LiquidTextFolder.skipShortKey) private var ltSkipShort = false
 
     var body: some View {
         let _ = store.revision
@@ -278,6 +283,31 @@ private struct DataSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Section("LiquidText 自动导入") {
+                Toggle("自动导入这个文件夹里的 LiquidText 笔记", isOn: Binding(
+                    get: { ltEnabled && !ltFolder.isEmpty },
+                    set: { on in
+                        if on && ltFolder.isEmpty { chooseLiquidTextFolder() }
+                        ltEnabled = on && LiquidTextFolder.folder != nil
+                        if ltEnabled { store.checkLiquidTextFolder(quiet: false) }
+                    }))
+                HStack {
+                    Text(ltFolder.isEmpty ? "未选择文件夹" : ltFolder)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("选择文件夹…") { chooseLiquidTextFolder() }
+                    Button("在访达中打开") {
+                        if let f = LiquidTextFolder.folder { NSWorkspace.shared.activateFileViewerSelecting([f]) }
+                    }
+                    .disabled(ltFolder.isEmpty)
+                    Button("立即检查") { store.checkLiquidTextFolder(quiet: false, force: true) }
+                        .disabled(ltFolder.isEmpty)
+                }
+                Toggle("跳过很短的摘录（不足 4 个字，如只摘了人名）", isOn: $ltSkipShort)
+                Text("在 LiquidText 里“导出 → 笔记 → Word”，保存到这个文件夹（建议在“文稿”里新建“LiquidText 导出”）。KongReview 启动、回到前台时和每分钟检查一次，只处理新出现或改动过的文件，不会移动或修改它们。同一本书重新导出整份笔记时，只导入新摘的；在 KongReview 里改过或删掉的摘录不会被加回来。导入的摘录带“LiquidText”标签。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section("导入") {
                 HStack {
                     Button("从 LiquidText 导入笔记…") { ExportService.importLiquidText(store: store) }
@@ -312,6 +342,21 @@ private struct DataSettings: View {
             RestoreBackupView()
         }
     }
+}
+
+@MainActor
+private func chooseLiquidTextFolder() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.canCreateDirectories = true
+    panel.prompt = "选择"
+    panel.message = "选择存放 LiquidText 导出笔记的文件夹（可新建“LiquidText 导出”）"
+    if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+        panel.directoryURL = docs
+    }
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    LiquidTextFolder.folder = url
 }
 
 @MainActor

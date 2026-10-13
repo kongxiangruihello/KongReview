@@ -767,3 +767,85 @@ final class V11DatabaseTests: XCTestCase {
     XCTAssertEqual(try db.targetRetention(), 0.85, accuracy: 1e-9)
   }
 }
+
+final class V12DatabaseTests: XCTestCase {
+  func makeDB() throws -> AppDatabase {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("v12-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    var config = Configuration()
+    config.prepareDatabase { db in db.add(function: AppDatabase.foldFunction) }
+    return try AppDatabase(DatabasePool(path: dir.appendingPathComponent("a.sqlite").path, configuration: config))
+  }
+
+  func testFoldedSearchFindsBothScripts() throws {
+    let db = try makeDB()
+    _ = try db.save(Highlight(text: "除了紅衛兵和工人造反派，上海還有一支文革力量"))
+    _ = try db.save(Highlight(text: "红卫兵运动在上海", note: "按语：參見李遜"))
+    _ = try db.save(Highlight(text: "无关的一条"))
+    XCTAssertEqual(try db.highlights(HighlightQuery(text: "红卫兵")).count, 2)
+    XCTAssertEqual(try db.highlights(HighlightQuery(text: "紅衛兵")).count, 2)
+    XCTAssertEqual(try db.highlights(HighlightQuery(text: "参见")).count, 1, "按语也在索引里")
+    XCTAssertEqual(try db.highlights(HighlightQuery(text: "上海")).count, 2, "两字走 LIKE 分支")
+    // 改文字后索引跟着变
+    var h = try XCTUnwrap(try db.highlights(HighlightQuery(text: "无关")).first)
+    h.text = "後來改成繁體的文字"
+    _ = try db.save(h)
+    XCTAssertEqual(try db.highlights(HighlightQuery(text: "后来改成")).count, 1)
+    XCTAssertEqual(try db.highlights(HighlightQuery(text: "无关")).count, 0)
+  }
+
+  func testCardSectionsRoundTripAndSearch() throws {
+    let db = try makeDB()
+    var c = Card(front: "學而時習之", back: "時時溫習")
+    c.sections = [CardSection(name: "出處", text: "《論語·學而》"), CardSection(name: "例句", text: "温故而知新", folded: true)]
+    let saved = try db.save(c)
+    let back = try XCTUnwrap(try db.card(id: XCTUnwrap(saved.id)))
+    XCTAssertEqual(back.sections?.count, 2)
+    XCTAssertEqual(back.sections?[1].folded, true)
+    XCTAssertTrue(back.backWithSections.contains("<details class=\"kr-field\"><summary>例句</summary>"))
+    XCTAssertEqual(try db.cards(query: "论语").count, 1, "背面栏目参与搜索，且繁简通搜")
+    XCTAssertEqual(try db.cards(query: "温习").count, 1)
+  }
+
+  func testLiquidTextKeysSkipEditedAndDeleted() throws {
+    let db = try makeDB()
+    func result(_ texts: [(String, String)]) -> ReadwiseCSVImporter.Result {
+      let parsed = LiquidTextImporter.parse(texts.map { .init(text: "Excerpt:\t\($0.0)\n(革命造反年代 (李逊) , p.\($0.1))") })
+      return LiquidTextImporter.result(parsed, fallbackTitle: "x")
+    }
+    let r1 = try db.importReadwise(result([("第一條摘錄的文字", "14"), ("第二條", "15")]), keyPrefix: "liquidtext")
+    XCTAssertEqual(r1.highlightsImported, 2)
+    // 在 KongReview 里改了第一条
+    var h = try XCTUnwrap(try db.highlights(HighlightQuery(text: "第一條摘錄")).first)
+    h.text = "第一條摘錄的文字（已校對）"
+    _ = try db.save(h)
+    // 重新导出的笔记多了一条
+    let r2 = try db.importReadwise(result([("第一條摘錄的文字", "14"), ("第二條", "15"), ("第三條新摘", "20")]), keyPrefix: "liquidtext")
+    XCTAssertEqual(r2.highlightsImported, 1, "改过的那条不会被加回来，只导入新摘的")
+    XCTAssertEqual(r2.duplicatesSkipped, 2)
+  }
+
+  func testLiquidTextFolderReadsDocx() throws {
+    let env = ProcessInfo.processInfo.environment
+    guard let sample = env["KR_LT_SAMPLE"] else { throw XCTSkip("没有样本文件") }
+    let db = try makeDB()
+    let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("lt-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try FileManager.default.copyItem(at: URL(fileURLWithPath: sample), to: folder.appendingPathComponent("樣本 Notes.docx"))
+    LiquidTextFolder.folder = folder
+    LiquidTextFolder.isEnabled = true
+    UserDefaults.standard.removeObject(forKey: LiquidTextFolder.seenKey)
+    let r1 = LiquidTextFolder.process(db: db)
+    XCTAssertEqual(r1.files, 1)
+    XCTAssertEqual(r1.added, 94)
+    XCTAssertEqual(r1.images, 2)
+    let r2 = LiquidTextFolder.process(db: db)
+    XCTAssertEqual(r2.files, 0, "没改动的文件不再读")
+    let r3 = LiquidTextFolder.process(db: db, force: true)
+    XCTAssertEqual(r3.added, 0)
+    XCTAssertEqual(r3.duplicates, 94)
+    XCTAssertEqual(try db.highlights(HighlightQuery(text: "红卫兵")).isEmpty, false, "繁体摘录可用简体搜到")
+    LiquidTextFolder.isEnabled = false
+    LiquidTextFolder.folder = nil
+  }
+}

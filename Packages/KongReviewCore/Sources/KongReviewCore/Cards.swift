@@ -41,6 +41,8 @@ public struct Card: Codable, Identifiable, Hashable, Sendable {
     public var difficulty: Double?
     /// 上次复习时间（FSRS 据此计算经过的天数）
     public var lastReview: Date?
+    /// 1.2：背面的自定义栏目（如“释义”“出处”“例句”），依次显示在背面答案之后；nil 表示没有
+    public var sections: [CardSection]?
 
     public init(id: Int64? = nil, deck: String = "默认", front: String, back: String = "", tags: [String] = [],
                 highlightId: Int64? = nil, state: State = .new, step: Int = 0, interval: Double = 0,
@@ -69,7 +71,26 @@ public struct Card: Codable, Identifiable, Hashable, Sendable {
         self.stability = nil
         self.difficulty = nil
         self.lastReview = nil
+        self.sections = nil
     }
+}
+
+/// 记忆卡背面的一个栏目：名称 + 内容（Markdown 或 HTML），可设为默认折叠（点开才看到）
+public struct CardSection: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    public var text: String
+    public var folded: Bool
+
+    public init(id: String = UUID().uuidString, name: String, text: String = "", folded: Bool = false) {
+        self.id = id
+        self.name = name
+        self.text = text
+        self.folded = folded
+    }
+
+    /// 新建栏目时可选的常用名称
+    public static let suggestedNames = ["释义", "出处", "例句", "注释", "译文", "备注", "相关"]
 }
 
 /// 回答按钮（与 Anki 相同的四档）

@@ -38,9 +38,10 @@ extension AppDatabase {
             if let deck { sql += " AND deck = ?"; args.append(deck) }
             let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
             if !q.isEmpty {
-                let p = SearchQuery.likePattern(q)
-                sql += " AND (front LIKE ? ESCAPE '\\\\' OR back LIKE ? ESCAPE '\\\\')"
-                args += [p, p]
+                // 1.2：繁简通搜；背面栏目也在搜索范围内
+                let p = SearchQuery.likePattern(ChineseFold.fold(q))
+                sql += " AND (kr_fold(front) LIKE ? ESCAPE '\\' OR kr_fold(back) LIKE ? ESCAPE '\\' OR kr_fold(coalesce(sections, '')) LIKE ? ESCAPE '\\')"
+                args += [p, p, p]
             }
             sql += " ORDER BY createdAt DESC, id DESC"
             return try Card.fetchAll(db, sql: sql, arguments: StatementArguments(args))

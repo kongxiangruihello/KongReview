@@ -144,6 +144,8 @@ struct HighlightListView: View {
                     Menu {
                         Button("专题汇编（Word / Markdown）…") { startExport(.compilation) }
                         Button("导出到 Anki…") { startExport(.anki) }
+                        Divider()
+                        Button("参考文献表（GB/T 7714）…") { showBibliography() }
                     } label: {
                         Label("导出", systemImage: "square.and.arrow.up")
                     }
@@ -206,6 +208,17 @@ struct HighlightListView: View {
             state.selection = state.selection.filter { id in state.items.contains { $0.id == id } }
         } catch {
             store.report(error)
+        }
+    }
+
+    /// 1.2：当前列表（或已选摘录）涉及的出处 → 参考文献表
+    private func showBibliography() {
+        let ids = Array(state.selection)
+        if ids.isEmpty {
+            store.showBibliography(for: (try? store.db.highlights(query)) ?? [], title: title)
+        } else {
+            let order = state.items.compactMap(\.id).filter { state.selection.contains($0) }
+            store.showBibliography(for: (try? store.db.highlights(ids: order)) ?? [], title: title)
         }
     }
 

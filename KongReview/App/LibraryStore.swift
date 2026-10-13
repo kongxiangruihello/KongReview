@@ -33,6 +33,8 @@ final class LibraryStore {
     var tagCountMap: [String: Int] = [:]
     var tagEditor: TagEditRequest?
     var showTagManager = false
+    /// 1.2：参考文献表
+    var bibliographyRequest: BibliographyRequest?
     var trashCount = 0
     var articleCount = 0
 
@@ -50,6 +52,8 @@ final class LibraryStore {
     var importAddTag = true
     /// LiquidText 导入：跳过很短的摘录
     var importSkipShort = false
+    /// 1.2：LiquidText 文件夹正在后台检查
+    @ObservationIgnored var liquidTextChecking = false
     /// 操作完成后的提示
     var infoMessage: String?
     /// 后台导入进行中时的状态文字（非空表示正忙）
@@ -216,7 +220,8 @@ final class LibraryStore {
                     self.importProgress = "正在导入 \(result.highlightCount) 条摘录，请稍候…"
                 }
                 if !preview.media.isEmpty { try db.saveMedia(preview.media) }
-                let r = try db.importReadwise(result, extraTag: tag)
+                let r = try db.importReadwise(result, extraTag: tag,
+                                              keyPrefix: preview.origin == .liquidText ? LiquidTextFolder.keyPrefix : nil)
                 AppLog.write("导入\(preview.tag)：\(r.highlightsImported) 条，重复跳过 \(r.duplicatesSkipped) 条")
                 await MainActor.run { self.finishImport(r, preview: preview) }
             } catch {
@@ -637,6 +642,17 @@ final class LibraryStore {
         d.card.deck = d.card.deck.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "默认"
         d.card.tags = TagParser.parse(d.tagsText)
         d.card.updatedAt = Date()
+        // 1.2：背面栏目——去掉首尾空白，名称与内容都空的栏目丢弃；记住用过的栏目名
+        if let secs = d.card.sections {
+            let cleaned = secs.map { s -> CardSection in
+                var s = s
+                s.name = s.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                s.text = s.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return s
+            }.filter { !$0.name.isEmpty || !$0.text.isEmpty }
+            d.card.sections = cleaned.isEmpty ? nil : cleaned
+            CardSettings.rememberSectionNames(cleaned.map(\.name))
+        }
         // 多字段卡片：正面 / 背面存一份字段内容的拼接，供搜索与列表预览（显示仍按模板）
         if d.card.noteType != nil, !d.card.fields.isEmpty {
             d.card.front = d.card.fields[0]
@@ -824,8 +840,35 @@ final class LibraryStore {
         }
     }
 
+    /// 1.2：检查 LiquidText 导出文件夹（后台读取与导入，有新摘录时提示）
+    func checkLiquidTextFolder(quiet: Bool = true, force: Bool = false) {
+        guard LiquidTextFolder.isEnabled || force, LiquidTextFolder.folder != nil, !liquidTextChecking else {
+            if !quiet && LiquidTextFolder.folder == nil { infoMessage = "还没有选择 LiquidText 导出文件夹。" }
+            return
+        }
+        liquidTextChecking = true
+        let db = self.db
+        Task.detached(priority: .utility) {
+            let r = LiquidTextFolder.process(db: db, force: force)
+            await MainActor.run {
+                self.liquidTextChecking = false
+                if r.added > 0 { self.reload() }
+                var lines: [String] = []
+                if r.added > 0 {
+                    lines.append("从 LiquidText 导入 \(r.added) 条新摘录：" + r.sources.map { "《\($0)》" }.joined(separator: "、") + "。"
+                                 + (r.images > 0 ? "含图片。" : ""))
+                }
+                if r.duplicates > 0 && (!quiet || r.added > 0) { lines.append("\(r.duplicates) 条以前导入过，跳过。") }
+                if !r.failed.isEmpty { lines.append("无法导入：\n" + r.failed.joined(separator: "\n")) }
+                if lines.isEmpty && !quiet { lines.append(r.files == 0 ? "文件夹里没有新的或改动过的笔记文件。" : "没有新摘录。") }
+                if !lines.isEmpty { self.infoMessage = lines.joined(separator: "\n") }
+            }
+        }
+    }
+
     /// 检查收件箱；有新摘录时提示
     func checkInbox(quiet: Bool = true) {
+        checkLiquidTextFolder(quiet: true)
         let r = InboxService.process(db: db)
         guard r.files > 0 else {
             if !quiet { infoMessage = "收件箱里没有新文件。" }
@@ -1015,8 +1058,18 @@ final class LibraryStore {
     func commit(_ draft: HighlightDraft) {
         guard save(draft: draft) else { return }
         editorDraft = nil
-        // 改的是已做成记忆卡的摘录：按设置同步，或询问
-        if let id = draft.highlight.id, cardHighlightIDs.contains(id) {
+        offerCardSync(for: draft.highlight.id)
+    }
+
+    /// 1.2：回顾卡片上就地编辑后保存（与编辑面板一样，摘录已做成记忆卡时按设置同步或询问）
+    func saveEdited(_ highlight: Highlight) {
+        save(highlight)
+        offerCardSync(for: highlight.id)
+    }
+
+    /// 改的是已做成记忆卡的摘录：按设置同步，或询问
+    func offerCardSync(for highlightID: Int64?) {
+        if let id = highlightID, cardHighlightIDs.contains(id) {
             switch CardSettings.syncFromHighlight {
             case "always": syncCards(fromHighlight: id)
             case "never": break

@@ -112,14 +112,30 @@ public enum SearchTerms {
     }
 
     /// 文本里每个词出现的位置（不区分大小写）
+    /// 1.2 起繁简通配：搜“红卫兵”也标出“紅衛兵”（逐字归一后比较，位置对回原文）
     public static func ranges(of terms: [String], in text: String) -> [Range<String.Index>] {
         var out: [Range<String.Index>] = []
+        let scalars = Array(text.unicodeScalars)
+        let folded = scalars.map(ChineseFold.fold)
+        var indices: [String.Index] = []
+        indices.reserveCapacity(scalars.count + 1)
+        var i = text.unicodeScalars.startIndex
+        while i < text.unicodeScalars.endIndex {
+            indices.append(i)
+            i = text.unicodeScalars.index(after: i)
+        }
+        indices.append(text.endIndex)
         for t in terms {
-            var start = text.startIndex
-            while start < text.endIndex,
-                  let r = text.range(of: t, options: [.caseInsensitive, .diacriticInsensitive], range: start..<text.endIndex) {
-                out.append(r)
-                start = r.upperBound
+            let needle = Array(ChineseFold.fold(t).unicodeScalars)
+            guard !needle.isEmpty, needle.count <= folded.count else { continue }
+            var s = 0
+            while s + needle.count <= folded.count {
+                if folded[s] == needle[0] && Array(folded[s..<(s + needle.count)]) == needle {
+                    out.append(indices[s]..<indices[s + needle.count])
+                    s += needle.count
+                } else {
+                    s += 1
+                }
             }
         }
         return out.sorted { $0.lowerBound < $1.lowerBound }

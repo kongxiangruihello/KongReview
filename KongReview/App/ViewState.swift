@@ -16,6 +16,8 @@ final class ReviewState {
     var position = 0
     /// 正在写按语时的草稿（非 nil 表示编辑框打开；此时单键快捷键停用）
     var noteDraft: String?
+    /// 1.2：卡片上就地编辑原文、译文、按语时的草稿（非 nil 表示正在编辑；此时单键快捷键停用）
+    var inlineDraft: InlineEditDraft?
     /// 当前这组回顾是哪一天的（跨日时据此刷新）
     var day = ""
     /// 卡片上的出处详情（完整引文、位置、标签、添加时间）是否展开；默认折叠
@@ -24,6 +26,21 @@ final class ReviewState {
     var showRelated: Bool = UserDefaults.standard.bool(forKey: "review.showRelated") {
         didSet { UserDefaults.standard.set(showRelated, forKey: "review.showRelated") }
     }
+}
+
+/// 生成参考文献表的请求：一组出处（按在列表里首次出现的顺序）
+struct BibliographyRequest: Identifiable {
+    let id = UUID()
+    var title: String
+    var sources: [Source]
+}
+
+/// 回顾卡片就地编辑的草稿
+struct InlineEditDraft: Equatable {
+    var id: Int64?
+    var text: String
+    var translation: String
+    var note: String
 }
 
 /// 记忆卡学习界面的状态
@@ -63,6 +80,22 @@ enum CardSettings {
     static let adjustDarkColorsKey = "cards.adjustDarkColors"
     static let syncFromHighlightKey = "cards.syncFromHighlight"   // "ask" / "always" / "never"
     static let menuBarCountsKey = "menubar.showCounts"
+    static let sectionNamesKey = "cards.sectionNames"
+
+    /// 背面栏目：最近用过的名称在前，其后是常用名称
+    static var sectionNames: [String] {
+        let recent = UserDefaults.standard.stringArray(forKey: sectionNamesKey) ?? []
+        var out: [String] = []
+        for n in recent + CardSection.suggestedNames where !n.isEmpty && !out.contains(n) { out.append(n) }
+        return Array(out.prefix(12))
+    }
+
+    static func rememberSectionNames(_ names: [String]) {
+        let recent = UserDefaults.standard.stringArray(forKey: sectionNamesKey) ?? []
+        var out: [String] = []
+        for n in names + recent where !n.isEmpty && !out.contains(n) { out.append(n) }
+        UserDefaults.standard.set(Array(out.prefix(12)), forKey: sectionNamesKey)
+    }
 
     static var newPerDay: Int { (UserDefaults.standard.object(forKey: newPerDayKey) as? Int) ?? 20 }
     static var reviewsPerDay: Int { (UserDefaults.standard.object(forKey: reviewsPerDayKey) as? Int) ?? 200 }

@@ -62,7 +62,15 @@ final class AppDatabase {
 
     init(_ writer: any DatabaseWriter) throws {
         self.writer = writer
+        // 1.2：繁简归一函数。索引触发器在写连接上调用它，所以必须在迁移之前注册。
+        try writer.writeWithoutTransaction { db in db.add(function: AppDatabase.foldFunction) }
         try migrator.migrate(writer)
+    }
+
+    /// kr_fold(文本)：繁体转简体、全角转半角、英文转小写（见 ChineseFold），供繁简通搜的索引使用
+    static let foldFunction = DatabaseFunction("kr_fold", argumentCount: 1, pure: true) { values in
+        guard let s = String.fromDatabaseValue(values[0]) else { return nil }
+        return ChineseFold.fold(s)
     }
 
     /// 恢复备份后补跑迁移（备份可能来自旧版本）
@@ -78,6 +86,7 @@ final class AppDatabase {
         let url = dir.appendingPathComponent("kongreview.sqlite")
         var config = Configuration()
         config.foreignKeysEnabled = true
+        config.prepareDatabase { db in db.add(function: AppDatabase.foldFunction) }
 
         // 改名迁移：新库不存在、旧版 KongGlean 的库存在时，把旧库完整复制过来（旧文件原样保留）
         let legacy = support.appendingPathComponent("KongGlean/glean.sqlite")
@@ -291,6 +300,31 @@ final class AppDatabase {
                 t.column("highlightId", .integer)
                 t.column("importedAt", .datetime).notNull()
             }
+        }
+
+        // 1.2：繁简通搜索引、记忆卡背面栏目、LiquidText 文件夹导入记录
+        m.registerMigration("v8-fold-search-card-sections") { db in
+            // 归一后的全文（原文 + 译文 + 按语），trigram 分词；与 highlight 一一对应（rowid = highlight.id）
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE highlight_fold_ft USING fts5(body, tokenize = 'trigram');
+                INSERT INTO highlight_fold_ft(rowid, body)
+                    SELECT id, kr_fold(coalesce(text, '') || char(10) || coalesce(translation, '') || char(10) || coalesce(note, ''))
+                    FROM highlight;
+                CREATE TRIGGER highlight_fold_ai AFTER INSERT ON highlight BEGIN
+                    INSERT INTO highlight_fold_ft(rowid, body)
+                    VALUES (new.id, kr_fold(coalesce(new.text, '') || char(10) || coalesce(new.translation, '') || char(10) || coalesce(new.note, '')));
+                END;
+                CREATE TRIGGER highlight_fold_ad AFTER DELETE ON highlight BEGIN
+                    DELETE FROM highlight_fold_ft WHERE rowid = old.id;
+                END;
+                CREATE TRIGGER highlight_fold_au AFTER UPDATE OF text, translation, note ON highlight BEGIN
+                    DELETE FROM highlight_fold_ft WHERE rowid = old.id;
+                    INSERT INTO highlight_fold_ft(rowid, body)
+                    VALUES (new.id, kr_fold(coalesce(new.text, '') || char(10) || coalesce(new.translation, '') || char(10) || coalesce(new.note, '')));
+                END;
+                """)
+            // 背面栏目：JSON 数组 [{id, name, text, folded}]
+            try db.alter(table: "card") { t in t.add(column: "sections", .text) }
         }
         return m
     }
@@ -604,7 +638,10 @@ extension AppDatabase {
     /// - 同一出处下正文与位置都相同的摘录视为重复，跳过（可重复导入同一个文件而不产生重复）；
     /// - extraTag 会加到每条导入的摘录上，方便日后筛选或批量处理。
     @discardableResult
-    func importReadwise(_ result: ReadwiseCSVImporter.Result, extraTag: String? = nil, now: Date = Date()) throws -> ImportReport {
+    /// keyPrefix（1.2，LiquidText 用）：给每条导入的摘录记一个“来源键”（出处 + 位置 + 导入时的原文），
+    /// 以后同一条再出现就跳过——即使已在 KongReview 里改过文字或删掉了，重新导出的笔记也不会把它加回来。
+    func importReadwise(_ result: ReadwiseCSVImporter.Result, extraTag: String? = nil, now: Date = Date(),
+                        keyPrefix: String? = nil) throws -> ImportReport {
         try writer.write { db in
             var report = ImportReport()
             for src in result.sources {
@@ -621,10 +658,21 @@ extension AppDatabase {
                 }
 
                 for item in src.highlights {
-                    let exists = try Bool.fetchOne(db, sql: """
-                        SELECT EXISTS (SELECT 1 FROM highlight WHERE sourceId = ? AND text = ? AND COALESCE(location, '') = ?)
-                        """, arguments: [source.id, item.text, item.location ?? ""]) ?? false
-                    if exists {
+                    let key = keyPrefix.map { Self.importKey(prefix: $0, title: src.title, author: src.author,
+                                                             location: item.location, text: item.text) }
+                    if let key, try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM inbox_item WHERE key = ?)",
+                                                  arguments: [key]) ?? false {
+                        report.duplicatesSkipped += 1
+                        continue
+                    }
+                    let existingID = try Int64.fetchOne(db, sql: """
+                        SELECT id FROM highlight WHERE sourceId = ? AND text = ? AND COALESCE(location, '') = ? LIMIT 1
+                        """, arguments: [source.id, item.text, item.location ?? ""])
+                    if let existingID {
+                        if let key {
+                            try db.execute(sql: "INSERT OR IGNORE INTO inbox_item (key, highlightId, importedAt) VALUES (?, ?, ?)",
+                                           arguments: [key, existingID, now])
+                        }
                         report.duplicatesSkipped += 1
                         continue
                     }
@@ -643,11 +691,23 @@ extension AppDatabase {
                         updatedAt: now
                     )
                     try h.insert(db)
+                    if let key {
+                        try db.execute(sql: "INSERT OR IGNORE INTO inbox_item (key, highlightId, importedAt) VALUES (?, ?, ?)",
+                                       arguments: [key, h.id, now])
+                    }
                     report.highlightsImported += 1
                 }
             }
             return report
         }
+    }
+}
+
+extension AppDatabase {
+    /// 导入去重键：前缀 + SHA-1(标题、作者、位置、原文)
+    static func importKey(prefix: String, title: String, author: String?, location: String?, text: String) -> String {
+        let raw = [title, author ?? "", location ?? "", text].joined(separator: "\u{1}")
+        return prefix + "|" + SHA1.hex(Data(raw.utf8))
     }
 }
 
@@ -676,14 +736,15 @@ struct HighlightQuery: Hashable {
 
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty {
-            if SearchQuery.usesFullText(q) {
-                from = "highlight JOIN highlight_ft ON highlight_ft.rowid = highlight.id"
-                clauses.append("highlight_ft MATCH ?")
-                args.append(SearchQuery.fts5Phrase(q))
+            // 1.2：在繁简归一后的索引里找，“红卫兵”与“紅衛兵”互相能搜到
+            let fq = ChineseFold.fold(q)
+            if SearchQuery.usesFullText(fq) {
+                from = "highlight JOIN highlight_fold_ft ON highlight_fold_ft.rowid = highlight.id"
+                clauses.append("highlight_fold_ft MATCH ?")
+                args.append(SearchQuery.fts5Phrase(fq))
             } else {
-                clauses.append("(highlight.text LIKE ? ESCAPE '\\' OR highlight.note LIKE ? ESCAPE '\\' OR highlight.translation LIKE ? ESCAPE '\\')")
-                let p = SearchQuery.likePattern(q)
-                args += [p, p, p]
+                clauses.append("highlight.id IN (SELECT rowid FROM highlight_fold_ft WHERE body LIKE ? ESCAPE '\\')")
+                args.append(SearchQuery.likePattern(fq))
             }
         }
         if let sourceId {

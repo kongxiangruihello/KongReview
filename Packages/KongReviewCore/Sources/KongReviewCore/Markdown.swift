@@ -194,6 +194,44 @@ public enum Markdown {
         return t
     }
 
+    /// 1.2：剪贴板里的 HTML（从网页、Word、Pages 复制）→ Markdown，保留标题、粗体、斜体、删除线、列表、引用、链接、图片；
+    /// 其余样式（字体、字号、颜色）去掉。用于不是所见即所得编辑器的地方（快速录入浮窗）。
+    public static func markdown(fromClipboardHTML html: String) -> String {
+        var t = html
+        // 只要 <body> 里的内容；去掉注释、样式、脚本、Word 的条件注释与 XML 岛
+        if let re = try? NSRegularExpression(pattern: #"(?is)<body\b[^>]*>(.*)</body\s*>"#),
+           let m = re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)),
+           let r = Range(m.range(at: 1), in: t) {
+            t = String(t[r])
+        }
+        t = replace(t, #"(?is)<!--.*?-->"#, "")
+        t = replace(t, #"(?is)<(head|style|script|title|xml|template)\b[^>]*>.*?</\1\s*>"#, "")
+        t = replace(t, #"(?is)<!\[if[^>]*>.*?<!\[endif\]>"#, "")
+        t = replace(t, #"(?i)</?[a-z]+:[a-z0-9]+\b[^>]*>"#, "")   // Word 的 <o:p> 之类
+        // HTML 源码里的换行只是空白：中文之间直接删，其余变成一个空格
+        t = replace(t, #"(?<=[\p{Han}，。、；：！？）」』])[ \t]*\r?\n[ \t]*(?=[\p{Han}，。、；：！？（「『])"#, "")
+        t = replace(t, #"[ \t]*\r?\n[ \t]*"#, " ")
+        // 标题、删除线、段落
+        for level in 1...6 {
+            t = replace(t, "(?is)<h\(level)\\b[^>]*>(.*?)</h\(level)\\s*>",
+                        "\n\n" + String(repeating: "#", count: level) + " $1\n\n")
+        }
+        t = replace(t, #"(?is)<(s|del|strike)\b[^>]*>(.*?)</\1\s*>"#, "~~$2~~")
+        t = replace(t, #"(?is)<span\b[^>]*font-weight:\s*(bold|[6-9]00)[^>]*>(.*?)</span\s*>"#, "**$2**")
+        t = replace(t, #"(?is)<span\b[^>]*font-style:\s*italic[^>]*>(.*?)</span\s*>"#, "*$1*")
+        t = replace(t, #"(?i)</(p|div|blockquote|ul|ol|table|pre)\s*>"#, "\n\n")
+        t = replace(t, #"(?i)<(p|div)\b[^>]*>"#, "\n")
+        t = markdown(fromHTMLFragments: t)
+        // 粗体、斜体标记贴着空白时收紧（“** 粗体**” → “**粗体**”）
+        t = replace(t, #"\*\*\s+([^*\n]+?)\s*\*\*"#, "**$1**")
+        t = replace(t, #"\*\*\*\*"#, "")
+        // 行首多余空格、行尾空格；连续空行压成一个
+        t = replace(t, #"(?m)^[ \t]+(?![-*>#])"#, "")
+        t = replace(t, #"(?m)[ \t]+$"#, "")
+        t = replace(t, #"\n{3,}"#, "\n\n")
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func decodeEntities(_ s: String) -> String {
         var t = s.replacingOccurrences(of: "&nbsp;", with: " ")
             .replacingOccurrences(of: "&lt;", with: "<")

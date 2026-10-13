@@ -4,8 +4,9 @@ import KongReviewCore
 
 /// 每日回顾：一次一张卡片。同一天内重开应用会回到同一组、同一位置；跨日自动换新。
 ///
-/// 快捷键：下一条 空格 / → / J；上一条 ← / K；写按语 N；做成记忆卡 M；收藏 F；弃置 Delete；编辑 E。
-/// 写按语时单键快捷键全部停用，以免打字被当成命令。
+/// 快捷键：下一条 空格 / → / J；上一条 ← / K；写按语 N；做成记忆卡 M；收藏 F；弃置 Delete；
+/// 编辑 E（1.2 起在卡片上就地编辑，⌥E 打开编辑面板）。
+/// 写按语、就地编辑时单键快捷键全部停用，以免打字被当成命令。
 struct DailyReviewView: View {
     @Environment(LibraryStore.self) private var store
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
@@ -17,7 +18,8 @@ struct DailyReviewView: View {
         ReviewScheduler(config: .init(dailyCount: dailyCount, masteryLimit: 0))
     }
 
-    private var editingNote: Bool { state.noteDraft != nil }
+    /// 正在写按语或就地编辑：单键快捷键停用
+    private var editingNote: Bool { state.noteDraft != nil || state.inlineDraft != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,14 +106,12 @@ struct DailyReviewView: View {
         if state.noteDraft != nil {
             ReviewCardContainer(padding: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("按语（支持 Markdown）").font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: Binding(get: { state.noteDraft ?? "" }, set: { state.noteDraft = $0 }))
-                    .font(.system(size: 15))
-                    .frame(minHeight: 90)
-                    .scrollContentBackground(.hidden)
-                    .padding(6)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                MarkdownPreview(text: state.noteDraft ?? "", font: .callout, slot: "preview-draft")
+                Text("按语").font(.caption).foregroundStyle(.secondary)
+                RichEditor(text: Binding(get: { state.noteDraft ?? "" }, set: { state.noteDraft = $0 }),
+                           font: .note, placeholder: "写下按语…", autoHeight: true, minHeight: 90, focus: true,
+                           slot: "review-note-draft",
+                           onSubmit: { saveNote(for: card) }, onCancel: { state.noteDraft = nil })
+                    .richEditorFrame()
                 HStack {
                     Spacer()
                     Button("取消") { state.noteDraft = nil }
@@ -303,6 +303,9 @@ struct DailyReviewView: View {
             }
             .padding(.bottom, 24)
 
+            if let d = state.inlineDraft, d.id == h.id {
+                inlineEditor(card)
+            } else {
             // 正文与译文、按语（网页渲染：Markdown 标题、列表、图片都按真实样式显示）
             RichWebText(text: h.text, style: .highlight, slot: "review-text")
             if let t = h.translation {
@@ -315,6 +318,7 @@ struct DailyReviewView: View {
                     RichWebText(text: n, style: .note, slot: "review-note")
                 }
                 .padding(.top, 18)
+            }
             }
 
             if state.showDetails {
@@ -346,7 +350,9 @@ struct DailyReviewView: View {
                 CardIconButton(icon: h.isFavorite ? "heart.fill" : "heart", help: "收藏（F）", active: h.isFavorite) {
                     act(.favorite, card)
                 }
-                CardIconButton(icon: "square.and.pencil", help: "编辑摘录（E）") { store.edit(h) }
+                CardIconButton(icon: "square.and.pencil", help: "就地编辑（E）；按住 ⌥ 点击打开编辑面板") {
+                    if NSEvent.modifierFlags.contains(.option) { store.edit(h) } else { startInlineEdit(h) }
+                }
                 CardIconButton(icon: hasCard ? "brain.fill" : "brain", help: hasCard ? "已做成记忆卡" : "做成记忆卡（M）") {
                     if !hasCard { makeCard(card) }
                 }
@@ -448,7 +454,7 @@ struct DailyReviewView: View {
             PillButton(icon: "xmark", title: "弃置", key: "⌫") { act(.discard, card) }
                 .keyboardShortcut(key(.delete))
                 .help("以后不再出现（可在列表中恢复）")
-            PillButton(icon: "text.bubble", title: "按语", key: "N", disabled: editingNote) { state.noteDraft = card.highlight.note ?? "" }
+            PillButton(icon: "text.bubble", title: "按语", key: "N", disabled: editingNote) { state.inlineDraft = nil; state.noteDraft = card.highlight.note ?? "" }
                 .keyboardShortcut(key("n"))
             PillButton(icon: "brain", title: hasCard ? "已是记忆卡" : "记忆卡", key: "M", disabled: hasCard) { makeCard(card) }
                 .keyboardShortcut(key("m"))
@@ -465,7 +471,9 @@ struct DailyReviewView: View {
                 Button("") { act(.keep, card) }.keyboardShortcut(key("j"))
                 Button("") { go(-1) }.keyboardShortcut(key("k"))
                 Button("") { act(.favorite, card) }.keyboardShortcut(key("f"))
-                Button("") { store.edit(card.highlight) }.keyboardShortcut(key("e"))
+                Button("") { startInlineEdit(card.highlight) }.keyboardShortcut(key("e"))
+                Button("") { store.edit(card.highlight) }
+                    .keyboardShortcut(editingNote ? nil : KeyboardShortcut("e", modifiers: .option))
                 Button("") { store.startCloze(for: card.highlight) }.keyboardShortcut(key("c"))
                 Button("") { state.showRelated.toggle() }.keyboardShortcut(key("r"))
             }
@@ -521,6 +529,66 @@ struct DailyReviewView: View {
         state.noteDraft = nil
     }
 
+    /// 1.2：就地编辑——原文、译文、按语直接在卡片上改
+    private func startInlineEdit(_ h: Highlight) {
+        state.noteDraft = nil
+        state.inlineDraft = InlineEditDraft(id: h.id, text: h.text, translation: h.translation ?? "", note: h.note ?? "")
+    }
+
+    private func saveInline(_ card: ReviewCard) {
+        guard let d = state.inlineDraft else { return }
+        guard d.id == card.highlight.id else { state.inlineDraft = nil; return }
+        let text = d.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { NSSound.beep(); return }
+        var h = card.highlight
+        let changed = h.text != text || (h.translation ?? "") != d.translation.trimmingCharacters(in: .whitespacesAndNewlines)
+            || (h.note ?? "") != d.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        state.inlineDraft = nil
+        guard changed else { return }
+        h.text = text
+        h.translation = d.translation.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+        h.note = d.note.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+        h.updatedAt = Date()
+        store.saveEdited(h)
+    }
+
+    @ViewBuilder
+    private func inlineEditor(_ card: ReviewCard) -> some View {
+        let h = card.highlight
+        VStack(alignment: .leading, spacing: 8) {
+            Text("原文").font(.caption).foregroundStyle(ReviewPalette.sub)
+            RichEditor(text: Binding(get: { state.inlineDraft?.text ?? "" }, set: { state.inlineDraft?.text = $0 }),
+                       font: .highlight, placeholder: "摘录原文", autoHeight: true, minHeight: 120, focus: true,
+                       slot: "inline-text", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                .richEditorFrame()
+            Text("译文 / 白话").font(.caption).foregroundStyle(ReviewPalette.sub).padding(.top, 6)
+            RichEditor(text: Binding(get: { state.inlineDraft?.translation ?? "" }, set: { state.inlineDraft?.translation = $0 }),
+                       placeholder: "（可选）", toolbar: false, autoHeight: true, minHeight: 50,
+                       slot: "inline-translation", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                .richEditorFrame()
+            Text("按语").font(.caption).foregroundStyle(ReviewPalette.sub).padding(.top, 6)
+            RichEditor(text: Binding(get: { state.inlineDraft?.note ?? "" }, set: { state.inlineDraft?.note = $0 }),
+                       font: .note, placeholder: "（可选）", autoHeight: true, minHeight: 60,
+                       slot: "inline-note", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                .richEditorFrame()
+            HStack {
+                Button("在编辑面板中打开（出处、位置、标签）…") {
+                    state.inlineDraft = nil
+                    store.edit(h)
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+                Spacer()
+                Button("取消") { state.inlineDraft = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("保存") { saveInline(card) }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 6)
+        }
+    }
+
     private func update(_ highlight: Highlight) {
         store.save(highlight)
         go(1)
@@ -528,6 +596,7 @@ struct DailyReviewView: View {
 
     private func go(_ delta: Int) {
         state.noteDraft = nil
+        state.inlineDraft = nil
         state.position = max(0, min(state.cards.count, state.position + delta))
         persist()
     }
@@ -536,6 +605,7 @@ struct DailyReviewView: View {
         let today = ReviewSessionRecord.dayString(Date())
         let key = ReviewSessionRecord.key(theme: state.theme)
         state.noteDraft = nil
+        state.inlineDraft = nil
         do {
             if !forceNew,
                let saved = ReviewSessionRecord.load(key: key),
@@ -610,28 +680,6 @@ enum RichText {
             a[lo..<hi].backgroundColor = Color.yellow.opacity(0.38)
         }
         return a
-    }
-}
-
-/// 一边写一边看：Markdown 实时预览
-struct MarkdownPreview: View {
-    let text: String
-    var font: Font = .body
-    var style: RichWebText.Style = .preview
-    var slot = "preview"
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("预览").font(.caption).foregroundStyle(.secondary)
-            if text.isEmpty {
-                Text("（空）").font(font).foregroundStyle(.secondary)
-            } else {
-                // 与回顾页同一套网页渲染：标题放大、列表缩进、图片显示
-                RichWebText(text: text, style: style, slot: slot)
-            }
-        }
-        .padding(8)
-        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 

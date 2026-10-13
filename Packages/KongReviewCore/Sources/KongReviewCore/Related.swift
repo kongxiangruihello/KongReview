@@ -28,7 +28,7 @@ public struct RelatedIndex: Sendable {
 
     public var count: Int { docs.count }
 
-    /// 汉字取相邻两字（“学而”“而时”…），西文与数字取整词（小写），去掉标点空白
+    /// 先繁简归一；汉字取相邻两字（“学而”“而时”…），西文与数字取整词（小写），去掉标点空白
     public static func terms(_ text: String) -> [String] {
         var out: [String] = []
         var han: [Character] = []
@@ -42,7 +42,8 @@ public struct RelatedIndex: Sendable {
             if word.count >= 2 { out.append(word.lowercased()) }
             word = ""
         }
-        for ch in text {
+        // 1.2：繁简归一后再切词，繁体与简体的同一段话视为相近
+        for ch in ChineseFold.fold(text) {
             if let u = ch.unicodeScalars.first, (0x4E00...0x9FFF).contains(u.value) || (0x3400...0x4DBF).contains(u.value) {
                 flushWord()
                 han.append(ch)

@@ -81,7 +81,26 @@ extension Card {
     /// 实际显示的正反面：有笔记类型与字段时按模板生成，否则用卡片自己的 front / back
     public func faces(using template: NoteTemplate?) -> (front: String, back: String) {
         if let t = template, !fields.isEmpty { return t.render(fields) }
-        return (front, back)
+        return (front, backWithSections)
+    }
+
+    /// 背面答案 + 自定义栏目（1.2）。没有栏目时原样返回 back；有栏目时拼成 HTML：
+    /// 背面答案在前，各栏目带名称依次排列，设为折叠的栏目点开才显示。
+    public var backWithSections: String {
+        let secs = (sections ?? []).filter { !NoteTemplate.isBlank($0.text) }
+        guard !secs.isEmpty else { return back }
+        var parts: [String] = []
+        if !NoteTemplate.isBlank(back) { parts.append("<div class=\"kr-field\">\(Markdown.html(back))</div>") }
+        for s in secs {
+            let name = Markdown.escape(s.name.trimmingCharacters(in: .whitespaces).isEmpty ? "栏目" : s.name)
+            let body = Markdown.html(s.text)
+            if s.folded {
+                parts.append("<details class=\"kr-field\"><summary>\(name)</summary>\(body)</details>")
+            } else {
+                parts.append("<div class=\"kr-field\"><div class=\"kr-label\">\(name)</div>\(body)</div>")
+            }
+        }
+        return parts.joined(separator: "\n")
     }
 }
 
