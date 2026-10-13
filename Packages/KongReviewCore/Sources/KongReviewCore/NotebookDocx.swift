@@ -34,6 +34,36 @@ public enum NotebookDocx {
         }
 
         body.append(para("Title", runs([.init(title)])))
+
+        // 1.4：目录——按小标题（一、二级）预先列出，Word 打开时会提示更新以填上页码（TOC 域）
+        if options.toc {
+            var entries: [(level: Int, text: String)] = []
+            for p in pieces {
+                switch p.kind {
+                case .heading(let h): entries.append((1, h))
+                case .text(let t):
+                    for pr in NotebookExporter.paragraphs(fromMarkdown: t) where pr.headingLevel > 0 {
+                        entries.append((pr.headingLevel <= 1 ? 1 : 2, pr.spans.map(\.text).joined()))
+                    }
+                default: break
+                }
+            }
+            if !entries.isEmpty {
+                body.append(para("TOCHeading", runs([.init("目　录")])))
+                let begin = "<w:r><w:fldChar w:fldCharType=\"begin\" w:dirty=\"true\"/></w:r>"
+                    + "<w:r><w:instrText xml:space=\"preserve\"> TOC \\o \"1-2\" \\h \\z \\u </w:instrText></w:r>"
+                    + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
+                let end = "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
+                for (k, e) in entries.enumerated() {
+                    var content = runs([.init(e.text)])
+                    if k == 0 { content = begin + content }
+                    if k == entries.count - 1 { content += end }
+                    body.append(para(e.level == 1 ? "TOC1" : "TOC2", content))
+                }
+                body.append("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>")
+            }
+        }
+
         for p in pieces {
             switch p.kind {
             case .heading(let h):
@@ -59,6 +89,11 @@ public enum NotebookDocx {
                     }
                     body.append(para("Quote", content))
                 }
+            case .comment(let c):
+                for (k, pr) in NotebookExporter.paragraphs(fromMarkdown: c).enumerated() {
+                    let lead: [NotebookExporter.Span] = k == 0 ? [.init("按：", bold: true)] : []
+                    body.append(para("Comment", runs(lead + pr.spans)))
+                }
             }
         }
         if !options.bibliography.isEmpty {
@@ -66,8 +101,11 @@ public enum NotebookDocx {
             for e in options.bibliography { body.append(para("Bibliography", runs([.init(e)]))) }
         }
 
+        let hf = options.headerFooter
+            ? "<w:headerReference w:type=\"default\" r:id=\"rId4\"/><w:footerReference w:type=\"default\" r:id=\"rId5\"/>"
+            : ""
         let sect = """
-        <w:sectPr><w:footnotePr><w:numFmt w:val="decimalEnclosedCircleChinese"/><w:numRestart w:val="eachPage"/></w:footnotePr>\
+        <w:sectPr>\(hf)<w:footnotePr><w:numFmt w:val="decimalEnclosedCircleChinese"/><w:numRestart w:val="eachPage"/></w:footnotePr>\
         <w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>
         """
         let document = xmlHead + "<w:document \(ns)><w:body>" + body.joined() + sect + "</w:body></w:document>"
@@ -83,7 +121,15 @@ public enum NotebookDocx {
         fn += "</w:footnotes>"
 
         let iso = ISO8601DateFormatter().string(from: created)
+        // 页眉：标题（居中，小五）；页脚：页码（居中）
+        let header = xmlHead + "<w:hdr \(ns)>" + para("Header", runs([.init(title)])) + "</w:hdr>"
+        let footer = xmlHead + "<w:ftr \(ns)><w:p><w:pPr><w:pStyle w:val=\"Footer\"/></w:pPr>"
+            + "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r>"
+            + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
+            + "</w:p></w:ftr>"
         return [
+            "word/header1.xml": header,
+            "word/footer1.xml": footer,
             "[Content_Types].xml": contentTypes,
             "_rels/.rels": rootRels,
             "word/document.xml": document,
@@ -129,6 +175,8 @@ public enum NotebookDocx {
     <Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>\
     <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>\
     <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>\
+    <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>\
+    <Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>\
     <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>\
     </Types>
     """
@@ -145,12 +193,14 @@ public enum NotebookDocx {
     <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>\
     <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>\
     <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>\
+    <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>\
+    <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>\
     </Relationships>
     """
 
     static let settings = xmlHead + """
-    <w:settings \(ns)><w:footnotePr><w:numFmt w:val="decimalEnclosedCircleChinese"/><w:numRestart w:val="eachPage"/>\
-    <w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr><w:defaultTabStop w:val="420"/>\
+    <w:settings \(ns)><w:defaultTabStop w:val="420"/><w:updateFields w:val="true"/><w:footnotePr><w:numFmt w:val="decimalEnclosedCircleChinese"/><w:numRestart w:val="eachPage"/>\
+    <w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>\
     <w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>
     """
 
@@ -161,25 +211,41 @@ public enum NotebookDocx {
     <w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault>\
     <w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>\
     <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>\
-    <w:pPr><w:ind w:firstLineChars="200" w:firstLine="480"/><w:jc w:val="both"/></w:pPr></w:style>\
+    <w:pPr><w:ind w:firstLine="480"/><w:jc w:val="both"/></w:pPr></w:style>\
     <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:qFormat/>\
-    <w:pPr><w:ind w:firstLine="0"/><w:jc w:val="center"/><w:spacing w:before="240" w:after="360"/></w:pPr>\
+    <w:pPr><w:spacing w:before="240" w:after="360"/><w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>\
     <w:rPr><w:rFonts w:eastAsia="黑体"/><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/></w:rPr></w:style>\
     <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>\
-    <w:pPr><w:keepNext/><w:ind w:firstLine="0"/><w:spacing w:before="360" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr>\
+    <w:pPr><w:keepNext/><w:spacing w:before="360" w:after="120"/><w:ind w:firstLine="0"/><w:outlineLvl w:val="0"/></w:pPr>\
     <w:rPr><w:rFonts w:eastAsia="黑体"/><w:b/><w:sz w:val="30"/><w:szCs w:val="30"/></w:rPr></w:style>\
     <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>\
-    <w:pPr><w:keepNext/><w:ind w:firstLine="0"/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="1"/></w:pPr>\
+    <w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/><w:ind w:firstLine="0"/><w:outlineLvl w:val="1"/></w:pPr>\
     <w:rPr><w:rFonts w:eastAsia="黑体"/><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style>\
     <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:qFormat/>\
-    <w:pPr><w:ind w:left="840" w:right="420" w:firstLine="0"/><w:spacing w:before="60" w:after="120" w:line="320" w:lineRule="auto"/></w:pPr>\
+    <w:pPr><w:spacing w:before="60" w:after="120" w:line="320" w:lineRule="auto"/><w:ind w:left="840" w:right="420" w:firstLine="0"/></w:pPr>\
     <w:rPr><w:rFonts w:eastAsia="楷体"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style>\
     <w:style w:type="paragraph" w:styleId="ListPara"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/>\
     <w:pPr><w:ind w:left="480" w:hanging="240" w:firstLine="0"/></w:pPr></w:style>\
     <w:style w:type="paragraph" w:styleId="Bibliography"><w:name w:val="Bibliography"/><w:basedOn w:val="Normal"/>\
     <w:pPr><w:ind w:left="420" w:hanging="420" w:firstLine="0"/><w:jc w:val="left"/></w:pPr><w:rPr><w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr></w:style>\
     <w:style w:type="paragraph" w:styleId="FootnoteText"><w:name w:val="footnote text"/><w:basedOn w:val="Normal"/>\
-    <w:pPr><w:ind w:firstLine="0"/><w:spacing w:line="240" w:lineRule="auto"/><w:jc w:val="left"/></w:pPr><w:rPr><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr></w:style>\
+    <w:pPr><w:spacing w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="left"/></w:pPr><w:rPr><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr></w:style>\
+    <w:style w:type="paragraph" w:styleId="Comment"><w:name w:val="Comment Text KR"/><w:basedOn w:val="Normal"/>\
+    <w:pPr><w:spacing w:after="120" w:line="300" w:lineRule="auto"/><w:ind w:left="840" w:right="420" w:firstLine="0"/></w:pPr>\
+    <w:rPr><w:color w:val="555555"/><w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr></w:style>\
+    <w:style w:type="paragraph" w:styleId="TOCHeading"><w:name w:val="TOC Heading"/><w:basedOn w:val="Normal"/>\
+    <w:pPr><w:spacing w:before="120" w:after="240"/><w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>\
+    <w:rPr><w:rFonts w:eastAsia="黑体"/><w:b/><w:sz w:val="30"/><w:szCs w:val="30"/></w:rPr></w:style>\
+    <w:style w:type="paragraph" w:styleId="TOC1"><w:name w:val="toc 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>\
+    <w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="8296"/></w:tabs><w:spacing w:after="60"/><w:ind w:firstLine="0"/></w:pPr></w:style>\
+    <w:style w:type="paragraph" w:styleId="TOC2"><w:name w:val="toc 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>\
+    <w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="8296"/></w:tabs><w:spacing w:after="60"/><w:ind w:left="420" w:firstLine="0"/></w:pPr></w:style>\
+    <w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/><w:basedOn w:val="Normal"/>\
+    <w:pPr><w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" w:color="999999"/></w:pBdr><w:spacing w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>\
+    <w:rPr><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr></w:style>\
+    <w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/>\
+    <w:pPr><w:spacing w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>\
+    <w:rPr><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr></w:style>\
     <w:style w:type="character" w:styleId="FootnoteReference"><w:name w:val="footnote reference"/><w:rPr><w:vertAlign w:val="superscript"/></w:rPr></w:style>\
     </w:styles>
     """

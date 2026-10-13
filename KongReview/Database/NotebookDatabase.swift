@@ -153,6 +153,23 @@ extension AppDatabase {
         }
     }
 
+    /// 1.4：笔记本里的摘录（按笔记本中的顺序，去重；不含已删除、已弃置的）
+    func notebookHighlights(_ notebookId: Int64) throws -> [Highlight] {
+        try writer.read { db in
+            let ids = try Int64.fetchAll(db, sql: """
+                SELECT highlightId FROM notebook_block
+                WHERE notebookId = ? AND kind = 'highlight' AND highlightId IS NOT NULL
+                ORDER BY position, id
+                """, arguments: [notebookId])
+            var seen = Set<Int64>()
+            let ordered = ids.filter { seen.insert($0).inserted }
+            let hs = try Highlight.filter(keys: ordered).fetchAll(db)
+                .filter { $0.deletedAt == nil }
+            let byID = Dictionary(hs.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
+            return ordered.compactMap { byID[$0] }
+        }
+    }
+
     /// 某条摘录已在哪些笔记本里
     func notebookIDs(containing highlightId: Int64) throws -> Set<Int64> {
         try writer.read { db in

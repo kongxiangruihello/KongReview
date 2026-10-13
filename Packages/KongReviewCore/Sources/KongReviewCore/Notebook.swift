@@ -70,6 +70,8 @@ public struct NotebookPiece: Sendable {
         case text(String)
         /// 摘录原文（Markdown）与脚注文字（出处）；cite 为空时不加脚注
         case quote(String, cite: String)
+        /// 1.4：摘录的按语（导出时可选附上，排在该摘录之后）
+        case comment(String)
     }
     public var kind: Kind
     public init(_ kind: Kind) { self.kind = kind }
@@ -80,9 +82,15 @@ public struct NotebookExportOptions: Sendable, Equatable {
     public var footnotes = true
     /// 文末附参考文献表（GB/T 7714）
     public var bibliography: [String] = []
-    public init(footnotes: Bool = true, bibliography: [String] = []) {
+    /// 1.4：Word 导出时在标题后加目录（按小标题）
+    public var toc = true
+    /// 1.4：页眉（标题）与页脚（页码）
+    public var headerFooter = true
+    public init(footnotes: Bool = true, bibliography: [String] = [], toc: Bool = true, headerFooter: Bool = true) {
         self.footnotes = footnotes
         self.bibliography = bibliography
+        self.toc = toc
+        self.headerFooter = headerFooter
     }
 }
 
@@ -112,6 +120,9 @@ public enum NotebookExporter {
                     }
                 }
                 out += lines + [""]
+            case .comment(let c):
+                let c = c.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !c.isEmpty { out += ["**按：**" + c.replacingOccurrences(of: "\n\n", with: "\n\n　　"), ""] }
             }
         }
         if !options.bibliography.isEmpty {
@@ -276,6 +287,11 @@ public enum NotebookExporter {
                         line += options.footnotes ? note(cite) : RTFWriter.escape("（\(cite)）")
                     }
                     body.append(line + "\\par")
+                }
+            case .comment(let c):
+                for (k, para) in paragraphs(fromMarkdown: c).enumerated() {
+                    let lead = k == 0 ? "{\\b " + RTFWriter.escape("按：") + "}" : ""
+                    body.append("\\pard\\plain\\f0\\fs21\\li720\\sa120 " + lead + runs(para.spans) + "\\par")
                 }
             }
         }

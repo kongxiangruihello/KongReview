@@ -28,6 +28,14 @@ final class NotebookState {
     var exportBibliography: Bool = UserDefaults.standard.bool(forKey: "notebook.bibliography") {
         didSet { UserDefaults.standard.set(exportBibliography, forKey: "notebook.bibliography") }
     }
+    /// 1.4：导出时附上摘录的按语
+    var exportNotes: Bool = UserDefaults.standard.bool(forKey: "notebook.notes") {
+        didSet { UserDefaults.standard.set(exportNotes, forKey: "notebook.notes") }
+    }
+    /// 1.4：Word 导出加目录
+    var exportTOC: Bool = UserDefaults.standard.object(forKey: "notebook.toc") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(exportTOC, forKey: "notebook.toc") }
+    }
 
     @ObservationIgnored var pendingSaves: [Int64: Task<Void, Never>] = [:]
 
@@ -117,6 +125,8 @@ extension LibraryStore {
         }
         perform { try db.deleteNotebook(id) }
         if case .notebook(let cur) = selection, cur == id { selection = .review }
+        if ReviewScope.notebookID(review.theme) == id { review.theme = nil }
+        UserDefaults.standard.removeObject(forKey: "review.session." + ReviewScope.notebook(id))
         if notebookState.notebookId == id { notebookState.notebookId = nil; notebookState.blocks = [] }
         reloadNotebooks()
     }
@@ -281,18 +291,23 @@ extension LibraryStore {
 
     func notebookPieces() -> [NotebookPiece] {
         let st = notebookState
-        return st.blocks.compactMap { b in
+        let notes = st.exportNotes
+        return st.blocks.flatMap { b -> [NotebookPiece] in
             switch b.kind {
             case .heading:
                 let t = b.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return t.isEmpty ? nil : NotebookPiece(.heading(t))
+                return t.isEmpty ? [] : [NotebookPiece(.heading(t))]
             case .text:
-                return NotebookPiece(.text(b.text))
+                return [NotebookPiece(.text(b.text))]
             case .highlight:
                 let h = b.highlightId.flatMap { st.highlights[$0] }
                 let text = h?.text ?? b.text
                 let cite = h.map { CitationFormatter.citation(for: $0, source: source(for: $0), style: CitationSettings.style) } ?? ""
-                return NotebookPiece(.quote(text, cite: cite))
+                var out = [NotebookPiece(.quote(text, cite: cite))]
+                if notes, let n = h?.note, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    out.append(NotebookPiece(.comment(n)))
+                }
+                return out
             }
         }
     }

@@ -10,6 +10,7 @@ final class V13CoreTests: XCTestCase {
             .init(.heading("一、學而")),
             .init(.text("孔子論學，**重在時習**。下面兩條可以對讀：\n\n- 其一\n- 其二")),
             .init(.quote("子曰：學而時習之，不亦說乎？", cite: "楊伯峻：《論語譯注》，北京：中華書局，1980年，第1頁。")),
+            .init(.comment("“習”是溫習，也有實習之意。")),
             .init(.text("過渡文字。")),
             .init(.quote("溫故而知新，可以為師矣。", cite: "")),
             .init(.quote("見賢思齊焉", cite: "《論語·里仁》。")),
@@ -42,6 +43,7 @@ final class V13CoreTests: XCTestCase {
         XCTAssertTrue(md.contains("> 溫故而知新，可以為師矣。\n"))
         XCTAssertTrue(md.contains("[^1]: 楊伯峻：《論語譯注》"))
         XCTAssertTrue(md.contains("## 参考文献"))
+        XCTAssertTrue(md.contains("**按：**“習”是溫習"))
         let inline = NotebookExporter.markdown(title: "x", pieces: pieces, options: .init(footnotes: false))
         XCTAssertTrue(inline.contains("不亦說乎？（楊伯峻："))
         XCTAssertFalse(inline.contains("[^"))
@@ -58,6 +60,13 @@ final class V13CoreTests: XCTestCase {
         let doc = try XCTUnwrap(files["word/document.xml"])
         XCTAssertEqual(doc.components(separatedBy: "<w:footnoteReference").count - 1, 2)
         XCTAssertTrue(doc.contains("論語專題 &lt;&amp;&gt;"))
+        XCTAssertTrue(doc.contains(" TOC \\o "))
+        XCTAssertTrue(doc.contains("w:pStyle w:val=\"Comment\""))
+        XCTAssertTrue(doc.contains("headerReference"))
+        XCTAssertNotNil(files["word/header1.xml"]); XCTAssertNotNil(files["word/footer1.xml"])
+        let plain = NotebookDocx.files(title: "x", pieces: [.init(.text("無標題"))], options: .init(toc: true, headerFooter: false))
+        XCTAssertFalse(plain["word/document.xml"]!.contains("TOC"), "没有小标题时不加目录")
+        XCTAssertFalse(plain["word/document.xml"]!.contains("headerReference"))
         let fn = try XCTUnwrap(files["word/footnotes.xml"])
         XCTAssertTrue(fn.contains("w:id=\"2\""))
         for (_, xml) in files { XCTAssertNoThrow(try XMLDocumentCheck.parse(xml)) }
@@ -104,5 +113,35 @@ enum XMLDocumentCheck {
         let p = XMLParser(data: Data(s.utf8))
         let d = D(); p.delegate = d
         if !p.parse() { throw p.parserError ?? NSError(domain: "xml", code: 1) }
+    }
+}
+
+final class V14CoreTests: XCTestCase {
+    func testPptx() throws {
+        let long = String(repeating: "子曰：學而時習之，不亦說乎？有朋自遠方來，不亦樂乎？人不知而不慍，不亦君子乎？", count: 16)
+        let pieces: [NotebookPiece] = [
+            .init(.heading("一、學而")),
+            .init(.quote("子曰：**學而時習之**，不亦說乎？", cite: "楊伯峻：《論語譯注》，北京：中華書局，1980年，第1頁。")),
+            .init(.comment("“習”是溫習，也有實習之意。")),
+            .init(.text("過渡：下面看一段較長的原文。\n\n- 其一\n- 其二")),
+            .init(.quote(long, cite: "《論語·學而》。")),
+            .init(.text("## 二、為政")),
+            .init(.quote("溫故而知新，可以為師矣。", cite: "")),
+        ]
+        let files = NotebookPptx.files(title: "論語專題 & 講稿", pieces: pieces,
+                                       options: .init(bibliography: ["[1] 楊伯峻.論語譯注[M].北京:中華書局,1980."]))
+        let slides = files.keys.filter { $0.hasPrefix("ppt/slides/slide") }
+        // 封面 + 章節 + 引文 + 正文 + 長引文（拆 2 頁以上）+ 章節 + 引文 + 參考文獻
+        XCTAssertGreaterThanOrEqual(slides.count, 9)
+        for (_, xml) in files { XCTAssertNoThrow(try XMLDocumentCheck.parse(xml)) }
+        XCTAssertTrue(files["ppt/slides/slide3.xml"]!.contains("按："))
+        XCTAssertTrue(files["ppt/presentation.xml"]!.contains("<p:sldId id=\"256\" r:id=\"rId2\"/>"))
+        if let dir = ProcessInfo.processInfo.environment["KR_PPTX_DIR"] {
+            for (path, xml) in files {
+                let url = URL(fileURLWithPath: dir).appendingPathComponent(path)
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try xml.write(to: url, atomically: true, encoding: .utf8)
+            }
+        }
     }
 }

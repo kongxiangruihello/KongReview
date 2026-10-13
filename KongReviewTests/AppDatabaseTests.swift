@@ -958,3 +958,43 @@ final class V13NotebookTests: XCTestCase {
     XCTAssertFalse(w.isEmpty)
   }
 }
+
+final class V14NotebookTests: XCTestCase {
+  func testNotebookHighlightsForReview() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let h1 = try db.save(Highlight(text: "甲"))
+    let h2 = try db.save(Highlight(text: "乙"))
+    var h3 = try db.save(Highlight(text: "丙"))
+    let nid = try XCTUnwrap(try db.createNotebook(title: "專題").id)
+    try db.insertBlocks([h2, h1, h2, h3].map { NotebookBlock(notebookId: nid, position: 0, kind: .highlight, highlightId: $0.id, text: $0.text) }
+                        + [NotebookBlock(notebookId: nid, position: 0, kind: .text, text: "文字")], into: nid, after: nil)
+    h3.deletedAt = Date()
+    _ = try db.save(h3)
+    // 按笔记本顺序、去重、不含已删除
+    XCTAssertEqual(try db.notebookHighlights(nid).map(\.text), ["乙", "甲"])
+    XCTAssertEqual(ReviewScope.notebookID(ReviewScope.notebook(nid)), nid)
+    XCTAssertNil(ReviewScope.notebookID("儒家"))
+  }
+
+  func testPiecesWithNotes() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      let h = try db.save(Highlight(text: "學而時習之", note: "按語在此"))
+      store.reload()
+      let nid = try XCTUnwrap(store.createNotebook(title: "x", with: [h.id!]))
+      store.loadNotebook(nid)
+      store.notebookState.exportNotes = false
+      XCTAssertEqual(store.notebookPieces().count, 1)
+      store.notebookState.exportNotes = true
+      let pieces = store.notebookPieces()
+      XCTAssertEqual(pieces.count, 2)
+      if case .comment(let c) = pieces[1].kind { XCTAssertEqual(c, "按語在此") } else { XCTFail() }
+      store.notebookState.exportNotes = false
+      // 删除笔记本时，若正在按它回顾，回顾范围回到全部
+      store.review.theme = ReviewScope.notebook(nid)
+      store.deleteNotebook(store.notebooks[0])
+      XCTAssertNil(store.review.theme)
+    }
+  }
+}

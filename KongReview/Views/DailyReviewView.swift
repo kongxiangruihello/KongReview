@@ -54,8 +54,8 @@ struct DailyReviewView: View {
             }
         }
         .background(ReviewPalette.page)
-        .navigationTitle(state.theme.map { "主题回顾 · #\($0)" } ?? "今日回顾")
-        .task(id: (state.theme ?? "") + "|" + store.today) { loadSession(forceNew: false) }
+        .navigationTitle(scopeTitle)
+        .task(id: (state.theme ?? "") + "|" + store.today + "|\(state.sessionToken)") { loadSession(forceNew: false) }
         .onChange(of: store.revision) { refreshCards() }
         .onChange(of: state.position) { persist() }
     }
@@ -116,6 +116,19 @@ struct DailyReviewView: View {
             Button { store.review.theme = nil } label: {
                 if theme == nil { Label("全部摘录", systemImage: "checkmark") } else { Text("全部摘录") }
             }
+            if !store.notebooks.isEmpty {
+                Divider()
+                Section("专题回顾（按笔记本，按笔记本中的顺序全部过一遍）") {
+                    ForEach(store.notebooks) { n in
+                        if let id = n.id {
+                            let t = ReviewScope.notebook(id)
+                            Button { store.review.theme = t } label: {
+                                if theme == t { Label("《\(n.title)》", systemImage: "checkmark") } else { Text("《\(n.title)》") }
+                            }
+                        }
+                    }
+                }
+            }
             if !store.tags.isEmpty {
                 Divider()
                 Section("主题回顾（按标签）") {
@@ -128,10 +141,10 @@ struct DailyReviewView: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: theme == nil ? "tray.full" : "number")
+                Image(systemName: theme == nil ? "tray.full" : (ReviewScope.notebookID(theme) != nil ? "text.book.closed" : "number"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(ReviewPalette.accent)
-                Text(theme ?? "全部摘录")
+                Text(scopeLabel)
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(ReviewPalette.ink)
                     .lineLimit(1)
@@ -153,7 +166,22 @@ struct DailyReviewView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .handCursor()
-        .help("回顾范围：全部摘录，或只看某个标签（主题回顾）")
+        .help("回顾范围：全部摘录、某本专题笔记本（按顺序全部过一遍），或某个标签（主题回顾）")
+    }
+
+    /// 范围的显示名
+    private var scopeLabel: String {
+        guard let t = state.theme else { return "全部摘录" }
+        if let nid = ReviewScope.notebookID(t) {
+            return store.notebooks.first { $0.id == nid }.map { "《\($0.title)》" } ?? "专题笔记本"
+        }
+        return t
+    }
+
+    private var scopeTitle: String {
+        guard let t = state.theme else { return "今日回顾" }
+        if ReviewScope.notebookID(t) != nil { return "专题回顾 · " + scopeLabel }
+        return "主题回顾 · #\(t)"
     }
 
     private var streakChip: some View {
@@ -704,16 +732,29 @@ struct DailyReviewView: View {
         state.noteDraft = nil
         state.inlineDraft = nil
         do {
+            // 专题回顾：笔记本里的摘录有增删或换序时不沿用当天的进度
+            let notebookIDs = try ReviewScope.notebookID(state.theme).map { try store.db.notebookHighlights($0).compactMap(\.id) }
             if !forceNew,
                let saved = ReviewSessionRecord.load(key: key),
-               saved.day == today {
-                let hs = try store.db.highlights(ids: saved.regularIds + saved.masteryIds)
-                state.cards = hs.map { ReviewCard(highlight: $0, isMastery: false) }
+               saved.day == today,
+               notebookIDs == nil || notebookIDs == saved.regularIds {
+                let ids = saved.regularIds + saved.masteryIds
+                let found = try store.db.highlights(ids: ids)
+                let byID = Dictionary(found.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
+                state.cards = ids.compactMap { byID[$0] }.map { ReviewCard(highlight: $0, isMastery: false) }
                 state.position = min(saved.position, state.cards.count)
                 state.day = today
                 return
             }
 
+            // 1.4：按专题笔记本回顾——笔记本里的全部摘录，按笔记本中的顺序
+            if let nid = ReviewScope.notebookID(state.theme) {
+                state.cards = try store.db.notebookHighlights(nid).map { ReviewCard(highlight: $0, isMastery: false) }
+                state.position = 0
+                state.day = today
+                persist()
+                return
+            }
             let (highlights, weights) = try store.db.reviewCandidates(tag: state.theme)
             let session: ReviewScheduler.Session
             if forceNew {

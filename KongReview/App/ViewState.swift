@@ -18,6 +18,8 @@ final class ReviewState {
     var noteDraft: String?
     /// 1.2：卡片上就地编辑原文、译文、按语时的草稿（非 nil 表示正在编辑；此时单键快捷键停用）
     var inlineDraft: InlineEditDraft?
+    /// 1.4：改变它会让回顾页重新载入当前范围（“回顾这本”时从头开始）
+    var sessionToken = 0
     /// 当前这组回顾是哪一天的（跨日时据此刷新）
     var day = ""
     /// 卡片上的出处详情（完整引文、位置、标签、添加时间）是否展开；默认折叠
@@ -33,6 +35,16 @@ struct BibliographyRequest: Identifiable {
     let id = UUID()
     var title: String
     var sources: [Source]
+}
+
+/// 回顾范围：theme 为 nil 是全库，“nb:12”是专题笔记本（1.4），其余是标签
+enum ReviewScope {
+    static let notebookPrefix = "nb:"
+    static func notebook(_ id: Int64) -> String { notebookPrefix + String(id) }
+    static func notebookID(_ theme: String?) -> Int64? {
+        guard let t = theme, t.hasPrefix(notebookPrefix) else { return nil }
+        return Int64(t.dropFirst(notebookPrefix.count))
+    }
 }
 
 /// 回顾卡片就地编辑的草稿

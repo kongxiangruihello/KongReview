@@ -46,6 +46,20 @@ struct NotebookView: View {
         .onDisappear { store.flushNotebookSaves() }
         .toolbar {
             ToolbarItem {
+                Button {
+                    store.flushNotebookSaves()
+                    // 每次点“回顾这本”都从头开始（不沿用当天的进度）
+                    UserDefaults.standard.removeObject(forKey: ReviewSessionRecord.key(theme: ReviewScope.notebook(notebookId)))
+                    store.review.theme = ReviewScope.notebook(notebookId)
+                    store.review.sessionToken += 1
+                    store.selection = .review
+                } label: {
+                    Label("回顾这本", systemImage: "sun.max")
+                }
+                .help("在“今日回顾”里按顺序把这本笔记本中的摘录过一遍")
+                .disabled(st.quoteCount == 0)
+            }
+            ToolbarItem {
                 Button { store.openNotebookPicker(after: st.blocks.last?.id) } label: {
                     Label("插入摘录", systemImage: "text.quote")
                 }
@@ -53,16 +67,19 @@ struct NotebookView: View {
             }
             ToolbarItem {
                 Menu {
-                    Button("Word 文档（含脚注）…") { NotebookExport.exportDocx(store: store) }
+                    Button("Word 文档（含脚注、目录、页码）…") { NotebookExport.exportDocx(store: store) }
+                    Button("演示稿（PowerPoint / Keynote）…") { NotebookExport.exportPptx(store: store) }
                     Button("Markdown（脚注 [^1]）…") { NotebookExport.exportMarkdown(store: store) }
                     Button("复制到剪贴板（粘到 Word、Pages，含脚注）") { NotebookExport.copyRTF(store: store) }
                     Divider()
                     Toggle("出处做成脚注（否则写在引文后的括号里）", isOn: Bindable(st).exportFootnotes)
                     Toggle("文末附参考文献表（GB/T 7714）", isOn: Bindable(st).exportBibliography)
+                    Toggle("附上摘录的按语", isOn: Bindable(st).exportNotes)
+                    Toggle("Word 加目录（按小标题）", isOn: Bindable(st).exportTOC)
                 } label: {
                     Label("导出", systemImage: "square.and.arrow.up")
                 }
-                .help("导出为 Word、Markdown，或复制后粘到 Word")
+                .help("导出为 Word、演示稿、Markdown，或复制后粘到 Word")
             }
             ToolbarItem {
                 Menu {
@@ -426,7 +443,8 @@ struct NotebookSheets: ViewModifier {
 enum NotebookExport {
     static func options(_ store: LibraryStore) -> NotebookExportOptions {
         NotebookExportOptions(footnotes: store.notebookState.exportFootnotes,
-                              bibliography: store.notebookState.exportBibliography ? store.notebookBibliography() : [])
+                              bibliography: store.notebookState.exportBibliography ? store.notebookBibliography() : [],
+                              toc: store.notebookState.exportTOC)
     }
 
     static func title(_ store: LibraryStore) -> String {
@@ -446,7 +464,21 @@ enum NotebookExport {
         let t = title(store)
         guard let url = savePanel(t + ".docx", type: UTType(filenameExtension: "docx") ?? .data) else { return }
         let files = NotebookDocx.files(title: t, pieces: store.notebookPieces(), options: options(store))
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("kr-docx-\(UUID().uuidString)")
+        writePackage(files, to: url, store: store, what: "Word")
+    }
+
+    /// 1.4：演示稿
+    static func exportPptx(store: LibraryStore) {
+        store.flushNotebookSaves()
+        let t = title(store)
+        guard let url = savePanel(t + ".pptx", type: UTType(filenameExtension: "pptx") ?? .data) else { return }
+        let files = NotebookPptx.files(title: t, pieces: store.notebookPieces(), options: options(store))
+        writePackage(files, to: url, store: store, what: "演示稿")
+    }
+
+    /// 把各部件写进临时文件夹，用系统自带的 zip 打包成 .docx / .pptx
+    static func writePackage(_ files: [String: String], to url: URL, store: LibraryStore, what: String) {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("kr-ooxml-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
         do {
             for (path, xml) in files {
@@ -455,14 +487,16 @@ enum NotebookExport {
                 try xml.write(to: f, atomically: true, encoding: .utf8)
             }
             try? FileManager.default.removeItem(at: url)
+            let tops = Set(files.keys.map { String($0.split(separator: "/").first ?? "") }).sorted()
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
             p.currentDirectoryURL = tmp
-            p.arguments = ["-q", "-X", "-r", url.path, "[Content_Types].xml", "_rels", "docProps", "word"]
+            // [Content_Types].xml 放在最前面
+            p.arguments = ["-q", "-X", "-r", url.path, "[Content_Types].xml"] + tops.filter { $0 != "[Content_Types].xml" }
             try p.run()
             p.waitUntilExit()
-            guard p.terminationStatus == 0 else { throw ImportFileError("打包 Word 文件失败（zip 退出码 \(p.terminationStatus)）。") }
-            AppLog.write("导出专题笔记本为 Word：\(store.notebookState.blocks.count) 块")
+            guard p.terminationStatus == 0 else { throw ImportFileError("打包\(what)失败（zip 退出码 \(p.terminationStatus)）。") }
+            AppLog.write("导出专题笔记本为\(what)：\(store.notebookState.blocks.count) 块")
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
             store.report(error)
