@@ -150,6 +150,8 @@ struct ContentView: View {
             ArticlesView()
         case .sourceManager:
             SourceManagerView()
+        case .help:
+            HelpView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -199,6 +201,7 @@ struct SidebarView: View {
                     }
                 }
                 .tag(SidebarItem.trash)
+                Label("使用说明", systemImage: "questionmark.circle").tag(SidebarItem.help)
             }
 
             // 出处默认折叠（点“出处”标题旁的箭头展开；记住上次状态）
@@ -245,7 +248,8 @@ struct SidebarView: View {
 
 
             if !store.tags.isEmpty {
-                Section("标签") {
+                // 标签默认折叠（记住上次状态）
+                Section("标签", isExpanded: Bindable(store).tagsExpanded) {
                     ForEach(store.tags, id: \.self) { tag in
                         Label(tag, systemImage: "number").tag(SidebarItem.tag(tag))
                     }

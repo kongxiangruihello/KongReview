@@ -13,6 +13,7 @@ enum SidebarItem: Hashable {
     case trash
     case articles
     case sourceManager
+    case help
     case source(Int64)
     case tag(String)
 }
@@ -73,6 +74,10 @@ final class LibraryStore {
     /// 侧边栏“出处”分组是否展开（默认折叠，记住上次状态）
     var sourcesExpanded: Bool = UserDefaults.standard.bool(forKey: "sidebar.sourcesExpanded") {
         didSet { UserDefaults.standard.set(sourcesExpanded, forKey: "sidebar.sourcesExpanded") }
+    }
+    /// 侧边栏“标签”分组是否展开（默认折叠）
+    var tagsExpanded: Bool = UserDefaults.standard.bool(forKey: "sidebar.tagsExpanded") {
+        didSet { UserDefaults.standard.set(tagsExpanded, forKey: "sidebar.tagsExpanded") }
     }
     /// 当前日期（yyyy-MM-dd）；跨日时更新，回顾页据此换新
     var today: String = ReminderPlan.dayKey(Date())

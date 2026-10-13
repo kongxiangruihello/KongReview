@@ -49,7 +49,8 @@ final class StatusItemController: NSObject {
         guard item == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: "KongReview")
+            // 与 App 图标同款（单色模板图）；万一解码失败退回系统符号
+            button.image = MenuBarIcon.image() ?? NSImage(systemSymbolName: "text.quote", accessibilityDescription: "KongReview")
             button.image?.isTemplate = true
         }
         let menu = NSMenu()

@@ -259,14 +259,28 @@ struct StudyView: View {
             Divider()
             if let card = study.current {
                 let f = store.faces(of: card)
-                CardWebView(front: f.front, back: study.showingAnswer ? f.back : nil, store: store)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                controls(card).padding()
+                VStack(spacing: 0) {
+                    ReviewCardContainer(padding: 0) {
+                        cardHeader(card)
+                            .padding(.horizontal, 28)
+                            .padding(.top, 20)
+                        CardWebView(front: f.front, back: study.showingAnswer ? f.back : nil, store: store)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 8)
+                    }
+                    .frame(maxWidth: 860, maxHeight: .infinity)
+                    .padding(.horizontal, 40)
+                    .padding(.top, 24)
+                    controls(card)
+                        .padding(.top, 18)
+                        .padding(.bottom, 20)
+                }
             } else {
                 finished
             }
         }
+        .background(ReviewPalette.page)
         .navigationTitle("学习 · \(study.deck ?? "")")
         .onAppear { if study.current == nil && !study.finished { store.nextCard() } }
     }
@@ -298,58 +312,78 @@ struct StudyView: View {
             .monospacedDigit()
             .font(.callout)
             Spacer()
-            if let card = study.current {
-                if let deck = study.deck, store.options(for: deck).algorithm == .fsrs,
-                   let r = FSRS(parameters: CardSettings.fsrsParameters).currentRetrievability(card) {
-                    Text("记住概率约 \(Int((r * 100).rounded()))%")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .help("FSRS 估计此刻还记得这张卡的概率（稳定性 \(String(format: "%.1f", card.stability ?? 0)) 天，难度 \(String(format: "%.1f", card.difficulty ?? 0))）")
-                }
-                if card.highlightId != nil {
-                    Button { store.openHighlight(of: card) } label: { Label("原摘录", systemImage: "text.quote") }
-                        .help("打开这张卡对应的摘录（出处、按语、标签）")
-                }
-                Button { store.editCard(card) } label: { Label("编辑", systemImage: "pencil") }
-                    .keyboardShortcut("e", modifiers: [])
-                    .help("编辑这张卡（E）")
-                Button {
-                    if let id = card.id { store.setSuspended(true, cards: [id]) }
-                    store.nextCard()
-                } label: { Label("暂停", systemImage: "pause.circle") }
-                    .help("暂停这张卡：不再出现在学习中，可在“浏览”里恢复")
-            }
+            // 与左边的返回按钮对称，让计数居中
+            Label("牌组", systemImage: "chevron.left").hidden()
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
     }
 
+    /// 卡片顶部：牌组、状态、记住概率；右侧原摘录、编辑、暂停
+    private func cardHeader(_ card: Card) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "brain.head.profile").foregroundStyle(.purple)
+            Text(card.deck).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+            Text(stateLabel(card))
+                .font(.caption)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(stateColor(card).opacity(0.15), in: Capsule())
+                .foregroundStyle(stateColor(card))
+            if store.options(for: card.deck).algorithm == .fsrs,
+               let r = FSRS(parameters: CardSettings.fsrsParameters).currentRetrievability(card) {
+                Text("记住概率约 \(Int((r * 100).rounded()))%")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help("FSRS 估计此刻还记得这张卡的概率（稳定性 \(String(format: "%.1f", card.stability ?? 0)) 天，难度 \(String(format: "%.1f", card.difficulty ?? 0))）")
+            }
+            Spacer()
+            if card.highlightId != nil {
+                CardIconButton(icon: "text.quote", help: "原摘录（出处、按语、标签）") { store.openHighlight(of: card) }
+            }
+            CardIconButton(icon: "square.and.pencil", help: "编辑这张卡（E）") { store.editCard(card) }
+                .keyboardShortcut("e", modifiers: [])
+            CardIconButton(icon: "pause.circle", help: "暂停这张卡：不再出现在学习中，可在“浏览”里恢复") {
+                if let id = card.id { store.setSuspended(true, cards: [id]) }
+                store.nextCard()
+            }
+        }
+    }
+
+    private func stateLabel(_ c: Card) -> String {
+        switch c.state {
+        case .new: return "新卡"
+        case .learning: return "学习中"
+        case .relearning: return "重学"
+        case .review: return "复习"
+        }
+    }
+
+    private func stateColor(_ c: Card) -> Color {
+        switch c.state {
+        case .new: return .blue
+        case .learning, .relearning: return .red
+        case .review: return .green
+        }
+    }
+
+    /// 卡片下方的圆形按钮：先“显示答案”，再四个评分
     @ViewBuilder
     private func controls(_ card: Card) -> some View {
         if !study.showingAnswer {
-            Button {
+            CircleActionButton(icon: "eye", title: "显示答案", hint: "空格", kind: .filled, diameter: 70) {
                 study.showingAnswer = true
-            } label: {
-                Text("显示答案").frame(minWidth: 200)
             }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
             .keyboardShortcut(.space, modifiers: [])
-            .help("空格")
         } else {
             let preview = store.scheduler(forDeck: card.deck).preview(card, now: Date())
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 40) {
                 ForEach(CardAnswer.allCases, id: \.self) { a in
-                    Button {
+                    CircleActionButton(icon: answerIcon(a), title: a.label,
+                                       hint: "\(preview[a] ?? "") · \(a.rawValue)",
+                                       kind: a == .good ? .filled : .outline,
+                                       tint: a == .good ? .accentColor : answerColor(a),
+                                       diameter: a == .good ? 70 : 60) {
                         store.answerCurrent(a)
-                    } label: {
-                        VStack(spacing: 2) {
-                            Text(preview[a] ?? "").font(.caption).foregroundStyle(.secondary)
-                            Text("\(a.rawValue) \(a.label)")
-                        }
-                        .frame(minWidth: 90)
                     }
-                    .controlSize(.large)
-                    .tint(answerColor(a))
                     .keyboardShortcut(KeyEquivalent(Character(String(a.rawValue))), modifiers: [])
                 }
             }
@@ -360,6 +394,15 @@ struct StudyView: View {
                     .opacity(0)
                     .allowsHitTesting(false)
             }
+        }
+    }
+
+    private func answerIcon(_ a: CardAnswer) -> String {
+        switch a {
+        case .again: return "arrow.counterclockwise"
+        case .hard: return "tortoise"
+        case .good: return "checkmark"
+        case .easy: return "hare"
         }
     }
 

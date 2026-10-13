@@ -149,6 +149,43 @@ def variant_c():
     return im
 
 
+
+CLEAR = (0, 0, 0, 0)
+INK = (0, 0, 0, 255)
+
+
+def menubar_template():
+    """菜单栏用的单色模板图：黑色书形，回环箭头与 k 镂空（macOS 按模板图自动适配深浅色菜单栏）。
+    线条比 App 图标加粗，以便缩到 18 点仍清楚。"""
+    im = Image.new("RGBA", (N, N), CLEAR)
+    d = ImageDraw.Draw(im)
+    open_book(d, INK, left=96, right=928, top=212, bottom=812, spine_dip=50, corner=56)
+    cy = 512
+    review_arrow(d, 512, cy, 262, 60, CLEAR, start=-50, sweep=290, head=1.2)
+    w = 64
+    d.rounded_rectangle((px(444), px(402), px(444 + w), px(628)), radius=px(w / 2), fill=CLEAR)
+    d.line([(px(476), px(574)), (px(578), px(476))], fill=CLEAR, width=px(w))
+    d.line([(px(476), px(546)), (px(586), px(624))], fill=CLEAR, width=px(w))
+    for (x, y) in ((578, 476), (586, 624)):
+        d.ellipse((px(x - w / 2), px(y - w / 2), px(x + w / 2), px(y + w / 2)), fill=CLEAR)
+    bbox = im.getbbox()
+    im = im.crop(bbox)
+    side = max(im.width, im.height)
+    sq = Image.new("RGBA", (side, side), CLEAR)
+    sq.alpha_composite(im, ((side - im.width) // 2, (side - im.height) // 2))
+    return sq
+
+
+def write_menubar(out_dir):
+    img = menubar_template()
+    paths = []
+    for scale in (1, 2):
+        size = 18 * scale
+        path = os.path.join(out_dir, "menubar@%dx.png" % scale)
+        img.resize((size, size), Image.LANCZOS).save(path)
+        paths.append(path)
+    return paths
+
 VARIANTS = {"a": variant_a, "b": variant_b, "c": variant_c}
 
 
@@ -190,6 +227,10 @@ if __name__ == "__main__":
         preview(out)
         print("preview:", out)
     else:
+        if "--menubar" in args:
+            out = args[args.index("--menubar") + 1]
+            print("menubar icons:", write_menubar(out))
+            sys.exit(0)
         v = args[args.index("--variant") + 1] if "--variant" in args else DEFAULT
         write_iconset(render(v))
         print("icon variant", v, "written to", OUT)

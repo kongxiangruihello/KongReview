@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import KongReviewCore
 
 /// 每日回顾：一次一张卡片。同一天内重开应用会回到同一组、同一位置；跨日自动换新。
@@ -34,20 +35,22 @@ struct DailyReviewView: View {
             } else {
                 let card = state.cards[state.position]
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        ReviewCardView(card: card, source: store.source(for: card.highlight),
-                                       hasCard: store.cardHighlightIDs.contains(card.id))
+                    VStack(spacing: 18) {
+                        reviewCard(card)
                         noteEditor(for: card)
                     }
-                    .padding(40)
-                    .frame(maxWidth: 760)
+                    .padding(.horizontal, 40)
+                    .padding(.top, 28)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: 820)
                     .frame(maxWidth: .infinity)
                 }
-                Divider()
                 controls(for: card)
-                    .padding()
+                    .padding(.top, 6)
+                    .padding(.bottom, 18)
             }
         }
+        .background(ReviewPalette.page)
         .navigationTitle(state.theme.map { "主题回顾 · #\($0)" } ?? "今日回顾")
         .task(id: (state.theme ?? "") + "|" + store.today) { loadSession(forceNew: false) }
         .onChange(of: store.revision) { refreshCards() }
@@ -136,6 +139,7 @@ struct DailyReviewView: View {
     @ViewBuilder
     private func noteEditor(for card: ReviewCard) -> some View {
         if state.noteDraft != nil {
+            ReviewCardContainer(padding: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("按语（支持 Markdown）").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: Binding(get: { state.noteDraft ?? "" }, set: { state.noteDraft = $0 }))
@@ -153,6 +157,7 @@ struct DailyReviewView: View {
                         .keyboardShortcut(.return, modifiers: .command)
                         .buttonStyle(.borderedProminent)
                 }
+            }
             }
         }
     }
@@ -177,64 +182,144 @@ struct DailyReviewView: View {
         editingNote ? nil : KeyboardShortcut(k, modifiers: [])
     }
 
+    /// 回顾卡片：出处头（封面、书名、作者，右侧写按语与展开详情）→ 正文 → 译文、按语 → 折叠的出处详情 → 右下角图标
+    private func reviewCard(_ card: ReviewCard) -> some View {
+        let h = card.highlight
+        let source = store.source(for: h)
+        let hasCard = store.cardHighlightIDs.contains(card.id)
+        return ReviewCardContainer(padding: 36) {
+            HStack(alignment: .top, spacing: 16) {
+                SourceThumb(source: source)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(source?.title ?? "未归类")
+                        .font(.system(size: 17, weight: .semibold))
+                        .lineLimit(2)
+                    Text([source?.author ?? "", h.location ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if hasCard {
+                        Label("已做成记忆卡", systemImage: "brain").font(.caption).foregroundStyle(.purple)
+                    }
+                }
+                Spacer(minLength: 12)
+                CardIconButton(icon: h.note == nil ? "text.bubble" : "text.bubble.fill",
+                               help: h.note == nil ? "写按语（N）" : "改按语（N）") {
+                    state.noteDraft = h.note ?? ""
+                }
+                CardIconButton(icon: state.showDetails ? "chevron.up" : "chevron.down",
+                               help: state.showDetails ? "收起出处详情" : "展开出处详情（完整引文、位置、标签）") {
+                    state.showDetails.toggle()
+                }
+            }
+            .padding(.bottom, 26)
+
+            // 正文与译文、按语（网页渲染：Markdown 标题、列表、图片都按真实样式显示）
+            RichWebText(text: h.text, style: .highlight, slot: "review-text")
+            if let t = h.translation {
+                RichWebText(text: t, style: .translation, slot: "review-translation")
+                    .padding(.top, 16)
+            }
+            if let n = h.note {
+                HStack(alignment: .top, spacing: 10) {
+                    RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor.opacity(0.7)).frame(width: 3)
+                    RichWebText(text: n, style: .note, slot: "review-note")
+                }
+                .padding(.top, 18)
+            }
+
+            if state.showDetails {
+                VStack(alignment: .leading, spacing: 6) {
+                    let cite = CitationFormatter.citation(for: h, source: source, style: CitationSettings.style)
+                    if !cite.isEmpty {
+                        Text(cite).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    if !h.tags.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(h.tags, id: \.self) { t in
+                                Text("#\(t)").font(.caption)
+                                    .padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(Color.accentColor.opacity(0.1), in: Capsule())
+                            }
+                        }
+                    }
+                    Text("添加于 \(h.createdAt.formatted(date: .abbreviated, time: .omitted))，回顾过 \(h.surfacedCount) 次")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.top, 20)
+            }
+
+            HStack(spacing: 28) {
+                Spacer()
+                CardIconButton(icon: h.isFavorite ? "heart.fill" : "heart", help: "收藏（F）", active: h.isFavorite) {
+                    act(.favorite, card)
+                }
+                CardIconButton(icon: "square.and.pencil", help: "编辑摘录（E）") { store.edit(h) }
+                CardIconButton(icon: hasCard ? "brain.fill" : "brain", help: hasCard ? "已做成记忆卡" : "做成记忆卡（M）") {
+                    if !hasCard { makeCard(card) }
+                }
+                CardIconButton(icon: "doc.on.doc", help: "复制（含出处）") { copy(h, source: source) }
+                ShareLink(item: shareText(h, source: source)) {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 18))
+                        .foregroundStyle(Color.accentColor.opacity(0.85))
+                        .frame(width: 34, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help("分享")
+            }
+            .padding(.top, 28)
+        }
+    }
+
+    /// 卡片下方的一排圆形按钮（参照 Readwise：弃置 · 中间操作 · 保留）
     @ViewBuilder
     private func controls(for card: ReviewCard) -> some View {
         let hasCard = store.cardHighlightIDs.contains(card.id)
-        HStack(spacing: 12) {
-            Button { go(-1) } label: { Label("上一条", systemImage: "chevron.left") }
+        HStack(alignment: .top, spacing: 44) {
+            CircleActionButton(icon: "chevron.left", title: "上一条", hint: "← / K", kind: .plain, diameter: 44,
+                               disabled: state.position == 0) { go(-1) }
                 .keyboardShortcut(key(.leftArrow))
-                .disabled(state.position == 0)
-                .help("上一条（← 或 K）")
-            Button("编辑") { store.edit(card.highlight) }
-                .keyboardShortcut(key("e"))
-                .help("编辑摘录（E）")
-            Button {
-                state.noteDraft = card.highlight.note ?? ""
-            } label: { Label(card.highlight.note == nil ? "写按语" : "改按语", systemImage: "text.bubble") }
-                .keyboardShortcut(key("n"))
-                .disabled(editingNote)
-                .help("在这条摘录下写自己的评论（N）")
-
-            Spacer()
-
-            Button(role: .destructive) {
-                act(.discard, card)
-            } label: { Label("弃置", systemImage: "trash") }
+            CircleActionButton(icon: "xmark", title: "弃置", hint: "Delete", kind: .outline) { act(.discard, card) }
                 .keyboardShortcut(key(.delete))
                 .help("以后不再出现（可在列表中恢复）")
-
-            Button {
-                act(.favorite, card)
-            } label: { Label("收藏", systemImage: card.highlight.isFavorite ? "star.fill" : "star") }
-                .keyboardShortcut(key("f"))
-                .help("收藏（F）")
-
-            Button {
-                store.makeCard(from: card.highlight)
-                store.logReview(.toCard, highlightId: card.highlight.id)
-                update(scheduler.apply(.keep, to: card.highlight))
-            } label: { Label(hasCard ? "已是记忆卡" : "做成记忆卡", systemImage: hasCard ? "brain.fill" : "brain") }
+            CircleActionButton(icon: "text.bubble", title: "按语", hint: "N", kind: .plain, diameter: 52,
+                               disabled: editingNote) { state.noteDraft = card.highlight.note ?? "" }
+                .keyboardShortcut(key("n"))
+            CircleActionButton(icon: "brain", title: hasCard ? "已是卡片" : "记忆卡", hint: "M", kind: .plain, diameter: 52,
+                               disabled: hasCard) { makeCard(card) }
                 .keyboardShortcut(key("m"))
-                .disabled(hasCard)
-                .help("做成记忆卡，到“记忆卡”页按 Anki 的方式复习（M）")
-
-            Button {
-                act(.keep, card)
-            } label: { Label("下一条", systemImage: "chevron.right") }
+            CircleActionButton(icon: "checkmark", title: "保留", hint: "空格 / → / J", kind: .filled) { act(.keep, card) }
                 .keyboardShortcut(key(.space))
-                .buttonStyle(.borderedProminent)
-                .help("下一条（空格、→ 或 J）")
         }
+        .frame(maxWidth: .infinity)
         .background {
-            // 额外的快捷键：→ / J 下一条，K 上一条
+            // 其余快捷键：→ / J 下一条，K 上一条，F 收藏，E 编辑
             Group {
                 Button("") { act(.keep, card) }.keyboardShortcut(key(.rightArrow))
                 Button("") { act(.keep, card) }.keyboardShortcut(key("j"))
                 Button("") { go(-1) }.keyboardShortcut(key("k"))
+                Button("") { act(.favorite, card) }.keyboardShortcut(key("f"))
+                Button("") { store.edit(card.highlight) }.keyboardShortcut(key("e"))
             }
             .opacity(0)
             .allowsHitTesting(false)
         }
+    }
+
+    private func makeCard(_ card: ReviewCard) {
+        store.makeCard(from: card.highlight)
+        store.logReview(.toCard, highlightId: card.highlight.id)
+        update(scheduler.apply(.keep, to: card.highlight))
+    }
+
+    private func shareText(_ h: Highlight, source: Source?) -> String {
+        let cite = CitationFormatter.citation(for: h, source: source, style: CitationSettings.style)
+        return cite.isEmpty ? h.text : h.text + "\n——" + cite
+    }
+
+    private func copy(_ h: Highlight, source: Source?) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(shareText(h, source: source), forType: .string)
     }
 
     // MARK: 逻辑
@@ -352,41 +437,6 @@ struct MarkdownPreview: View {
         }
         .padding(8)
         .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-    }
-}
-
-struct ReviewCardView: View {
-    let card: ReviewCard
-    let source: Source?
-    var hasCard = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if hasCard {
-                Label("已做成记忆卡", systemImage: "brain").font(.caption).foregroundStyle(.purple)
-            }
-            // 用网页内核渲染：Markdown 标题、列表、图片与夹杂的 HTML 都按真实样式显示
-            RichWebText(text: card.highlight.text, style: .highlight, slot: "review-text")
-            if let t = card.highlight.translation {
-                RichWebText(text: t, style: .translation, slot: "review-translation")
-            }
-            if let n = card.highlight.note {
-                HStack(alignment: .top, spacing: 8) {
-                    Rectangle().fill(.tint).frame(width: 3)
-                    RichWebText(text: n, style: .note, slot: "review-note")
-                }
-            }
-            let cite = CitationFormatter.citation(for: card.highlight, source: source, style: CitationSettings.style)
-            if !cite.isEmpty {
-                Text("—— \(cite)").font(.callout).foregroundStyle(.secondary)
-            }
-            if !card.highlight.tags.isEmpty {
-                Text(card.highlight.tags.map { "#\($0)" }.joined(separator: "  "))
-                    .font(.caption)
-                    .foregroundStyle(.tint)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
