@@ -219,6 +219,7 @@ struct CardsHomeView: View {
                 }
                 Button("学习") { store.startStudy(deck: d.name) }
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled(d.counts.total == 0)
             }
             .frame(width: 150, alignment: .trailing)
@@ -669,6 +670,7 @@ struct CardEditorView: View {
                 Button("保存") { store.commitCardEditor() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled((draft?.card.fields.first ?? draft?.card.front ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -726,6 +728,7 @@ struct CardEditorView: View {
             addSection("")
         }
         .menuStyle(.borderlessButton)
+        .handCursor()
         .fixedSize()
         .padding(.top, 8)
         .help("在背面答案之后再加一栏，如“释义”“出处”“例句”；可加多个。点按直接添加，按住选常用名称。")
@@ -821,6 +824,7 @@ struct CardImportPreviewView: View {
                 Button("导入") { store.confirmCardImport() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
             }
         }
         .padding(24)

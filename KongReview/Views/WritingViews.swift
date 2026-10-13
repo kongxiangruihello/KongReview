@@ -58,6 +58,7 @@ struct BibliographyView: View {
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
+                .handCursor()
                 .disabled(entries.isEmpty)
                 Button("存为文本…") { save(entries, title: req?.title ?? "参考文献") }
                     .disabled(entries.isEmpty)

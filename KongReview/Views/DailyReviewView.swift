@@ -36,6 +36,9 @@ struct DailyReviewView: View {
                 let card = state.cards[state.position]
                 ScrollView {
                     VStack(spacing: 18) {
+                        if let d = store.currentWeeklyDigest() {
+                            WeeklyDigestCard(digest: d)
+                        }
                         reviewCard(card)
                         noteEditor(for: card)
                     }
@@ -63,42 +66,125 @@ struct DailyReviewView: View {
     private var topBar: some View {
         let _ = store.revision
         let _ = store.today
-        let s = store.stats
         let due = store.dueCardCount()
         return VStack(spacing: 0) {
-            HStack(spacing: 22) {
-                Picker("范围", selection: Bindable(store.review).theme) {
-                    Text("全部摘录").tag(String?.none)
-                    ForEach(store.tags, id: \.self) { Text("#\($0)").tag(String?.some($0)) }
-                }
-                .labelsHidden()
-                .fixedSize()
+            // 1.3：窄窗口时不再挤掉左右两端——范围改成自绘的胶囊菜单，右侧按宽度逐级收起
+            HStack(spacing: 16) {
+                scopeMenu
                 if !state.cards.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView(value: Double(min(state.position, state.cards.count)), total: Double(state.cards.count))
                             .tint(ReviewPalette.accent)
-                            .frame(width: 90)
+                            .frame(width: 80)
                         Text("\(min(state.position + 1, state.cards.count)) / \(state.cards.count)")
                             .font(.system(size: 12.5).monospacedDigit())
                             .foregroundStyle(ReviewPalette.sub)
+                            .fixedSize()
                     }
                 }
-                StatChip(icon: "flame.fill", iconColor: ReviewPalette.hard, label: "连续", value: "\(s.currentStreak) 天")
-                Button { store.selection = .cards } label: {
-                    StatChip(icon: "brain", iconColor: ReviewPalette.accent, label: "记忆卡待学", value: "\(due)")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 16) {
+                        streakChip
+                        cardsChip(due, label: "记忆卡待学")
+                        Spacer(minLength: 8)
+                        statsLink(full: true)
+                    }
+                    HStack(spacing: 12) {
+                        streakChip
+                        cardsChip(due, label: "待学")
+                        Spacer(minLength: 6)
+                        statsLink(full: false)
+                    }
+                    HStack(spacing: 10) {
+                        cardsChip(due, label: "待学")
+                        Spacer(minLength: 4)
+                        statsLink(full: false)
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("打开记忆卡")
-                Spacer()
-                Button("全部统计 ›") { store.selection = .stats }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(ReviewPalette.accent)
+                .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 10)
             Rectangle().fill(ReviewPalette.hair).frame(height: 1)
         }
+    }
+
+    /// 回顾范围：全部摘录或某个标签（主题回顾）
+    private var scopeMenu: some View {
+        let theme = state.theme
+        return Menu {
+            Button { store.review.theme = nil } label: {
+                if theme == nil { Label("全部摘录", systemImage: "checkmark") } else { Text("全部摘录") }
+            }
+            if !store.tags.isEmpty {
+                Divider()
+                Section("主题回顾（按标签）") {
+                    ForEach(store.tags, id: \.self) { t in
+                        Button { store.review.theme = t } label: {
+                            if theme == t { Label("#\(t)", systemImage: "checkmark") } else { Text("#\(t)") }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: theme == nil ? "tray.full" : "number")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ReviewPalette.accent)
+                Text(theme ?? "全部摘录")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(ReviewPalette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 140, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(ReviewPalette.sub)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(Capsule().fill(ReviewPalette.card))
+            .overlay(Capsule().stroke(ReviewPalette.hair))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .handCursor()
+        .help("回顾范围：全部摘录，或只看某个标签（主题回顾）")
+    }
+
+    private var streakChip: some View {
+        StatChip(icon: "flame.fill", iconColor: ReviewPalette.hard, label: "连续", value: "\(store.stats.currentStreak) 天")
+            .fixedSize()
+    }
+
+    private func cardsChip(_ due: Int, label: String) -> some View {
+        Button { store.selection = .cards } label: {
+            StatChip(icon: "brain", iconColor: ReviewPalette.accent, label: label, value: "\(due)")
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .handCursor()
+        .help("打开记忆卡")
+    }
+
+    @ViewBuilder
+    private func statsLink(full: Bool) -> some View {
+        Button { store.selection = .stats } label: {
+            if full {
+                Text("全部统计 ›").font(.system(size: 12.5))
+            } else {
+                Image(systemName: "chart.bar.xaxis").font(.system(size: 13))
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(ReviewPalette.accent)
+        .fixedSize()
+        .handCursor()
+        .help("全部统计")
     }
 
     @ViewBuilder
@@ -119,6 +205,7 @@ struct DailyReviewView: View {
                     Button("保存按语") { saveNote(for: card) }
                         .keyboardShortcut(.return, modifiers: .command)
                         .buttonStyle(.borderedProminent)
+                        .handCursor()
                 }
             }
             }
@@ -369,6 +456,7 @@ struct DailyReviewView: View {
                         .foregroundStyle((h.frequency ?? 0) == 0 ? ReviewPalette.sub : ReviewPalette.accent)
                 }
                 .menuStyle(.borderlessButton)
+                .handCursor()
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .frame(width: 28, height: 26)
@@ -376,10 +464,15 @@ struct DailyReviewView: View {
                 Menu {
                     Button("复制文字（含出处）") { copy(h, source: source) }
                     Button("生成分享图…") { store.shareImageHighlight = h }
+                    if let id = h.id {
+                        Divider()
+                        AddToNotebookMenu(ids: [id])
+                    }
                 } label: {
                     Image(systemName: "square.and.arrow.up").font(.system(size: 14)).foregroundStyle(ReviewPalette.sub)
                 }
                 .menuStyle(.borderlessButton)
+                .handCursor()
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .frame(width: 28, height: 26)
@@ -407,6 +500,7 @@ struct DailyReviewView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .handCursor()
             .help("用词相近、同标签或同出处的其他摘录（R）")
             if state.showRelated {
                 if items.isEmpty {
@@ -436,6 +530,7 @@ struct DailyReviewView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .handCursor()
                     .help("打开这条摘录")
                 }
             }
@@ -577,6 +672,7 @@ struct DailyReviewView: View {
                     store.edit(h)
                 }
                 .buttonStyle(.link)
+                .handCursor()
                 .font(.system(size: 12))
                 Spacer()
                 Button("取消") { state.inlineDraft = nil }
@@ -584,6 +680,7 @@ struct DailyReviewView: View {
                 Button("保存") { saveInline(card) }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
             }
             .padding(.top, 6)
         }

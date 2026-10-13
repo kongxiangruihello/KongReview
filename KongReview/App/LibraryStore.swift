@@ -15,6 +15,7 @@ enum SidebarItem: Hashable {
     case sourceManager
     case help
     case saved(String)
+    case notebook(Int64)
     case source(Int64)
     case tag(String)
 }
@@ -35,6 +36,16 @@ final class LibraryStore {
     var showTagManager = false
     /// 1.2：参考文献表
     var bibliographyRequest: BibliographyRequest?
+    /// 1.3：专题笔记本列表、各本摘录数、当前打开的笔记本
+    var notebooks: [Notebook] = []
+    var notebookQuoteCounts: [Int64: Int] = [:]
+    var notebookState = NotebookState()
+    /// 1.3：新建笔记本对话框（输入标题）；附带要放进去的摘录
+    var newNotebookRequest: NewNotebookRequest?
+    /// 1.3：确认删除笔记本
+    var notebookPendingDeletion: Notebook?
+    /// 1.3：每周小结（按周缓存）
+    @ObservationIgnored var weeklyDigestCache: WeeklyDigest?
     var trashCount = 0
     var articleCount = 0
 
@@ -147,6 +158,8 @@ final class LibraryStore {
             reviewedToday = try db.reviewedToday()
             noteTemplates = try db.noteTemplates()
             coverIDs = try db.coverSourceIDs()
+            notebooks = try db.notebooks()
+            notebookQuoteCounts = try db.notebookQuoteCounts()
             refreshDerived()
             revision += 1
             onReload?()

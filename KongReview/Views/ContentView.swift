@@ -93,6 +93,7 @@ struct ContentView: View {
         .modifier(CardSheets())
         .modifier(TagSheets())
         .modifier(WritingSheets())
+        .modifier(NotebookSheets())
         .alert("完成", isPresented: Binding(
             get: { store.infoMessage != nil },
             set: { if !$0 { store.infoMessage = nil } }
@@ -163,6 +164,8 @@ struct ContentView: View {
             } else {
                 ContentUnavailableView("这个已存搜索已删除", systemImage: "bookmark.slash")
             }
+        case .notebook(let id):
+            NotebookView(notebookId: id).id(id)
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -249,12 +252,53 @@ struct SidebarView: View {
                         Image(systemName: "arrow.up.arrow.down")
                     }
                     .menuStyle(.borderlessButton)
+                    .handCursor()
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .help("出处排序：\(store.sourceSort.label)")
                 }
             }
 
+
+            // 1.3：专题笔记本
+            Section {
+                ForEach(store.notebooks) { n in
+                    if let id = n.id {
+                        HStack {
+                            Label(n.title, systemImage: "text.book.closed").lineLimit(1)
+                            Spacer()
+                            SidebarCount(store.notebookQuoteCounts[id] ?? 0)
+                        }
+                        .tag(SidebarItem.notebook(id))
+                        .contextMenu {
+                            Button("删除笔记本…", role: .destructive) { store.notebookPendingDeletion = n }
+                        }
+                    }
+                }
+                if store.notebooks.isEmpty {
+                    Button {
+                        store.newNotebookRequest = NewNotebookRequest()
+                    } label: {
+                        Label("新建专题笔记本…", systemImage: "plus")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .handCursor()
+                }
+            } header: {
+                HStack {
+                    Text("专题笔记本")
+                    Spacer()
+                    Button {
+                        store.newNotebookRequest = NewNotebookRequest()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .handCursor()
+                    .help("新建专题笔记本")
+                }
+            }
 
             if !store.savedSearches.isEmpty {
                 Section("已存搜索") {
@@ -283,6 +327,7 @@ struct SidebarView: View {
                             Image(systemName: "slider.horizontal.3")
                         }
                         .buttonStyle(.borderless)
+                        .handCursor()
                         .help("整理标签：改名、合并、删除、分层")
                     }
                 }

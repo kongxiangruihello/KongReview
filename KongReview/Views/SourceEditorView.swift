@@ -61,6 +61,7 @@ struct SourceEditorView: View {
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
+                .handCursor()
                 .disabled(source.title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding()

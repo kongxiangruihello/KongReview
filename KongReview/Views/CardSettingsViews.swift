@@ -77,6 +77,7 @@ struct DeckOptionsView: View {
                 Button("保存") { if let o = store.deckOptionsEditor { store.saveDeckOptions(o) } }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
             }
         }
         .padding(20)
@@ -167,6 +168,7 @@ struct NoteTemplateEditorView: View {
                 Button("保存") { if let t = store.templateEditor { store.saveTemplate(t) } }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled(t?.front.isEmpty ?? true)
             }
         }
@@ -217,6 +219,7 @@ struct ApkgExportView: View {
                 Button("导出…") { if let r = store.apkgExport { ExportService.exportApkg(r, store: store) } }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled(r?.decks.isEmpty ?? true)
             }
         }

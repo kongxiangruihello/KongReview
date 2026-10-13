@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import KongReviewCore
 
 /// 快速录入浮窗。
@@ -8,28 +9,17 @@ import KongReviewCore
 /// - 剪贴板里有新内容时自动填入正文并全选，直接打字即可替换。
 /// - 出处默认沿用上一次，适合连续摘录同一本书。
 @MainActor
-final class QuickCaptureController: NSObject, NSTextViewDelegate {
+final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDelegate {
     static let shared = QuickCaptureController()
 
     weak var store: LibraryStore?
 
     private var panel: QuickCapturePanel?
     /// 系统配置好的可滚动文本视图（自动换行、随宽度伸缩）
-    /// 1.2：粘贴时把网页、Word 的格式转成 Markdown 保留（MarkdownPasteTextView）
-    private let scroll: NSScrollView = {
-        let s = NSScrollView()
-        let tv = MarkdownPasteTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 170))
-        tv.minSize = .zero
-        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        tv.isVerticallyResizable = true
-        tv.isHorizontallyResizable = false
-        tv.autoresizingMask = [.width]
-        tv.textContainer?.widthTracksTextView = true
-        tv.textContainer?.containerSize = NSSize(width: 540, height: CGFloat.greatestFiniteMagnitude)
-        s.documentView = tv
-        return s
-    }()
-    private var textView: NSTextView { scroll.documentView as! NSTextView }
+    /// 1.3：正文改为所见即所得编辑器（与主窗口同一套，粘贴保留格式）
+    private let editorModel = QuickCaptureText()
+    private let editorHandle = RichEditorHandle()
+    private var editorHost: NSView?
     private let sourceField = NSComboBox()
     private let authorField = NSTextField()
     private let locationField = NSTextField()
@@ -38,6 +28,8 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
     private let statusLabel = NSTextField(labelWithString: "")
 
     private var pendingURL: String?
+    /// 显示时是否全选正文（剪贴板自动填入时全选，直接打字即替换）
+    private var selectAllOnShow = false
     /// 上次打开时的剪贴板计数；-1 表示首次打开也使用剪贴板内容
     private var lastChangeCount = -1
 
@@ -52,7 +44,12 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
         reset(prefill: prefill)
         if !panel.isVisible { panel.center() }
         panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(textView)
+        // 等新内容送进编辑器（SwiftUI 下一次刷新）后再设焦点、全选
+        let selectAll = selectAllOnShow
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            self?.editorHandle.focus(selectAll: selectAll)
+        }
     }
 
     func close() {
@@ -71,7 +68,7 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
         sourceField.addItems(withObjectValues: titles)
 
         if let p = prefill {
-            textView.string = p.text
+            editorModel.text = p.text
             sourceField.stringValue = p.title ?? p.url ?? ""
             authorField.stringValue = p.author ?? ""
             locationField.stringValue = p.location ?? ""
@@ -79,7 +76,7 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
             noteField.stringValue = p.note ?? ""
             pendingURL = p.url
             lastChangeCount = NSPasteboard.general.changeCount
-            textView.setSelectedRange(NSRange(location: (p.text as NSString).length, length: 0))
+            selectAllOnShow = false
             return
         }
 
@@ -89,14 +86,15 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
         locationField.stringValue = ""
         tagsField.stringValue = ""
         noteField.stringValue = ""
-        textView.string = ""
+        editorModel.text = ""
+        selectAllOnShow = false
 
         let pb = NSPasteboard.general
         if pb.changeCount != lastChangeCount,
            let clip = RichClipboard.markdown(pb)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !clip.isEmpty, clip.count <= 20_000 {
-            textView.string = clip
-            textView.selectAll(nil)
+            editorModel.text = clip
+            selectAllOnShow = true
         }
         lastChangeCount = pb.changeCount
     }
@@ -104,7 +102,9 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
     // MARK: 保存
 
     @objc private func save() {
-        let text = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ⌘↩ 可能同时由编辑器和“保存”按钮触发：浮窗已收起就不再保存
+        guard panel?.isVisible == true else { return }
+        let text = editorModel.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             NSSound.beep()
             return
@@ -144,22 +144,18 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
         close()
     }
 
-    // MARK: NSTextViewDelegate：Tab 切换栏目，Esc 关闭
+    // MARK: Tab 切换栏目：最后一栏（按语）按 Tab 回到正文，第一栏（出处）按 ⇧Tab 回到正文
 
-    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        switch selector {
-        case #selector(NSResponder.insertTab(_:)):
-            textView.window?.selectNextKeyView(nil)
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertTab(_:)), control === noteField {
+            editorHandle.focus()
             return true
-        case #selector(NSResponder.insertBacktab(_:)):
-            textView.window?.selectPreviousKeyView(nil)
-            return true
-        case #selector(NSResponder.cancelOperation(_:)), #selector(NSResponder.complete(_:)):
-            close()
-            return true
-        default:
-            return false
         }
+        if selector == #selector(NSResponder.insertBacktab(_:)), control === sourceField {
+            editorHandle.focus()
+            return true
+        }
+        return false
     }
 
     // MARK: 界面
@@ -180,17 +176,32 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.onCancel = { [weak self] in self?.close() }
 
-        // 正文
-        textView.isRichText = false
-        textView.allowsUndo = true
-        textView.font = NSFont(name: "Songti SC", size: 16) ?? .systemFont(ofSize: 16)
-        textView.textContainerInset = NSSize(width: 6, height: 8)
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.delegate = self
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.heightAnchor.constraint(equalToConstant: 170).isActive = true
+        // 正文：所见即所得编辑器
+        let editorView = QuickCaptureEditor(
+            model: editorModel, handle: editorHandle,
+            onSubmit: { [weak self] in self?.save() },
+            onCancel: { [weak self] in self?.close() },
+            onTab: { [weak self] back in
+                guard let self, let panel = self.panel else { return }
+                panel.makeFirstResponder(back ? self.noteField : self.sourceField)
+            })
+        let host: NSView
+        if let store {
+            let h = NSHostingView(rootView: editorView.environment(store))
+            h.sizingOptions = []   // 尺寸由下面的约束决定
+            host = h
+        } else {
+            host = NSView()
+        }
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.heightAnchor.constraint(equalToConstant: 170).isActive = true
+        host.wantsLayer = true
+        host.layer?.cornerRadius = 8
+        host.layer?.masksToBounds = true
+        host.layer?.borderWidth = 1
+        host.layer?.borderColor = NSColor.separatorColor.cgColor
+        host.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        editorHost = host
 
         // 字段
         sourceField.placeholderString = "书名或篇名，可留空（默认沿用上一次）"
@@ -225,7 +236,7 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
         buttons.orientation = .horizontal
         buttons.spacing = 8
 
-        let stack = NSStackView(views: [scroll, grid, buttons])
+        let stack = NSStackView(views: [host, grid, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
@@ -239,20 +250,20 @@ final class QuickCaptureController: NSObject, NSTextViewDelegate {
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             stack.topAnchor.constraint(equalTo: content.topAnchor),
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -36),
+            host.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -36),
             grid.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -36),
             buttons.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -36),
         ])
         panel.contentView = content
 
         // Tab 顺序
-        textView.nextKeyView = sourceField
+        sourceField.delegate = self
+        noteField.delegate = self
         sourceField.nextKeyView = authorField
         authorField.nextKeyView = locationField
         locationField.nextKeyView = tagsField
         tagsField.nextKeyView = noteField
-        noteField.nextKeyView = textView
-        panel.initialFirstResponder = textView
+        noteField.nextKeyView = sourceField
         return panel
     }
 
@@ -313,5 +324,27 @@ final class MarkdownPasteTextView: NSTextView {
         } else {
             super.paste(sender)
         }
+    }
+}
+
+// MARK: - 1.3：快速录入的正文编辑器
+
+@MainActor
+@Observable
+final class QuickCaptureText {
+    var text = ""
+}
+
+struct QuickCaptureEditor: View {
+    let model: QuickCaptureText
+    let handle: RichEditorHandle
+    let onSubmit: () -> Void
+    let onCancel: () -> Void
+    let onTab: (Bool) -> Void
+
+    var body: some View {
+        RichEditor(text: Bindable(model).text, font: .highlight, placeholder: "摘录原文（粘贴时保留粗体、标题、列表等格式）",
+                   toolbar: false, minHeight: 170, slot: "quick-capture",
+                   onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle)
     }
 }

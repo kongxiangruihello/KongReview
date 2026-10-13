@@ -171,6 +171,7 @@ struct PillButton: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
+        .handCursor(enabled: !disabled)
     }
 }
 
@@ -214,6 +215,7 @@ struct GradeButton: View {
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+        .handCursor()
     }
 }
 
@@ -234,6 +236,7 @@ struct CardIconButton: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .handCursor()
     }
 }
 

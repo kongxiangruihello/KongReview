@@ -23,12 +23,16 @@ struct RichEditor: View {
     var slot: String = "editor"
     var onSubmit: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
+    /// 1.3：Tab / ⇧Tab 跳出编辑器（快速录入浮窗用）；nil 时 Tab 照常
+    var onTab: ((Bool) -> Void)? = nil
+    /// 1.3：外部控制焦点、全选
+    var handle: RichEditorHandle? = nil
     @Environment(LibraryStore.self) private var store
 
     var body: some View {
         let rep = RichEditorRep(text: $text, mode: mode, font: font, placeholder: placeholder, toolbar: toolbar,
                                 autoHeight: autoHeight, focus: focus, slot: "rich-editor-" + slot,
-                                onSubmit: onSubmit, onCancel: onCancel, store: store)
+                                onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle, store: store)
         if autoHeight {
             rep.frame(height: max(minHeight, WebHeights.shared.values["rich-editor-" + slot] ?? minHeight))
         } else {
@@ -70,6 +74,8 @@ struct RichEditorRep: NSViewRepresentable {
     let slot: String
     let onSubmit: (() -> Void)?
     let onCancel: (() -> Void)?
+    let onTab: ((Bool) -> Void)?
+    let handle: RichEditorHandle?
     let store: LibraryStore
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -86,8 +92,10 @@ struct RichEditorRep: NSViewRepresentable {
         wv.navigationDelegate = c
         c.lastValue = text
         c.wantsFocus = focus
+        handle?.webView = wv
+        handle?.coordinator = c
         wv.loadHTMLString(EditorPage.page(text: text, mode: mode, font: font, placeholder: placeholder,
-                                          toolbar: toolbar, autoHeight: autoHeight), baseURL: nil)
+                                          toolbar: toolbar, autoHeight: autoHeight, tabOut: onTab != nil), baseURL: nil)
         return wv
     }
 
@@ -114,6 +122,7 @@ struct RichEditorRep: NSViewRepresentable {
         var lastValue = ""
         var ready = false
         var wantsFocus = false
+        var pendingSelectAll = false
         var pending: String?
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -122,7 +131,8 @@ struct RichEditorRep: NSViewRepresentable {
             if wantsFocus {
                 wantsFocus = false
                 webView.window?.makeFirstResponder(webView)
-                webView.evaluateJavaScript("krFocus();", completionHandler: nil)
+                webView.evaluateJavaScript(pendingSelectAll ? "krSelectAll();" : "krFocus();", completionHandler: nil)
+                pendingSelectAll = false
             }
         }
 
@@ -147,11 +157,34 @@ struct RichEditorRep: NSViewRepresentable {
                 p.onSubmit?()
             case "cancel":
                 p.onCancel?()
+            case "tab", "backtab":
+                p.onTab?(type == "backtab")
             case "open":
                 if let s = body["value"] as? String, let url = URL(string: s) { NSWorkspace.shared.open(url) }
             default:
                 break
             }
+        }
+    }
+}
+
+/// 1.3：从外面（AppKit 浮窗）控制编辑器：设焦点、全选
+@MainActor
+final class RichEditorHandle {
+    weak var webView: WKWebView?
+    weak var coordinator: RichEditorRep.Coordinator?
+
+    /// 让编辑器成为键盘焦点；selectAll 为 true 时全选内容（直接打字即替换）
+    func focus(selectAll: Bool = false) {
+        guard let wv = webView else { return }
+        wv.window?.makeFirstResponder(wv)
+        let js = selectAll ? "krSelectAll();" : "krFocus();"
+        if coordinator?.ready == true {
+            wv.evaluateJavaScript(js, completionHandler: nil)
+        } else {
+            // 页面还没载入完：载入后再做
+            coordinator?.wantsFocus = true
+            coordinator?.pendingSelectAll = selectAll
         }
     }
 }

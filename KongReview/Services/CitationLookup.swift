@@ -39,13 +39,13 @@ final class CitationLookupController: NSObject, NSSearchFieldDelegate {
 
     // MARK: 显示 / 关闭
 
-    func show() {
+    func show(query: String = "") {
         let p = panel ?? makePanel()
         panel = p
         model.message = nil
         model.picked = []
-        field.stringValue = ""
-        search("")
+        field.stringValue = query
+        search(query)
         if !p.isVisible { p.center() }
         p.makeKeyAndOrderFront(nil)
         p.makeFirstResponder(field)

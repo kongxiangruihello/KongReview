@@ -326,6 +326,28 @@ final class AppDatabase {
             // 背面栏目：JSON 数组 [{id, name, text, folded}]
             try db.alter(table: "card") { t in t.add(column: "sections", .text) }
         }
+
+        // 1.3：专题笔记本
+        m.registerMigration("v9-notebooks") { db in
+            try db.create(table: "notebook") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("title", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(table: "notebook_block") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("notebookId", .integer).notNull().references("notebook", onDelete: .cascade)
+                t.column("position", .double).notNull()
+                t.column("kind", .text).notNull()
+                t.column("highlightId", .integer).references("highlight", onDelete: .setNull)
+                t.column("text", .text).notNull().defaults(to: "")
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(index: "notebook_block_order", on: "notebook_block", columns: ["notebookId", "position"])
+            try db.create(index: "notebook_block_highlight", on: "notebook_block", columns: ["highlightId"])
+        }
         return m
     }
 }

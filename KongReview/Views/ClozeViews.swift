@@ -148,6 +148,7 @@ struct ClozeEditorView: View {
                 Button("生成 \(max(numbers.count, 1)) 张卡") { store.commitCloze() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled(numbers.isEmpty)
             }
         }

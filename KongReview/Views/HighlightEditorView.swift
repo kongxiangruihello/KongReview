@@ -98,6 +98,7 @@ struct HighlightEditorView: View {
                 Button(draft.isNew ? "保存" : "更新") { store.commit(draft) }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled(draft.highlight.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding()

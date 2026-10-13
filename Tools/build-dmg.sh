@@ -74,6 +74,23 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
   <dict>
     <key>NSAllowsArbitraryLoads</key><true/>
   </dict>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>添加到 KongReview</string></dict>
+      <key>NSMessage</key><string>addHighlight</string>
+      <key>NSPortName</key><string>${APP}</string>
+      <key>NSSendTypes</key><array><string>public.html</string><string>public.rtf</string><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array>
+      <key>NSRequiredContext</key><dict/>
+    </dict>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>在 KongReview 中查引文</string></dict>
+      <key>NSMessage</key><string>lookupSelection</string>
+      <key>NSPortName</key><string>${APP}</string>
+      <key>NSSendTypes</key><array><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array>
+      <key>NSRequiredContext</key><dict/>
+    </dict>
+  </array>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

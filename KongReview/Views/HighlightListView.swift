@@ -96,6 +96,7 @@ struct HighlightListView: View {
                                 state.limit += ListState.pageSize
                             }
                             .buttonStyle(.link)
+                            .handCursor()
                             Spacer()
                         }
                         .padding(.vertical, 8)
@@ -260,6 +261,7 @@ struct BatchMenu: View {
             Button("收藏") { store.batch(.favorite(true), ids: ids) }
             Button("取消收藏") { store.batch(.favorite(false), ids: ids) }
             Button("做成记忆卡") { store.batch(.addToMastery, ids: ids) }
+            AddToNotebookMenu(ids: ids)
             Button("弃置（不再出现在回顾中）") { store.batch(.discard(true), ids: ids) }
             Button("取消弃置") { store.batch(.discard(false), ids: ids) }
             Divider()
@@ -332,6 +334,7 @@ struct HighlightMenu: View {
             store.save(h)
         }
         Button("做成填空卡…") { store.startCloze(for: highlight) }
+        if let id = highlight.id { AddToNotebookMenu(ids: [id]) }
         Menu("回顾频率") {
             Button((highlight.frequency ?? 0) > 0 ? "✓ 多出现" : "多出现") { store.setFrequency(1, for: highlight) }
             Button((highlight.frequency ?? 0) == 0 ? "✓ 正常" : "正常") { store.setFrequency(nil, for: highlight) }
@@ -458,6 +461,7 @@ struct ListFilterBar: View {
             if !state.extra.isEmpty {
                 Button("清除筛选") { state.extra = ListFilter() }
                     .buttonStyle(.link)
+                    .handCursor()
             }
             Button {
                 store.savingSearchName = state.query.isEmpty ? "" : state.query

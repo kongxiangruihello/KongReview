@@ -53,6 +53,7 @@ struct ExportOptionsView: View {
                     Button("导出…") { ExportService.runExport(store: store) }
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
+                        .handCursor()
                         .disabled(req.highlights.isEmpty)
                 }
             }
@@ -144,6 +145,7 @@ struct BatchPromptView: View {
                         Button("确定") { store.commitBatchPrompt() }
                             .keyboardShortcut(.defaultAction)
                             .buttonStyle(.borderedProminent)
+                            .handCursor()
                             .disabled(TagParser.parse(p.text).isEmpty)
                     }
                 }
@@ -194,6 +196,7 @@ struct BatchPromptView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .handCursor()
             }
         }
         .frame(height: 300)

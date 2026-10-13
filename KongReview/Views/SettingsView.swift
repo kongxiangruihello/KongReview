@@ -105,6 +105,7 @@ private struct QuickCaptureSettings: View {
 }
 
 private struct ReviewSettings: View {
+    @Environment(LibraryStore.self) private var store
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
     @AppStorage(SettingsKeys.reminderEnabled) private var reminderEnabled = false
     @AppStorage(SettingsKeys.reminderHour) private var hour = 8
@@ -118,6 +119,10 @@ private struct ReviewSettings: View {
 
 
             Section("提醒") {
+                Toggle("每周一显示上周小结（回顾页顶部；已允许通知时另推送一条）", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: LibraryStore.digestEnabledKey) as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: LibraryStore.digestEnabledKey); store.revisionBump() }
+                ))
                 Toggle("每日提醒", isOn: $reminderEnabled)
                 DatePicker("提醒时间", selection: timeBinding, displayedComponents: .hourAndMinute)
                     .disabled(!reminderEnabled)

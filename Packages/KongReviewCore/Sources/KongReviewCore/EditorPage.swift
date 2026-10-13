@@ -96,7 +96,8 @@ public enum EditorPage {
 
     /// 完整页面
     public static func page(text: String, mode: RichEditorMode, font: RichEditorFont = .body,
-                            placeholder: String = "", toolbar: Bool = true, autoHeight: Bool = false) -> String {
+                            placeholder: String = "", toolbar: Bool = true, autoHeight: Bool = false,
+                            tabOut: Bool = false) -> String {
         let (html, isHTML) = displayHTML(for: text, mode: mode)
         let fontCSS: String
         switch font {
@@ -106,7 +107,7 @@ public enum EditorPage {
         }
         let config = """
         {"mode": \(jsString(mode.rawValue)), "originalHTML": \(isHTML), "placeholder": \(jsString(placeholder)),
-         "toolbar": \(toolbar), "autoHeight": \(autoHeight)}
+         "toolbar": \(toolbar), "autoHeight": \(autoHeight), "tabOut": \(tabOut)}
         """
         return "<!doctype html><html><head><meta charset=\"utf-8\"><style>"
             + css.replacingOccurrences(of: "/*FONT*/", with: fontCSS)
@@ -653,6 +654,10 @@ public enum EditorPage {
         var meta = e.metaKey || e.ctrlKey;
         if (e.key === 'Escape') { e.preventDefault(); sendNow(); post({ type: 'cancel' }); return; }
         if (meta && e.key === 'Enter') { e.preventDefault(); sendNow(); post({ type: 'submit' }); return; }
+        // 1.3：快速录入浮窗里 Tab 跳到下一栏
+        if (cfg.tabOut && e.key === 'Tab' && !meta && !e.altKey) {
+          e.preventDefault(); sendNow(); post({ type: e.shiftKey ? 'backtab' : 'tab' }); return;
+        }
         if (meta && !e.altKey) {
           var k = (e.key || '').toLowerCase(), code = e.code || '';
           var cmd = null;
@@ -793,6 +798,11 @@ public enum EditorPage {
       window.krFocus = function () {
         ed.focus();
         var r = document.createRange(); r.selectNodeContents(ed); r.collapse(false);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      };
+      window.krSelectAll = function () {
+        ed.focus();
+        var r = document.createRange(); r.selectNodeContents(ed);
         var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
       };
       window.krGetValue = function () { return value(); };

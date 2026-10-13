@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyCenter.shared.lookupAction = { CitationLookupController.shared.show() }
         HotKeyCenter.shared.applyLookup(HotKeyPreset.lookup)
         StatusItemController.shared.apply()
-        PointerCursor.install()
+        ServiceProvider.install()
         QuickCaptureController.shared.store?.runStartupMaintenance()
 
         // 提醒与“今天是否已回顾”挂钩：首次回顾后、跨日时重排通知
@@ -56,8 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 兜底：每 10 分钟查一次（有些情况下系统不发跨日通知）
         Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in
-            MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }
+            MainActor.assumeIsolated {
+                QuickCaptureController.shared.store?.checkDayChange()
+                // 1.3：每周一 8 点后推送一次“上周小结”
+                if let s = QuickCaptureController.shared.store { WeeklyDigestNotifier.checkAndPost(store: s) }
+            }
         }
+        if let s = QuickCaptureController.shared.store { WeeklyDigestNotifier.checkAndPost(store: s) }
         BrowserWatcher.shared.start()
     }
 

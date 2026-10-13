@@ -81,6 +81,7 @@ struct ImportPreviewView: View {
                 Button("导入") { store.confirmImport() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled(store.importProgress != nil)
             }
         }

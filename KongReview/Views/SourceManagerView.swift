@@ -147,6 +147,7 @@ struct MergeSourcesView: View {
                     Button("合并") { store.commitMerge() }
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
+                        .handCursor()
                 }
             }
             .padding(24)

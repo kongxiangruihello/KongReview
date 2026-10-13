@@ -142,6 +142,7 @@ struct TagManagerView: View {
                             Spacer()
                             Button("把 #\(b) 并入 #\(a)") { store.renameTag(b, to: a) }
                                 .buttonStyle(.link)
+                                .handCursor()
                         }
                         .font(.callout)
                     }

@@ -299,6 +299,7 @@ struct AddArticleView: View {
                 Button("存档") { store.saveArticle(from: urlBinding.wrappedValue) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .handCursor()
                     .disabled(store.articleProgress != nil || urlBinding.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -341,6 +342,7 @@ struct ArticleSourceEditorView: View {
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
+                .handCursor()
             }
         }
         .padding(20)

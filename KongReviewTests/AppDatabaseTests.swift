@@ -849,3 +849,112 @@ final class V12DatabaseTests: XCTestCase {
     LiquidTextFolder.folder = nil
   }
 }
+
+final class V13NotebookTests: XCTestCase {
+  func testNotebookBlocksOrderAndInsert() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let s = try db.save(Source(title: "論語譯注", author: "楊伯峻"))
+    let h1 = try db.save(Highlight(sourceId: s.id, text: "學而時習之", location: "第 1 页"))
+    let h2 = try db.save(Highlight(sourceId: s.id, text: "溫故而知新"))
+    let n = try db.createNotebook(title: "論語專題")
+    let nid = try XCTUnwrap(n.id)
+    let a = try db.insertBlocks([NotebookBlock(notebookId: nid, position: 0, kind: .highlight, highlightId: h1.id, text: h1.text),
+                                 NotebookBlock(notebookId: nid, position: 0, kind: .highlight, highlightId: h2.id, text: h2.text)],
+                                into: nid, after: nil)
+    XCTAssertEqual(a.map(\.position), [1, 2])
+    // 插到两块之间、插到开头
+    let mid = try db.insertBlocks([NotebookBlock(notebookId: nid, position: 0, kind: .text, text: "過渡")], into: nid, after: a[0].id)
+    let head = try db.insertBlocks([NotebookBlock(notebookId: nid, position: 0, kind: .heading, text: "一、學")], into: nid, after: nil, atStart: true)
+    var blocks = try db.notebookBlocks(nid)
+    XCTAssertEqual(blocks.map(\.id), [head[0].id, a[0].id, mid[0].id, a[1].id])
+    // 连续往同一处插很多次也不会乱序（间隔太小时自动重新编号）
+    var after = a[0].id
+    for k in 0..<60 {
+      after = try db.insertBlocks([NotebookBlock(notebookId: nid, position: 0, kind: .text, text: "\(k)")], into: nid, after: after)[0].id
+    }
+    blocks = try db.notebookBlocks(nid)
+    XCTAssertEqual(blocks.count, 64)
+    XCTAssertEqual(blocks.filter { $0.kind == .text && $0.text != "過渡" }.map(\.text), (0..<60).map(String.init))
+    XCTAssertEqual(blocks.last?.id, a[1].id)
+    // 重新排序、删除笔记本连带删除块；摘录彻底删除后块保留（highlightId 置空）
+    try db.reorderBlocks(blocks.reversed().compactMap(\.id))
+    XCTAssertEqual(try db.notebookBlocks(nid).first?.id, a[1].id)
+    XCTAssertEqual(try db.notebookQuoteCounts()[nid], 2)
+    XCTAssertEqual(try db.notebookIDs(containing: h1.id!), [nid])
+    try db.writer.write { db in _ = try Highlight.deleteOne(db, key: h2.id!) }
+    XCTAssertNil(try db.notebookBlocks(nid).first?.highlightId)
+    try db.deleteNotebook(nid)
+    XCTAssertEqual(try db.notebookBlocks(nid).count, 0)
+  }
+
+  func testStoreNotebookFlow() throws {
+    try MainActor.assumeIsolated { try runNotebookScenario() }
+  }
+
+  @MainActor
+  private func runNotebookScenario() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let store = LibraryStore(db: db)
+    let um = UndoManager()
+    store.undoManager = um
+    let s = try db.save(Source(title: "論語譯注", author: "楊伯峻", publisher: "中華書局", year: "1980"))
+    let h1 = try db.save(Highlight(sourceId: s.id, text: "**學而**時習之", location: "第 1 页"))
+    let h2 = try db.save(Highlight(text: "無出處的一條"))
+    store.reload()
+    let nid = try XCTUnwrap(store.createNotebook(title: "  論語專題 ", with: [h1.id!]))
+    XCTAssertEqual(store.notebooks.first?.title, "論語專題")
+    XCTAssertEqual(store.selection, .notebook(nid))
+    store.loadNotebook(nid)
+    XCTAssertEqual(store.notebookState.blocks.count, 1)
+    let t = try XCTUnwrap(store.insertNotebookBlock(.text, text: "", after: store.notebookState.blocks[0].id))
+    store.updateNotebookBlockText(t, "孔子論學。")
+    store.flushNotebookSaves()
+    XCTAssertEqual(try db.notebookBlocks(nid).first { $0.id == t }?.text, "孔子論學。")
+    store.insertNotebookHighlights([h2.id!], after: nil, atStart: true)
+    XCTAssertEqual(store.notebookState.blocks.first?.highlightId, h2.id)
+    store.moveNotebookBlock(store.notebookState.blocks[0].id!, by: 1)
+    XCTAssertEqual(try db.notebookBlocks(nid).map(\.highlightId), [h1.id, h2.id, nil])
+    // 导出内容：有出处的摘录带脚注文字，无出处的不带
+    let pieces = store.notebookPieces()
+    XCTAssertEqual(pieces.count, 3)
+    if case .quote(let q, let cite) = pieces[0].kind {
+      XCTAssertEqual(q, "**學而**時習之"); XCTAssertTrue(cite.contains("楊伯峻"), cite); XCTAssertTrue(cite.contains("1"), cite)
+    } else { XCTFail() }
+    if case .quote(_, let cite) = pieces[1].kind { XCTAssertEqual(cite, "") } else { XCTFail() }
+    XCTAssertEqual(store.notebookBibliography().count, 1)
+    // 删除文字块 → 撤销
+    store.deleteNotebookBlock(t)
+    XCTAssertEqual(try db.notebookBlocks(nid).count, 2)
+    um.undo()
+    XCTAssertEqual(try db.notebookBlocks(nid).count, 3)
+    XCTAssertTrue(store.notebookState.blocks.contains { $0.kind == .text && $0.text == "孔子論學。" })
+    // 从别处加入
+    store.addHighlights([h2.id!], toNotebook: nid)
+    XCTAssertEqual(store.notebookQuoteCounts[nid], 3)
+    XCTAssertEqual(store.notebookState.blocks.count, 4)
+  }
+
+  func testWeeklyDigest() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let now = Date()
+    let (start, _) = WeeklyDigest.previousWeek(of: now)
+    let inWeek = start.addingTimeInterval(36 * 3600)
+    let h = try db.save(Highlight(text: "上週收藏的一條", createdAt: inWeek))
+    let old = try db.save(Highlight(text: "很久以前", createdAt: start.addingTimeInterval(-30 * 86400)))
+    try db.writer.write { d in
+      var e1 = ReviewEvent(kind: .favorite, highlightId: h.id, at: inWeek); try e1.insert(d)
+      var e2 = ReviewEvent(kind: .keep, highlightId: old.id, at: inWeek.addingTimeInterval(86400)); try e2.insert(d)
+      var e3 = ReviewEvent(kind: .card, cardId: 1, answer: 3, at: inWeek); try e3.insert(d)
+      var e4 = ReviewEvent(kind: .card, cardId: 2, answer: 1, at: inWeek); try e4.insert(d)
+      var e5 = ReviewEvent(kind: .keep, highlightId: old.id, at: start.addingTimeInterval(-3600)); try e5.insert(d)
+    }
+    let w = try db.weeklyDigest(now: now)
+    XCTAssertEqual(w.highlightsReviewed, 2)
+    XCTAssertEqual(w.cardsReviewed, 2)
+    XCTAssertEqual(w.cardsCorrect, 1)
+    XCTAssertEqual(w.activeDays, 2)
+    XCTAssertEqual(w.newHighlights, 1)
+    XCTAssertEqual(w.quoteID, h.id, "上周收藏的优先")
+    XCTAssertFalse(w.isEmpty)
+  }
+}
