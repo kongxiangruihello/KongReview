@@ -47,6 +47,10 @@ extension AppDatabase {
         }
     }
 
+    func cardCount() throws -> Int {
+        try writer.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM card WHERE deletedAt IS NULL") ?? 0 }
+    }
+
     func deckNames() throws -> [String] {
         try writer.read { db in
             try String.fetchAll(db, sql: "SELECT DISTINCT deck FROM card WHERE deletedAt IS NULL ORDER BY deck")

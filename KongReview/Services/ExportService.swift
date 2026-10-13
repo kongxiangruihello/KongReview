@@ -188,4 +188,32 @@ enum ExportService {
             }
         }
     }
+
+    // MARK: 诊断信息
+
+    static func exportDiagnostics(store: LibraryStore) {
+        let d = UserDefaults.standard
+        let settings: [(String, String)] = [
+            ("快速录入快捷键", HotKeyPreset.current.label),
+            ("引文速查快捷键", HotKeyPreset.lookup.label),
+            ("每日回顾条数", String(d.object(forKey: SettingsKeys.dailyCount) as? Int ?? 10)),
+            ("每日提醒", d.bool(forKey: SettingsKeys.reminderEnabled) ? "开" : "关"),
+            ("引文体例", CitationSettings.style.rawValue),
+            ("FSRS 参数", CardSettings.fsrsIsDefault ? "默认" : "已优化"),
+            ("Obsidian 同步", ObsidianSync.isEnabled ? "开" : "关"),
+            ("备份位置", BackupService.location.label),
+            ("菜单栏数字", CardSettings.menuBarCounts ? "开" : "关"),
+        ]
+        let text = Diagnostics.report(db: store.db, settings: settings)
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "KongReview诊断信息-\(ReminderPlan.dayKey(Date())).txt"
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            store.report(error)
+        }
+    }
 }

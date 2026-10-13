@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ApplicationServices
 import KongReviewCore
 
 enum SettingsKeys {
@@ -53,6 +54,34 @@ private struct QuickCaptureSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("现在试一下") { QuickCaptureController.shared.show() }
+            }
+            Section("引文速查") {
+                Picker("快捷键", selection: Binding(
+                    get: { HotKeyPreset.lookup },
+                    set: { p in
+                        HotKeyPreset.lookup = p
+                        HotKeyCenter.shared.applyLookup(p)
+                        store.reload()
+                    })) {
+                    ForEach(HotKeyPreset.allCases) { Text($0.label).tag($0) }
+                }
+                if HotKeyCenter.shared.lookupRegistrationFailed {
+                    Text("这个快捷键已被其他应用占用，请换一个。").font(.caption).foregroundStyle(.red)
+                }
+                Text("写作时在任何应用里按快捷键，搜索摘录，回车把“原文 + 出处”粘到光标处。出处按“设置 → 摘录”里的引文体例生成。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("现在试一下") { CitationLookupController.shared.show() }
+                    if AXIsProcessTrusted() {
+                        Label("已允许自动粘贴", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                    } else {
+                        Button("允许自动粘贴…") { CitationLookupController.requestAccessibility() }
+                    }
+                }
+                Text("自动粘贴要在“系统设置 → 隐私与安全性 → 辅助功能”里允许 KongReview（用来模拟按 ⌘V）。不允许也能用：选中后自动复制，自己按 ⌘V。注意：本应用是本机签名，每次重新构建安装后可能要重新勾选一次。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Section {
                 Toggle("在菜单栏显示图标", isOn: $showMenuBarIcon)
@@ -186,6 +215,7 @@ private struct DataSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("立即备份") { ExportService.backupNow(store: store) }
+                    Button("从备份恢复…") { store.showBackups() }
                     Button("打开备份文件夹") {
                         if let dir = try? BackupService.directory() {
                             NSWorkspace.shared.activateFileViewerSelecting([dir])
@@ -258,8 +288,22 @@ private struct DataSettings: View {
                     ExportService.exportAll(store: store)
                 }
             }
+            Section("问题排查") {
+                HStack {
+                    Button("导出诊断信息…") { ExportService.exportDiagnostics(store: store) }
+                    Button("打开日志文件夹") {
+                        NSWorkspace.shared.activateFileViewerSelecting([AppLog.file.deletingLastPathComponent()])
+                    }
+                }
+                Text("诊断信息包括版本、系统、数据规模、主要设置和最近的日志，不含任何摘录正文，可以放心发给别人帮忙排查。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .formStyle(.grouped)
+        .sheet(item: Bindable(store).backupList) { _ in
+            RestoreBackupView()
+        }
     }
 }
 
@@ -324,5 +368,61 @@ private struct CardSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// 从备份恢复：列出备份（日期、摘录与卡片数、大小），确认后恢复
+struct RestoreBackupView: View {
+    @Environment(LibraryStore.self) private var store
+
+    var body: some View {
+        let items = store.backupList?.items
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("从备份恢复").font(.title2.bold())
+            Text("选一份备份恢复。恢复前会先把当前数据另存一份“恢复前”备份，随时可以再恢复回来。")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let items {
+                if items.isEmpty {
+                    Text("还没有备份。").foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    List(items) { b in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(b.date.formatted(date: .abbreviated, time: .shortened)).font(.headline)
+                                Text("\(b.highlights) 条摘录 · \(b.cards) 张卡 · \(ByteCountFormatter().string(fromByteCount: b.bytes))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(b.url.deletingLastPathComponent().lastPathComponent + "/" + b.url.lastPathComponent)
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Button("恢复…") { store.pendingRestore = b }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    .frame(minHeight: 260)
+                }
+            } else {
+                HStack { ProgressView().controlSize(.small); Text("正在读取备份…").foregroundStyle(.secondary) }
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            }
+            HStack {
+                Spacer()
+                Button("关闭", role: .cancel) { store.backupList = nil }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 540, height: 460)
+        .confirmationDialog(
+            "恢复到 \(store.pendingRestore?.date.formatted(date: .abbreviated, time: .shortened) ?? "") 的备份？",
+            isPresented: Binding(get: { store.pendingRestore != nil }, set: { if !$0 { store.pendingRestore = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("恢复", role: .destructive) { if let b = store.pendingRestore { store.restoreBackup(b) } }
+            Button("取消", role: .cancel) { store.pendingRestore = nil }
+        } message: {
+            Text("数据库里的全部内容（摘录、出处、记忆卡、回顾记录、网页存档）会换成这份备份；应用设置不变。当前数据会先另存一份。")
+        }
     }
 }

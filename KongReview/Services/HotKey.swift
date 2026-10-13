@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 
 /// 全局快捷键预设。用 Carbon 的 RegisterEventHotKey，不需要“辅助功能”权限。
 enum HotKeyPreset: String, CaseIterable, Identifiable {
-    case ctrlOptK, ctrlOptG, ctrlOptSpace, optCmdK, off
+    case ctrlOptK, ctrlOptG, ctrlOptSpace, optCmdK, ctrlOptL, ctrlOptJ, optCmdL, off
 
     var id: String { rawValue }
 
@@ -13,6 +13,9 @@ enum HotKeyPreset: String, CaseIterable, Identifiable {
         case .ctrlOptG: return "⌃⌥G"
         case .ctrlOptSpace: return "⌃⌥空格"
         case .optCmdK: return "⌥⌘K"
+        case .ctrlOptL: return "⌃⌥L"
+        case .ctrlOptJ: return "⌃⌥J"
+        case .optCmdL: return "⌥⌘L"
         case .off: return "不使用"
         }
     }
@@ -22,14 +25,16 @@ enum HotKeyPreset: String, CaseIterable, Identifiable {
         case .ctrlOptK, .optCmdK: return UInt32(kVK_ANSI_K)
         case .ctrlOptG: return UInt32(kVK_ANSI_G)
         case .ctrlOptSpace: return UInt32(kVK_Space)
+        case .ctrlOptL, .optCmdL: return UInt32(kVK_ANSI_L)
+        case .ctrlOptJ: return UInt32(kVK_ANSI_J)
         case .off: return nil
         }
     }
 
     var modifiers: UInt32 {
         switch self {
-        case .ctrlOptK, .ctrlOptG, .ctrlOptSpace: return UInt32(controlKey | optionKey)
-        case .optCmdK: return UInt32(optionKey | cmdKey)
+        case .ctrlOptK, .ctrlOptG, .ctrlOptSpace, .ctrlOptL, .ctrlOptJ: return UInt32(controlKey | optionKey)
+        case .optCmdK, .optCmdL: return UInt32(optionKey | cmdKey)
         case .off: return 0
         }
     }
@@ -40,46 +45,74 @@ enum HotKeyPreset: String, CaseIterable, Identifiable {
         get { HotKeyPreset(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .ctrlOptK }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
     }
+
+    /// 引文速查浮窗的快捷键（默认 ⌃⌥L）
+    static let lookupKey = "hotkey.lookup"
+    static var lookup: HotKeyPreset {
+        get { HotKeyPreset(rawValue: UserDefaults.standard.string(forKey: lookupKey) ?? "") ?? .ctrlOptL }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: lookupKey) }
+    }
 }
 
 @MainActor
 final class HotKeyCenter {
     static let shared = HotKeyCenter()
 
+    /// 快速录入（id 1）
     var action: (() -> Void)?
+    /// 引文速查（id 2）
+    var lookupAction: (() -> Void)?
     /// 最近一次注册是否成功（快捷键被其他应用占用时为 false）
     private(set) var lastRegistrationFailed = false
+    private(set) var lookupRegistrationFailed = false
 
-    private var hotKeyRef: EventHotKeyRef?
+    private var refs: [UInt32: EventHotKeyRef] = [:]
     private var handlerRef: EventHandlerRef?
 
     func apply(_ preset: HotKeyPreset) {
-        unregister()
-        lastRegistrationFailed = false
-        guard let keyCode = preset.keyCode else { return }
-        installHandlerIfNeeded()
-        let hotKeyID = EventHotKeyID(signature: OSType(0x4B47_4C4E), id: 1) // "KGLN"
-        var ref: EventHotKeyRef?
-        let status = RegisterEventHotKey(keyCode, preset.modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
-        if status == noErr {
-            hotKeyRef = ref
-        } else {
-            lastRegistrationFailed = true
-        }
+        lastRegistrationFailed = !register(preset, id: 1)
+    }
+
+    func applyLookup(_ preset: HotKeyPreset) {
+        lookupRegistrationFailed = !register(preset, id: 2)
     }
 
     func unregister() {
-        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
-        hotKeyRef = nil
+        for (_, r) in refs { UnregisterEventHotKey(r) }
+        refs.removeAll()
+    }
+
+    /// 注册一个快捷键；preset 为“不使用”时只注销。返回是否成功
+    private func register(_ preset: HotKeyPreset, id: UInt32) -> Bool {
+        if let old = refs[id] { UnregisterEventHotKey(old); refs[id] = nil }
+        guard let keyCode = preset.keyCode else { return true }
+        installHandlerIfNeeded()
+        let hotKeyID = EventHotKeyID(signature: OSType(0x4B47_4C4E), id: id) // "KGLN"
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(keyCode, preset.modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        guard status == noErr, let ref else { return false }
+        refs[id] = ref
+        return true
+    }
+
+    fileprivate func fire(_ id: UInt32) {
+        switch id {
+        case 2: lookupAction?()
+        default: action?()
+        }
     }
 
     private func installHandlerIfNeeded() {
         guard handlerRef == nil else { return }
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         var ref: EventHandlerRef?
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ -> OSStatus in
+            var hk = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                              nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
+            let id = hk.id
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { HotKeyCenter.shared.action?() }
+                MainActor.assumeIsolated { HotKeyCenter.shared.fire(id) }
             }
             return noErr
         }, 1, &spec, nil, &ref)

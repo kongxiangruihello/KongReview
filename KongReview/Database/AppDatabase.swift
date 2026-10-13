@@ -65,6 +65,11 @@ final class AppDatabase {
         try migrator.migrate(writer)
     }
 
+    /// 恢复备份后补跑迁移（备份可能来自旧版本）
+    func migrateIfNeeded() throws {
+        try migrator.migrate(writer)
+    }
+
     static func makeShared() throws -> AppDatabase {
         let fm = FileManager.default
         let support = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)

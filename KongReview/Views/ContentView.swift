@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         @Bindable var store = store
@@ -118,6 +119,8 @@ struct ContentView: View {
             // 让菜单栏、链接等 AppKit 代码在主窗口关闭后也能重新打开它
             WindowOpener.openMain = { openWindow(id: "main") }
             WindowOpener.openSettingsAction = { openSettings() }
+            // 撤销：用主窗口的撤销管理器（“编辑”菜单的撤销 / 重做与 ⌘Z、⇧⌘Z）
+            store.undoManager = undoManager
         }
         .alert("出错了", isPresented: Binding(
             get: { store.errorMessage != nil },

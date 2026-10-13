@@ -130,12 +130,14 @@ final class LibraryStore {
             trashCount = try db.trashCount()
             articleCount = try db.articleCount()
             cardHighlightIDs = try db.cardHighlightIDs()
-            cardCount = try db.cards().count
+            cardCount = try db.cardCount()
             reviewedToday = try db.reviewedToday()
             noteTemplates = try db.noteTemplates()
             coverIDs = try db.coverSourceIDs()
+            refreshDerived()
             revision += 1
             onReload?()
+            scheduleRelatedRebuild()
             scheduleObsidianSync()
         } catch {
             report(error)
@@ -149,6 +151,7 @@ final class LibraryStore {
 
     func report(_ error: Error) {
         errorMessage = error.localizedDescription
+        AppLog.write("错误：\(error.localizedDescription)（\(String(describing: error))）")
     }
 
     // MARK: 写操作（统一在这里做，写完刷新）
@@ -172,7 +175,9 @@ final class LibraryStore {
 
     /// 删除 = 移入“最近删除”，30 天内可恢复
     func delete(_ highlight: Highlight) {
-        perform { try db.moveToTrash(highlight) }
+        undoable("删除摘录", highlights: highlight.id.map { [$0] } ?? []) {
+            perform { try db.moveToTrash(highlight) }
+        }
     }
 
     func restore(_ highlight: Highlight) {
@@ -241,6 +246,17 @@ final class LibraryStore {
 
     func batch(_ action: BatchAction, ids: [Int64]) {
         guard !ids.isEmpty else { return }
+        if case .addToMastery = action {} else {
+            // 批量改动可撤销（做成记忆卡另有“删除卡片”）
+            let before = try? db.snapshot(highlightIds: ids)
+            defer { if let before { registerUndo("批量操作（\(ids.count) 条）", before, reviewPosition: nil) } }
+            batchWork(action, ids: ids)
+            return
+        }
+        batchWork(action, ids: ids)
+    }
+
+    private func batchWork(_ action: BatchAction, ids: [Int64]) {
         let scheduler = ReviewScheduler()
         perform {
             switch action {
@@ -300,6 +316,8 @@ final class LibraryStore {
     func commitMerge() {
         guard let m = mergeRequest else { return }
         let ids = m.sources.compactMap(\.source.id)
+        let before = try? db.snapshot(sourceIds: ids)
+        defer { if let before { registerUndo("合并出处", before, reviewPosition: nil) } }
         do {
             try BackupService.backupNow(db: db)
         } catch {
@@ -317,6 +335,8 @@ final class LibraryStore {
 
     func commitDeleteSources() {
         let ids = sourcesPendingDeletion.compactMap(\.id)
+        let before = try? db.snapshot(sourceIds: ids)
+        defer { if let before { registerUndo("删除出处", before, reviewPosition: nil) } }
         perform { try db.deleteSources(ids) }
         sourcesPendingDeletion = []
         if case .source(let id) = selection, ids.contains(id) { selection = .sourceManager }
@@ -351,7 +371,122 @@ final class LibraryStore {
         if openArticle?.id == id { openArticle = nil }
     }
 
-    func revisionBump() { revision += 1 }
+    func revisionBump() {
+        refreshDerived()
+        revision += 1
+    }
+
+    // MARK: 1.0：撤销（⌘Z / ⇧⌘Z，用窗口的撤销管理器，菜单“编辑”里会显示操作名）
+
+    /// 由主窗口登记（@Environment(\.undoManager)）
+    @ObservationIgnored weak var undoManager: UndoManager?
+
+    /// 先记快照，再执行改动，最后登记撤销
+    func undoable(_ name: String, highlights: [Int64] = [], sources: [Int64] = [], cards: [Int64] = [],
+                  reviewPosition: Int? = nil, _ work: () -> Void) {
+        let before = try? db.snapshot(highlightIds: highlights, sourceIds: sources, cardIds: cards)
+        work()
+        if let before { registerUndo(name, before, reviewPosition: reviewPosition) }
+    }
+
+    private func registerUndo(_ name: String, _ snap: UndoSnapshot, reviewPosition: Int?) {
+        guard let um = undoManager else { return }
+        um.registerUndo(withTarget: self) { store in
+            MainActor.assumeIsolated { store.applyUndo(name, snap, reviewPosition: reviewPosition) }
+        }
+        um.setActionName(name)
+    }
+
+    /// 写回快照；同时记下写回前的状态，供“重做”
+    private func applyUndo(_ name: String, _ snap: UndoSnapshot, reviewPosition: Int?) {
+        let current = try? db.snapshot(highlightIds: snap.highlightIds, sourceIds: snap.sourceIds, cardIds: snap.cardIds)
+        let currentPosition = review.position
+        perform { try db.restore(snap) }
+        if let p = reviewPosition { review.position = max(0, min(p, review.cards.count)) }
+        if let current { registerUndo(name, current, reviewPosition: reviewPosition == nil ? nil : currentPosition) }
+    }
+
+    // MARK: 1.0：从备份恢复
+
+    /// 恢复面板（非空时弹出）
+    var backupList: BackupListRequest?
+    /// 等待确认恢复的备份
+    var pendingRestore: BackupInfo?
+
+    func showBackups() {
+        backupList = BackupListRequest(items: nil)
+        Task.detached(priority: .userInitiated) {
+            let items = BackupInfo.all()
+            await MainActor.run { if self.backupList != nil { self.backupList?.items = items } }
+        }
+    }
+
+    /// 先把当前数据另存一份“恢复前”备份，再用所选备份替换
+    func restoreBackup(_ info: BackupInfo) {
+        let db = self.db
+        maintenanceProgress = "正在恢复备份…"
+        pendingRestore = nil
+        backupList = nil
+        Task.detached(priority: .userInitiated) {
+            do {
+                let dir = try BackupService.directory()
+                let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+                let safety = dir.appendingPathComponent("恢复前-\(stamp).sqlite")
+                try db.backup(to: safety)
+                try db.restore(from: info.url)
+                AppLog.write("从备份恢复：\(info.url.lastPathComponent)；恢复前的数据另存为 \(safety.lastPathComponent)")
+                await MainActor.run {
+                    self.maintenanceProgress = nil
+                    self.reload()
+                    self.infoMessage = "已恢复到 \(info.date.formatted(date: .abbreviated, time: .shortened)) 的备份（\(info.highlights) 条摘录、\(info.cards) 张卡）。\n恢复前的数据另存为“\(safety.lastPathComponent)”，在备份文件夹里，需要时可以再恢复回来。"
+                }
+            } catch {
+                await MainActor.run { self.maintenanceProgress = nil; self.report(error) }
+            }
+        }
+    }
+
+    // MARK: 1.0：缓存的统计（每次数据变化算一次，界面直接读，不在每次重绘时查库）
+
+    /// 回顾统计（最近 30 天）
+    var stats: ReviewStats.Summary = .empty
+    /// 各牌组今天的新卡 / 学习中 / 待复习
+    var deckSummaryCache: [DeckSummary] = []
+
+    func refreshDerived() {
+        stats = (try? db.reviewSummary(now: Date(), days: 30)) ?? .empty
+        deckSummaryCache = (try? db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
+                                                  reviewsPerDay: CardSettings.reviewsPerDay)) ?? []
+    }
+
+    // MARK: 1.0：相关摘录
+
+    /// 相关摘录索引（后台建立；数据变化 10 秒后重建）
+    var relatedIndex: RelatedIndex?
+    private var relatedTask: Task<Void, Never>?
+
+    func scheduleRelatedRebuild(delay: UInt64 = 10) {
+        relatedTask?.cancel()
+        let db = self.db
+        let wait = relatedIndex == nil ? 1 : delay
+        relatedTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            let built = await Task.detached(priority: .utility) { () -> RelatedIndex? in
+                guard let docs = try? db.relatedDocs() else { return nil }
+                return RelatedIndex(docs)
+            }.value
+            if let built { self.relatedIndex = built }
+        }
+    }
+
+    /// 与某条摘录相关的几条（含共有标签、是否同一出处）
+    func related(to h: Highlight, limit: Int = 5) -> [RelatedItem] {
+        guard let id = h.id, let idx = relatedIndex else { return [] }
+        let hits = idx.related(to: id, limit: limit)
+        let byId = Dictionary(uniqueKeysWithValues: ((try? db.highlights(ids: hits.map(\.id))) ?? []).compactMap { x in x.id.map { ($0, x) } })
+        return hits.compactMap { hit in byId[hit.id].map { RelatedItem(highlight: $0, hit: hit) } }
+    }
 
     // MARK: 回顾日志与提醒
 
@@ -386,13 +521,13 @@ final class LibraryStore {
 
     /// 回顾页顶部提示：所有牌组今天待学的卡片数
     func dueCardCount() -> Int {
-        let s = (try? db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
-                                       reviewsPerDay: CardSettings.reviewsPerDay)) ?? []
-        return s.reduce(0) { $0 + $1.counts.total }
+        deckSummaryCache.reduce(0) { $0 + $1.counts.total }
     }
 
     func deleteCards(_ ids: [Int64]) {
-        perform { try db.deleteCards(ids) }
+        undoable("删除记忆卡", cards: ids) {
+            perform { try db.deleteCards(ids) }
+        }
     }
 
     func saveCard(_ card: Card) {
@@ -512,7 +647,9 @@ final class LibraryStore {
     /// 单条摘录的回顾频率：1 多出现、-1 少出现、nil 正常
     func setFrequency(_ value: Int?, for highlight: Highlight) {
         guard let id = highlight.id else { return }
-        perform { try db.setFrequency(value, highlightId: id) }
+        undoable("调整回顾频率", highlights: [id]) {
+            perform { try db.setFrequency(value, highlightId: id) }
+        }
     }
 
     func startCloze(for highlight: Highlight) {
@@ -749,6 +886,8 @@ final class LibraryStore {
     }
 
     func delete(_ source: Source) {
+        let before = source.id.flatMap { try? db.snapshot(sourceIds: [$0]) }
+        defer { if let before { registerUndo("删除出处", before, reviewPosition: nil) } }
         perform { try db.delete(source) }
         if case .source(let id) = selection, id == source.id { selection = .all }
     }
@@ -876,4 +1015,17 @@ extension String {
         let t = trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
     }
+}
+
+/// 一条相关摘录
+struct RelatedItem: Identifiable {
+    var highlight: Highlight
+    var hit: RelatedIndex.Hit
+    var id: Int64 { hit.id }
+}
+
+/// 备份列表（items 为 nil 表示正在读取）
+struct BackupListRequest: Identifiable {
+    let id = UUID()
+    var items: [BackupInfo]?
 }

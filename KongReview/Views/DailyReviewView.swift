@@ -52,6 +52,7 @@ struct DailyReviewView: View {
         .navigationTitle(state.theme.map { "主题回顾 · #\($0)" } ?? "今日回顾")
         .task(id: (state.theme ?? "") + "|" + store.today) { loadSession(forceNew: false) }
         .onChange(of: store.revision) { refreshCards() }
+        .onChange(of: state.position) { persist() }
     }
 
     // MARK: 子视图
@@ -60,7 +61,7 @@ struct DailyReviewView: View {
     private var topBar: some View {
         let _ = store.revision
         let _ = store.today
-        let s = ReviewStats.summarize((try? store.db.events()) ?? [], now: Date(), days: 7)
+        let s = store.stats
         let due = store.dueCardCount()
         return VStack(spacing: 0) {
             HStack(spacing: 22) {
@@ -127,9 +128,10 @@ struct DailyReviewView: View {
     /// 回顾完成：页面中部的一张总结卡——日期、三项大数字、近 7 天、今日一句、下一步
     private var finished: some View {
         let _ = store.revision
-        let s = ReviewStats.summarize((try? store.db.events()) ?? [], now: Date(), days: 7)
+        let s = store.stats
         let due = store.dueCardCount()
-        let peak = max(1, s.lastDays.map(\.total).max() ?? 1)
+        let week = Array(s.lastDays.suffix(7))
+        let peak = max(1, week.map(\.total).max() ?? 1)
         let quote = todaysQuote()
         return ScrollView {
             VStack(spacing: 0) {
@@ -157,8 +159,8 @@ struct DailyReviewView: View {
 
                 // 近 7 天
                 HStack(alignment: .bottom, spacing: 14) {
-                    ForEach(Array(s.lastDays.enumerated()), id: \.offset) { i, d in
-                        let isToday = i == s.lastDays.count - 1
+                    ForEach(Array(week.enumerated()), id: \.offset) { i, d in
+                        let isToday = i == week.count - 1
                         VStack(spacing: 6) {
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(isToday ? ReviewPalette.accent : ReviewPalette.accentSoft)
@@ -335,7 +337,8 @@ struct DailyReviewView: View {
                 .padding(.top, 20)
             }
 
-            Rectangle().fill(ReviewPalette.hair).frame(height: 1).padding(.top, 26)
+            relatedSection(h)
+            Rectangle().fill(ReviewPalette.hair).frame(height: 1).padding(.top, 22)
             HStack(spacing: 14) {
                 Text("添加于 \(h.createdAt.formatted(date: .abbreviated, time: .omitted))")
                     .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub.opacity(0.8))
@@ -380,6 +383,60 @@ struct DailyReviewView: View {
         }
     }
 
+    /// 相关摘录：默认折叠，展开后列出用词相近、同标签、同出处的几条
+    @ViewBuilder
+    private func relatedSection(_ h: Highlight) -> some View {
+        let items = state.showRelated ? store.related(to: h) : []
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                state.showRelated.toggle()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: state.showRelated ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("相关摘录").font(.system(size: 12.5, weight: .medium))
+                    if store.relatedIndex == nil { ProgressView().controlSize(.mini) }
+                }
+                .foregroundStyle(ReviewPalette.sub)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("用词相近、同标签或同出处的其他摘录（R）")
+            if state.showRelated {
+                if items.isEmpty {
+                    Text(store.relatedIndex == nil ? "正在建立索引…" : "没有找到相关的摘录。")
+                        .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
+                }
+                ForEach(items) { item in
+                    Button { store.edit(item.highlight) } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(MarkdownText.attributed(item.highlight.text))
+                                .font(.system(size: 13.5, design: .serif))
+                                .foregroundStyle(ReviewPalette.ink)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            HStack(spacing: 6) {
+                                Text(store.source(for: item.highlight).map { "《\($0.title)》" } ?? "未归类")
+                                    .lineLimit(1)
+                                ForEach(item.hit.sharedTags, id: \.self) { t in Text("#\(t)").foregroundStyle(ReviewPalette.accent) }
+                            }
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(ReviewPalette.sub)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(ReviewPalette.soft, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("打开这条摘录")
+                }
+            }
+        }
+        .padding(.top, 22)
+    }
+
     /// 卡片下方的操作条：上一条 ｜ 弃置 · 按语 · 记忆卡 ｜ 保留（主操作）
     @ViewBuilder
     private func controls(for card: ReviewCard) -> some View {
@@ -410,6 +467,7 @@ struct DailyReviewView: View {
                 Button("") { act(.favorite, card) }.keyboardShortcut(key("f"))
                 Button("") { store.edit(card.highlight) }.keyboardShortcut(key("e"))
                 Button("") { store.startCloze(for: card.highlight) }.keyboardShortcut(key("c"))
+                Button("") { state.showRelated.toggle() }.keyboardShortcut(key("r"))
             }
             .opacity(0)
             .allowsHitTesting(false)
@@ -442,7 +500,16 @@ struct DailyReviewView: View {
         case .discard: kind = .discard
         }
         store.logReview(kind, highlightId: card.highlight.id)
-        update(scheduler.apply(action, to: card.highlight))
+        let name: String
+        switch action {
+        case .keep: name = "保留"
+        case .favorite: name = card.highlight.isFavorite ? "取消收藏" : "收藏"
+        case .discard: name = "弃置"
+        }
+        // 可撤销（⌘Z）：摘录恢复原状，回到这一条
+        store.undoable(name, highlights: card.highlight.id.map { [$0] } ?? [], reviewPosition: state.position) {
+            update(scheduler.apply(action, to: card.highlight))
+        }
     }
 
     private func saveNote(for card: ReviewCard) {

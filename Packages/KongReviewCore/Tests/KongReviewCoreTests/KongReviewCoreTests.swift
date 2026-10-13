@@ -807,3 +807,42 @@ final class V09CoreTests: XCTestCase {
         XCTAssertEqual(r.count, 3)
     }
 }
+
+final class V10CoreTests: XCTestCase {
+    func testStatsFromAggregatesMatchesEvents() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var events: [ReviewEvent] = []
+        for d in 0..<5 {
+            let at = now.addingTimeInterval(-86_400 * Double(d))
+            events.append(ReviewEvent(kind: .keep, at: at))
+            events.append(ReviewEvent(kind: .card, cardId: 1, answer: d == 2 ? 1 : 3, at: at))
+        }
+        let a = ReviewStats.summarize(events, now: now, days: 7)
+        var byDay: [String: ReviewStats.Day] = [:]
+        for e in events {
+            let k = ReminderPlan.dayKey(e.at)
+            var d = byDay[k] ?? .init(key: k, highlights: 0, cards: 0)
+            if e.kind == .card { d.cards += 1 } else { d.highlights += 1 }
+            byDay[k] = d
+        }
+        let b = ReviewStats.summarize(byDay: byDay, again: 1, now: now, days: 7)
+        XCTAssertEqual(a, b)
+        XCTAssertEqual(a.currentStreak, 5)
+    }
+
+    func testRelatedIndex() {
+        let docs = [
+            RelatedIndex.Doc(id: 1, text: "学而时习之，不亦说乎", tags: ["论语"], sourceId: 1),
+            RelatedIndex.Doc(id: 2, text: "温故而知新，可以为师矣；学而不思则罔", tags: ["论语"], sourceId: 1),
+            RelatedIndex.Doc(id: 3, text: "物竞天择，适者生存", tags: ["严复"], sourceId: 2),
+            RelatedIndex.Doc(id: 4, text: "学而时习之者，君子之学也", tags: [], sourceId: 3),
+            RelatedIndex.Doc(id: 5, text: "天演论：物竞天择", tags: ["严复"], sourceId: 2),
+        ] + (6..<60).map { RelatedIndex.Doc(id: Int64($0), text: "无关文字\($0)号", tags: [], sourceId: nil) }
+        let idx = RelatedIndex(docs)
+        let r = idx.related(to: 1)
+        XCTAssertEqual(r.first?.id, 4, "\(r)")
+        XCTAssertTrue(r.contains { $0.id == 2 })
+        XCTAssertEqual(idx.related(to: 3).first?.id, 5)
+        XCTAssertTrue(RelatedIndex.terms("学而 Time-line 2026").contains("time"))
+    }
+}

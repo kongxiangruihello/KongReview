@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         HotKeyCenter.shared.action = { QuickCaptureController.shared.show() }
         HotKeyCenter.shared.apply(HotKeyPreset.current)
+        HotKeyCenter.shared.lookupAction = { CitationLookupController.shared.show() }
+        HotKeyCenter.shared.applyLookup(HotKeyPreset.lookup)
         StatusItemController.shared.apply()
         QuickCaptureController.shared.store?.runStartupMaintenance()
 

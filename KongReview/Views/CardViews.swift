@@ -123,8 +123,7 @@ struct CardsHomeView: View {
 
     private var summaries: [DeckSummary] {
         _ = store.revision
-        return (try? store.db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
-                                            reviewsPerDay: CardSettings.reviewsPerDay)) ?? []
+        return store.deckSummaryCache
     }
 
     private var deckList: some View {
@@ -288,9 +287,7 @@ struct StudyView: View {
     private var counts: StudyQueue.Counts {
         _ = store.revision
         guard let deck = study.deck,
-              let s = try? store.db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
-                                                  reviewsPerDay: CardSettings.reviewsPerDay)
-                .first(where: { $0.name == deck }) else { return .init() }
+              let s = store.deckSummaryCache.first(where: { $0.name == deck }) else { return .init() }
         return s.counts
     }
 
@@ -407,9 +404,8 @@ struct StudyView: View {
     private var finished: some View {
         let _ = store.revision
         let start = Calendar.current.startOfDay(for: Date())
-        let today = ((try? store.db.events()) ?? []).filter { $0.kind == .card && $0.at >= start }
-        let correct = today.filter { ($0.answer ?? 0) > 1 }.count
-        let accuracy = today.isEmpty ? "—" : "\(Int((Double(correct) / Double(today.count) * 100).rounded()))"
+        let answers = (try? store.db.cardAnswersToday()) ?? (total: 0, correct: 0)
+        let accuracy = answers.total == 0 ? "—" : "\(Int((Double(answers.correct) / Double(answers.total) * 100).rounded()))"
         let tomorrowEnd = Calendar.current.date(byAdding: .day, value: 2, to: start) ?? start
         let deckCards = study.deck.flatMap { try? store.db.cards(deck: $0) } ?? []
         let dueTomorrow = deckCards.filter { $0.state != .new && !$0.isSuspended && $0.due < tomorrowEnd }.count
@@ -427,9 +423,9 @@ struct StudyView: View {
                 .padding(.top, 6)
                 .padding(.bottom, 24)
             HStack(spacing: 0) {
-                summaryStat("\(today.count)", unit: "次", label: "今日复习（全部牌组）")
+                summaryStat("\(answers.total)", unit: "次", label: "今日复习（全部牌组）")
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                summaryStat(accuracy, unit: today.isEmpty ? "" : "%", label: "答对率（非“重来”）")
+                summaryStat(accuracy, unit: answers.total == 0 ? "" : "%", label: "答对率（非“重来”）")
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
                 summaryStat("\(dueTomorrow)", unit: "张", label: "明天到期", accent: true)
             }

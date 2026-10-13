@@ -59,6 +59,9 @@ public enum ReviewStats {
         public var highlights: Int      // 当天回顾的摘录条数
         public var cards: Int           // 当天复习的记忆卡次数
         public var total: Int { highlights + cards }
+        public init(key: String, highlights: Int, cards: Int) {
+            self.key = key; self.highlights = highlights; self.cards = cards
+        }
     }
 
     public struct Summary: Equatable, Sendable {
@@ -70,6 +73,9 @@ public enum ReviewStats {
         public var totalCards: Int
         public var lastDays: [Day]      // 最近 N 天，旧 → 新
         public var cardAccuracy: Double? // 记忆卡“非重来”的比例
+
+        public static let empty = Summary(today: Day(key: "", highlights: 0, cards: 0), currentStreak: 0, longestStreak: 0,
+                                          activeDays: 0, totalHighlights: 0, totalCards: 0, lastDays: [], cardAccuracy: nil)
     }
 
     public static func summarize(_ events: [ReviewEvent], now: Date, days: Int = 30, calendar: Calendar = .current) -> Summary {
@@ -90,6 +96,13 @@ public enum ReviewStats {
             }
             byDay[k] = d
         }
+        return summarize(byDay: byDay, again: again, now: now, days: days, calendar: calendar)
+    }
+
+    /// 由按日汇总的数字生成统计（数据库里用 SQL 按日汇总后调用，不必把上万条日志都读进内存）
+    public static func summarize(byDay: [String: Day], again: Int, now: Date, days: Int = 30,
+                                 calendar: Calendar = .current) -> Summary {
+        let answered = byDay.values.reduce(0) { $0 + $1.cards }
         let start = calendar.startOfDay(for: now)
         func key(_ offset: Int) -> String {
             ReminderPlan.dayKey(calendar.date(byAdding: .day, value: -offset, to: start)!, calendar: calendar)

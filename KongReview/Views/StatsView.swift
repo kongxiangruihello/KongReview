@@ -16,8 +16,7 @@ struct StatsView: View {
     var body: some View {
         _ = store.revision
         _ = store.today
-        let events = (try? store.db.events()) ?? []
-        let s = ReviewStats.summarize(events, now: Date(), days: 30)
+        let s = store.stats
         let cards = (try? store.db.cards()) ?? []
         let bars = s.lastDays.flatMap { d -> [Bar] in
             let date = Self.parse(d.key)

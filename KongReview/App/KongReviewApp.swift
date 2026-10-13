@@ -39,6 +39,7 @@ struct KongReviewApp: App {
                     .keyboardShortcut("n")
                 Button("快速录入浮窗") { QuickCaptureController.shared.show() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+                Button("引文速查…") { CitationLookupController.shared.show() }
                 Button("存档网页…") { store.showAddArticle() }
                     .keyboardShortcut("l")
                 Button("新建出处") {
@@ -52,6 +53,13 @@ struct KongReviewApp: App {
                 Button("记忆卡") { store.selection = .cards }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("回顾统计") { store.selection = .stats }
+            }
+            CommandGroup(replacing: .help) {
+                Button("KongReview 使用说明") {
+                    store.selection = .help
+                    WindowOpener.showMain()
+                }
+                Button("导出诊断信息…") { ExportService.exportDiagnostics(store: store) }
             }
             CommandGroup(after: .importExport) {
                 Button("导出全部为 Markdown…") { ExportService.exportAll(store: store) }

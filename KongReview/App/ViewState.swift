@@ -20,6 +20,10 @@ final class ReviewState {
     var day = ""
     /// 卡片上的出处详情（完整引文、位置、标签、添加时间）是否展开；默认折叠
     var showDetails = false
+    /// 卡片下方的“相关摘录”是否展开（记住上次状态）
+    var showRelated: Bool = UserDefaults.standard.bool(forKey: "review.showRelated") {
+        didSet { UserDefaults.standard.set(showRelated, forKey: "review.showRelated") }
+    }
 }
 
 /// 记忆卡学习界面的状态

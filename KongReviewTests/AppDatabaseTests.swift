@@ -576,3 +576,93 @@ final class V09SyncTests: XCTestCase {
     XCTAssertTrue(FileManager.default.fileExists(atPath: inbox.appendingPathComponent("出错/b.json").path))
   }
 }
+
+final class V10DatabaseTests: XCTestCase {
+  func testSummaryRelatedRestoreAndUndoSnapshots() throws {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("v10-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let db = try AppDatabase(DatabasePool(path: dir.appendingPathComponent("a.sqlite").path))
+    let s = try db.save(Source(title: "论语"))
+    let h1 = try db.save(Highlight(sourceId: s.id, text: "学而时习之，不亦说乎", tags: ["论语"]))
+    _ = try db.save(Highlight(sourceId: s.id, text: "学而时习之者，君子之学也"))
+    for i in 0..<3 { _ = try db.save(Highlight(text: "其他内容\(i)")) }
+    db.log(ReviewEvent(kind: .keep, highlightId: h1.id))
+    db.log(ReviewEvent(kind: .card, cardId: 1, answer: 1))
+    db.log(ReviewEvent(kind: .card, cardId: 1, answer: 3))
+
+    // SQL 汇总与内存汇总一致
+    let a = try db.reviewSummary()
+    let b = ReviewStats.summarize(try db.events(), now: Date(), days: 30)
+    XCTAssertEqual(a, b)
+    XCTAssertEqual(a.today.highlights, 1); XCTAssertEqual(a.today.cards, 2)
+    XCTAssertEqual(try db.cardAnswersToday().total, 2); XCTAssertEqual(try db.cardAnswersToday().correct, 1)
+
+    // 相关摘录
+    let idx = RelatedIndex(try db.relatedDocs())
+    XCTAssertEqual(idx.count, 5)
+
+    // 备份 → 改动 → 恢复
+    let backup = dir.appendingPathComponent("b.sqlite")
+    try db.backup(to: backup)
+    _ = try db.save(Highlight(text: "备份之后新加的"))
+    XCTAssertEqual(try db.count(HighlightQuery()), 6)
+    let info = try XCTUnwrap(BackupInfo.read(backup))
+    XCTAssertEqual(info.highlights, 5)
+    try db.restore(from: backup)
+    XCTAssertEqual(try db.count(HighlightQuery()), 5)
+    let diag = Diagnostics.report(db: db, settings: [("快捷键", "⌃⌥K")])
+    XCTAssertTrue(diag.contains("摘录：5"), diag)
+    XCTAssertFalse(diag.contains("学而时习之"), "诊断信息不应包含摘录正文")
+  }
+}
+
+final class V10UndoTests: XCTestCase {
+  func testUndoRedo() throws {
+    // XCTest 在主线程上跑测试；LibraryStore 是主线程对象
+    try MainActor.assumeIsolated { try runUndoScenario() }
+  }
+
+  @MainActor
+  private func runUndoScenario() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let store = LibraryStore(db: db)
+    let um = UndoManager()
+    store.undoManager = um
+    let a = try db.save(Source(title: "甲"))
+    let b = try db.save(Source(title: "乙"))
+    let h1 = try db.save(Highlight(sourceId: a.id, text: "一"))
+    let h2 = try db.save(Highlight(sourceId: b.id, text: "二"))
+    store.reload()
+
+    // 删除摘录 → 撤销 → 重做
+    store.delete(h1)
+    XCTAssertEqual(try db.count(HighlightQuery()), 1)
+    um.undo()
+    XCTAssertEqual(try db.count(HighlightQuery()), 2)
+    um.redo()
+    XCTAssertEqual(try db.count(HighlightQuery()), 1)
+    um.undo()
+
+    // 合并出处 → 撤销：出处与摘录归属都回来
+    store.mergeRequest = MergeRequest(sources: [.init(source: a, count: 1), .init(source: b, count: 1)], target: a.id!)
+    store.commitMerge()
+    XCTAssertEqual(try db.allSources().count, 1)
+    um.undo()
+    XCTAssertEqual(try db.allSources().count, 2)
+    XCTAssertEqual(try db.highlights(ids: [h2.id!]).first?.sourceId, b.id)
+
+    // 删除记忆卡 → 撤销
+    XCTAssertEqual(try db.makeCards(fromHighlights: [h1.id!]), 1)
+    let cid = try XCTUnwrap(db.cards().first?.id)
+    store.deleteCards([cid])
+    XCTAssertEqual(try db.cardCount(), 0)
+    um.undo()
+    XCTAssertEqual(try db.cardCount(), 1)
+
+    // 批量弃置 → 撤销
+    store.batch(.discard(true), ids: [h1.id!, h2.id!])
+    XCTAssertEqual(try db.count(HighlightQuery()), 0)
+    um.undo()
+    XCTAssertEqual(try db.count(HighlightQuery()), 2)
+  }
+}
