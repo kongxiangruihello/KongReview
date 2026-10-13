@@ -15,16 +15,22 @@ struct HighlightListView: View {
     @Environment(LibraryStore.self) private var store
     let title: String
     let filter: HighlightFilter
+    /// 从“已存搜索”打开时带入的搜索词与筛选
+    var saved: SavedSearch? = nil
 
     private var state: ListState { store.list }
 
     private var query: HighlightQuery {
-        HighlightQuery(
-            text: state.query, sourceId: filter.sourceId, tag: filter.tag,
-            favoritesOnly: filter.favoritesOnly, masteryOnly: filter.masteryOnly,
-            unsortedOnly: filter.unsortedOnly, deletedOnly: filter.deletedOnly
+        let x = state.extra
+        return HighlightQuery(
+            text: state.query, sourceId: filter.sourceId ?? x.sourceId, tag: filter.tag,
+            favoritesOnly: filter.favoritesOnly || x.favoritesOnly, masteryOnly: filter.masteryOnly,
+            unsortedOnly: filter.unsortedOnly, deletedOnly: filter.deletedOnly,
+            tags: x.tags, dateFrom: x.from, dateTo: x.to
         )
     }
+
+    private var terms: [String] { SearchTerms.terms(state.query) }
 
     private struct LoadKey: Hashable {
         var query: HighlightQuery
@@ -33,6 +39,38 @@ struct HighlightListView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !filter.deletedOnly && (state.showFilters || !state.extra.isEmpty) {
+                ListFilterBar(base: filter)
+                Divider()
+            }
+            listContent
+        }
+        .task(id: title) {
+            // 换了列表：已存搜索带入它的条件，其他列表清空上一个列表的组合筛选
+            if let saved {
+                state.query = saved.text
+                state.extra = saved.filter
+                state.showFilters = true
+            } else if state.extraOwner != title {
+                state.extra = ListFilter()
+            }
+            state.extraOwner = title
+        }
+        .alert("保存当前搜索", isPresented: Binding(
+            get: { store.savingSearchName != nil },
+            set: { if !$0 { store.savingSearchName = nil } }
+        )) {
+            TextField("名称，如：严复 · 进化", text: Binding(get: { store.savingSearchName ?? "" }, set: { store.savingSearchName = $0 }))
+            Button("取消", role: .cancel) { store.savingSearchName = nil }
+            Button("保存") { store.saveCurrentSearch(named: store.savingSearchName ?? "") }
+        } message: {
+            Text("搜索词与筛选条件会保存到侧边栏“已存搜索”，点一下就能再次打开。")
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
         Group {
             if state.items.isEmpty {
                 ContentUnavailableView {
@@ -45,7 +83,7 @@ struct HighlightListView: View {
             } else {
                 List(selection: Bindable(store.list).selection) {
                     ForEach(state.items, id: \.id) { h in
-                        HighlightRow(highlight: h, source: store.source(for: h))
+                        HighlightRow(highlight: h, source: store.source(for: h), terms: terms)
                             .tag(h.id ?? -1)
                             .onAppear {
                                 if h.id == state.items.last?.id, state.hasMore { state.limit += ListState.pageSize }
@@ -94,6 +132,14 @@ struct HighlightListView: View {
         }
         .toolbar {
             if !filter.deletedOnly {
+                ToolbarItem {
+                    Button {
+                        state.showFilters.toggle()
+                    } label: {
+                        Label("筛选", systemImage: state.extra.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    }
+                    .help("按出处、多个标签、日期组合筛选")
+                }
                 ToolbarItem {
                     Menu {
                         Button("专题汇编（Word / Markdown）…") { startExport(.compilation) }
@@ -213,18 +259,19 @@ struct HighlightRow: View {
     @Environment(LibraryStore.self) private var store
     let highlight: Highlight
     let source: Source?
+    var terms: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(RichText.attributed(highlight.text))
+            Text(RichText.marked(highlight.text, terms: terms))
                 .font(.system(.body, design: .serif))
                 .lineLimit(6)
                 .textSelection(.enabled)
             if let t = highlight.translation {
-                Text(RichText.attributed("译：" + t)).font(.callout).foregroundStyle(.secondary).lineLimit(3)
+                Text(RichText.marked("译：" + t, terms: terms)).font(.callout).foregroundStyle(.secondary).lineLimit(3)
             }
             if let n = highlight.note {
-                Text(RichText.attributed("按：" + n)).font(.callout).foregroundStyle(.blue).lineLimit(3)
+                Text(RichText.marked("按：" + n, terms: terms)).font(.callout).foregroundStyle(.blue).lineLimit(3)
             }
             HStack(spacing: 8) {
                 let cite = CitationFormatter.citation(for: highlight, source: source, style: CitationSettings.style)
@@ -271,6 +318,16 @@ struct HighlightMenu: View {
             h.isFavorite.toggle()
             store.save(h)
         }
+        Button("做成填空卡…") { store.startCloze(for: highlight) }
+        Menu("回顾频率") {
+            Button((highlight.frequency ?? 0) > 0 ? "✓ 多出现" : "多出现") { store.setFrequency(1, for: highlight) }
+            Button((highlight.frequency ?? 0) == 0 ? "✓ 正常" : "正常") { store.setFrequency(nil, for: highlight) }
+            Button((highlight.frequency ?? 0) < 0 ? "✓ 少出现" : "少出现") { store.setFrequency(-1, for: highlight) }
+        }
+        Button("生成分享图…") { store.shareImageHighlight = highlight }
+        if let u = store.source(for: highlight)?.url, let url = URL(string: u), url.isFileURL || u.hasPrefix("http") {
+            Button(url.isFileURL ? "打开原文件" : "打开原网页") { NSWorkspace.shared.open(url) }
+        }
         if let id = highlight.id, store.cardHighlightIDs.contains(id) {
             Button("查看记忆卡") {
                 store.selection = .cards
@@ -304,5 +361,100 @@ struct HighlightMenu: View {
         let md = MarkdownExporter.block(for: highlight, source: store.source(for: highlight), style: CitationSettings.style)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(md, forType: .string)
+    }
+}
+
+/// 列表上方的组合筛选条：出处 · 标签（可多选，须同时具备） · 日期 · 只看收藏 · 保存为搜索
+struct ListFilterBar: View {
+    @Environment(LibraryStore.self) private var store
+    let base: HighlightFilter
+    private var state: ListState { store.list }
+
+    private var datePreset: String {
+        guard let from = state.extra.from else { return "不限日期" }
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: from),
+                                                    to: Calendar.current.startOfDay(for: Date())).day ?? 0
+        if state.extra.to == nil {
+            switch days {
+            case 6: return "近 7 天"
+            case 29: return "近 30 天"
+            case 364: return "近一年"
+            default: break
+            }
+        }
+        return "自定义"
+    }
+
+    private func preset(_ days: Int?) {
+        if let days {
+            state.extra.from = Calendar.current.date(byAdding: .day, value: -(days - 1), to: Date())
+            state.extra.to = nil
+        } else {
+            state.extra.from = nil
+            state.extra.to = nil
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if base.sourceId == nil {
+                Picker("出处", selection: Bindable(store.list).extra.sourceId) {
+                    Text("全部出处").tag(Int64?.none)
+                    ForEach(store.sources) { s in Text(s.title).tag(s.id) }
+                }
+                .frame(maxWidth: 220)
+            }
+            Menu {
+                if store.tags.isEmpty { Text("还没有标签") }
+                ForEach(store.tags, id: \.self) { t in
+                    Button(state.extra.tags.contains(t) ? "✓ #\(t)" : "#\(t)") {
+                        if let i = state.extra.tags.firstIndex(of: t) { state.extra.tags.remove(at: i) } else { state.extra.tags.append(t) }
+                    }
+                }
+            } label: {
+                Text(state.extra.tags.isEmpty ? "标签" : "标签：" + state.extra.tags.map { "#\($0)" }.joined(separator: " "))
+                    .lineLimit(1)
+            }
+            .fixedSize()
+            .help("可选多个标签：只显示同时带有这些标签的摘录")
+            Menu(datePreset) {
+                Button("不限日期") { preset(nil) }
+                Button("近 7 天") { preset(7) }
+                Button("近 30 天") { preset(30) }
+                Button("近一年") { preset(365) }
+                Button("自定义…") {
+                    if state.extra.from == nil { preset(30) }
+                    state.extra.to = Date()
+                }
+            }
+            .fixedSize()
+            if state.extra.from != nil && datePreset == "自定义" {
+                DatePicker("", selection: Binding(get: { state.extra.from ?? Date() }, set: { state.extra.from = $0 }),
+                           displayedComponents: .date)
+                    .labelsHidden().fixedSize()
+                Text("至").foregroundStyle(.secondary)
+                DatePicker("", selection: Binding(get: { state.extra.to ?? Date() }, set: { state.extra.to = $0 }),
+                           displayedComponents: .date)
+                    .labelsHidden().fixedSize()
+            }
+            if !base.favoritesOnly {
+                Toggle("只看收藏", isOn: Bindable(store.list).extra.favoritesOnly)
+                    .toggleStyle(.checkbox)
+            }
+            Spacer()
+            if !state.extra.isEmpty {
+                Button("清除筛选") { state.extra = ListFilter() }
+                    .buttonStyle(.link)
+            }
+            Button {
+                store.savingSearchName = state.query.isEmpty ? "" : state.query
+            } label: {
+                Label("保存为搜索", systemImage: "bookmark")
+            }
+            .disabled(state.extra.isEmpty && state.query.isEmpty)
+            .help("把当前的搜索词和筛选条件存到侧边栏")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 }

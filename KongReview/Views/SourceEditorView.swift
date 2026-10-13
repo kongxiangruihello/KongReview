@@ -37,6 +37,7 @@ struct SourceEditorView: View {
                         TextField("卷期（如：55(34) 或 第3期）", text: optional(sourceBinding.issue))
                     }
                 }
+                CoverEditorSection(source: source, isbn: optional(sourceBinding.isbn))
                 Section("每日回顾") {
                     Picker("出现频率", selection: sourceBinding.reviewWeight) {
                         Text("不再出现").tag(0.0)
@@ -64,7 +65,7 @@ struct SourceEditorView: View {
             }
             .padding()
         }
-        .frame(minWidth: 480, minHeight: 460)
+        .frame(minWidth: 520, minHeight: 600)
     }
 
     private func close() {

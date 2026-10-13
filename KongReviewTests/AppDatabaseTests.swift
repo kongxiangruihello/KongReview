@@ -518,3 +518,61 @@ final class V08DatabaseTests: XCTestCase {
     XCTAssertEqual(try db.compact().mediaRemoved, 1)
   }
 }
+
+final class V09DatabaseTests: XCTestCase {
+  func testInboxCoversFrequencyAndFilters() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let json = #"{"version":1,"app":"KongPDF","source":{"title":"严复集","author":"严复","kind":"pdf","url":"file:///a.pdf","isbn":"9787101000000"},"highlights":[{"id":"h1","text":"物竞天择","page":12,"tags":["严复","进化"],"createdAt":"2026-01-05T08:00:00Z"},{"id":"h2","text":"适者生存","tags":["严复"]}]}"#
+    let file = try InboxPayload.parse(Data(json.utf8))
+    let r1 = try db.importInbox(file, now: Date(timeIntervalSince1970: 1_790_000_000))
+    XCTAssertEqual(r1.added, 2)
+    let r2 = try db.importInbox(file)
+    XCTAssertEqual(r2.added, 0); XCTAssertEqual(r2.duplicates, 2)
+    let src = try XCTUnwrap(db.allSources().first)
+    XCTAssertEqual(src.kind, .pdf); XCTAssertEqual(src.isbn, "9787101000000")
+
+    // 封面
+    try db.setCover(sourceId: src.id!, data: Data([1, 2, 3]))
+    XCTAssertEqual(try db.cover(sourceId: src.id!), Data([1, 2, 3]))
+    XCTAssertEqual(try db.coverSourceIDs(), [src.id!])
+    try db.setCover(sourceId: src.id!, data: nil)
+    XCTAssertNil(try db.cover(sourceId: src.id!))
+
+    // 频率
+    let h = try XCTUnwrap(db.highlights(HighlightQuery(text: "物竞")).first)
+    XCTAssertEqual(h.location, "第 12 页")
+    try db.setFrequency(1, highlightId: h.id!)
+    XCTAssertEqual(try db.highlights(ids: [h.id!]).first?.frequency, 1)
+
+    // 组合筛选：多个标签 + 日期范围
+    XCTAssertEqual(try db.count(HighlightQuery(tags: ["严复", "进化"])), 1)
+    XCTAssertEqual(try db.count(HighlightQuery(tags: ["严复"])), 2)
+    let jan = Date(timeIntervalSince1970: 1_767_571_200)   // 2026-01-05
+    XCTAssertEqual(try db.count(HighlightQuery(dateFrom: jan, dateTo: jan)), 1)
+  }
+}
+
+final class V09SyncTests: XCTestCase {
+  func testObsidianSyncAndInboxFolder() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let s = try db.save(Source(title: "论语译注", author: "杨伯峻"))
+    _ = try db.save(Highlight(sourceId: s.id, text: "学而时习之", tags: ["论语"]))
+    _ = try db.save(Highlight(text: "未归类的一条"))
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("obs-\(UUID().uuidString)")
+    let r1 = try ObsidianSync.run(db: db, to: dir, style: .footnote)
+    XCTAssertEqual(r1.written, 2)
+    let md = try String(contentsOf: dir.appendingPathComponent("论语译注.md"), encoding: .utf8)
+    XCTAssertTrue(md.contains("> 学而时习之") && md.contains("#论语"))
+    let r2 = try ObsidianSync.run(db: db, to: dir, style: .footnote)
+    XCTAssertEqual(r2.written, 0); XCTAssertEqual(r2.unchanged, 2)
+
+    let inbox = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("inbox-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+    try Data(#"{"app":"X","source":{"title":"书"},"highlights":[{"id":"1","text":"甲"}]}"#.utf8).write(to: inbox.appendingPathComponent("a.json"))
+    try Data("not json".utf8).write(to: inbox.appendingPathComponent("b.json"))
+    let res = InboxService.process(db: db, folder: inbox)
+    XCTAssertEqual(res.files, 2); XCTAssertEqual(res.added, 1); XCTAssertEqual(res.failed.count, 1)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: inbox.appendingPathComponent("已导入/a.json").path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: inbox.appendingPathComponent("出错/b.json").path))
+  }
+}

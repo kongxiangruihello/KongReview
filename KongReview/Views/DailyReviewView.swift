@@ -347,14 +347,34 @@ struct DailyReviewView: View {
                 CardIconButton(icon: hasCard ? "brain.fill" : "brain", help: hasCard ? "已做成记忆卡" : "做成记忆卡（M）") {
                     if !hasCard { makeCard(card) }
                 }
-                CardIconButton(icon: "doc.on.doc", help: "复制（含出处）") { copy(h, source: source) }
-                ShareLink(item: shareText(h, source: source)) {
-                    Image(systemName: "square.and.arrow.up").font(.system(size: 14))
-                        .foregroundStyle(ReviewPalette.sub)
-                        .frame(width: 28, height: 26)
+                CardIconButton(icon: "rectangle.dashed", help: "做成填空卡（C）") { store.startCloze(for: h) }
+                Menu {
+                    Button((h.frequency ?? 0) > 0 ? "✓ 多出现" : "多出现") { store.setFrequency(1, for: h) }
+                    Button((h.frequency ?? 0) == 0 ? "✓ 正常" : "正常") { store.setFrequency(nil, for: h) }
+                    Button((h.frequency ?? 0) < 0 ? "✓ 少出现" : "少出现") { store.setFrequency(-1, for: h) }
+                    Divider()
+                    Button("不再出现（弃置）") { act(.discard, card) }
+                } label: {
+                    Image(systemName: (h.frequency ?? 0) > 0 ? "dial.high" : ((h.frequency ?? 0) < 0 ? "dial.low" : "dial.medium"))
+                        .font(.system(size: 14))
+                        .foregroundStyle((h.frequency ?? 0) == 0 ? ReviewPalette.sub : ReviewPalette.accent)
                 }
-                .buttonStyle(.plain)
-                .help("分享")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .frame(width: 28, height: 26)
+                .help("这条摘录以后出现得多一些还是少一些")
+                Menu {
+                    Button("复制文字（含出处）") { copy(h, source: source) }
+                    Button("生成分享图…") { store.shareImageHighlight = h }
+                } label: {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 14)).foregroundStyle(ReviewPalette.sub)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .frame(width: 28, height: 26)
+                .help("复制或生成分享图")
             }
             .padding(.top, 12)
         }
@@ -389,6 +409,7 @@ struct DailyReviewView: View {
                 Button("") { go(-1) }.keyboardShortcut(key("k"))
                 Button("") { act(.favorite, card) }.keyboardShortcut(key("f"))
                 Button("") { store.edit(card.highlight) }.keyboardShortcut(key("e"))
+                Button("") { store.startCloze(for: card.highlight) }.keyboardShortcut(key("c"))
             }
             .opacity(0)
             .allowsHitTesting(false)
@@ -504,6 +525,24 @@ struct DailyReviewView: View {
 enum RichText {
     static func attributed(_ s: String) -> AttributedString {
         MarkdownText.attributed(s)
+    }
+
+    /// 同上，并把搜索词标成黄底（列表里的搜索结果）
+    static func marked(_ s: String, terms: [String]) -> AttributedString {
+        var a = attributed(s)
+        guard !terms.isEmpty else { return a }
+        // 先按字符位置记下所有命中，再统一上色（改属性后旧的索引可能失效）
+        var spans: [(Int, Int)] = []
+        let plain = String(a.characters)
+        for r in SearchTerms.ranges(of: terms, in: plain) {
+            spans.append((plain.distance(from: plain.startIndex, to: r.lowerBound), plain.distance(from: r.lowerBound, to: r.upperBound)))
+        }
+        for (off, len) in spans {
+            let lo = a.index(a.startIndex, offsetByCharacters: off)
+            let hi = a.index(lo, offsetByCharacters: len)
+            a[lo..<hi].backgroundColor = Color.yellow.opacity(0.38)
+        }
+        return a
     }
 }
 

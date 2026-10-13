@@ -59,3 +59,38 @@ app.openURL("kongreview://add?" + params.join("&"), false);
 ## 快捷指令（Shortcuts）
 
 “打开 URL”动作，URL 填 `kongreview://add?text=`，后面接上“URL 编码”过的文本变量即可。
+
+
+## 收件箱：其他应用投递摘录（0.9 起）
+
+供计划中的 PDF 批注应用、脚本、快捷指令等使用。把摘录写成 JSON 文件放进
+
+```
+~/Library/Application Support/KongReview/Inbox/
+```
+
+KongReview 在启动、回到前台时和每分钟检查一次：导入成功的文件移到 `Inbox/已导入/`，格式不对的移到 `Inbox/出错/` 并附一个说明原因的 `.原因.txt`。设置 → 数据 → 收件箱 可以打开这个文件夹或立即检查。
+
+格式（version 1，UTF-8）：
+
+```json
+{
+  "version": 1,
+  "app": "KongPDF",
+  "source": {
+    "title": "严复集", "author": "严复", "kind": "pdf",
+    "url": "file:///Users/me/Books/严复集.pdf",
+    "publisher": "中华书局", "year": "1986", "isbn": "9787101000000"
+  },
+  "highlights": [
+    { "id": "批注在来源应用里的唯一 id", "text": "原文", "note": "按语", "translation": "译文",
+      "page": 12, "location": "卷一", "tags": ["严复"], "createdAt": "2026-10-13T08:00:00Z" }
+  ]
+}
+```
+
+- `source.kind`：book / article / web / pdf（默认）/ ai / other。
+- 出处按“标题 + 作者”合并到已有出处；已有出处缺网址或 ISBN 时会补上。
+- 摘录按“app + id”去重（没有 id 时按原文），同一文件重复投递不会产生重复摘录。
+- `location` 优先；没有时用 `page` 生成“第 N 页”。`createdAt` 可用 ISO 8601 字符串或 Unix 秒 / 毫秒。
+- 出处的 `url` 是本地文件时，摘录右键菜单里有“打开原文件”。

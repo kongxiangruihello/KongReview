@@ -118,6 +118,12 @@ public struct ReviewScheduler: Sendable {
         guard !highlight.isDiscarded, !highlight.isDeleted, sourceWeight > 0 else { return 0 }
         var w = sourceWeight
         if highlight.isFavorite { w *= config.favoriteBoost }
+        // 单条摘录的频率：多出现 ×2.5，少出现 ×0.35
+        switch highlight.frequency ?? 0 {
+        case 1...: w *= 2.5
+        case ..<0: w *= 0.35
+        default: break
+        }
         if let last = highlight.lastSurfacedAt {
             let days = daysBetween(last, now)
             // 刚出现时接近 0，经过一个恢复半衰期回到 0.5，之后逐渐趋近 1

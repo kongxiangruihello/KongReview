@@ -38,7 +38,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }
         }
         nc.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }
+            MainActor.assumeIsolated {
+                QuickCaptureController.shared.store?.checkDayChange()
+                QuickCaptureController.shared.store?.checkInbox()
+            }
+        }
+        // 收件箱：启动时与每分钟检查一次
+        QuickCaptureController.shared.store?.checkInbox()
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkInbox() }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { QuickCaptureController.shared.store?.checkDayChange() }

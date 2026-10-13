@@ -152,6 +152,12 @@ struct ContentView: View {
             SourceManagerView()
         case .help:
             HelpView()
+        case .saved(let id):
+            if let saved = store.savedSearches.first(where: { $0.id == id }) {
+                HighlightListView(title: saved.name, filter: .init(), saved: saved)
+            } else {
+                ContentUnavailableView("这个已存搜索已删除", systemImage: "bookmark.slash")
+            }
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -247,6 +253,17 @@ struct SidebarView: View {
             }
 
 
+            if !store.savedSearches.isEmpty {
+                Section("已存搜索") {
+                    ForEach(store.savedSearches) { s in
+                        Label(s.name, systemImage: "bookmark").tag(SidebarItem.saved(s.id))
+                            .contextMenu {
+                                Button("删除已存搜索", role: .destructive) { store.deleteSavedSearch(s.id) }
+                            }
+                    }
+                }
+            }
+
             if !store.tags.isEmpty {
                 // 标签默认折叠（记住上次状态）
                 Section("标签", isExpanded: Bindable(store).tagsExpanded) {
@@ -296,6 +313,12 @@ struct CardSheets: ViewModifier {
             }
             .sheet(item: $store.apkgExport) { _ in
                 ApkgExportView()
+            }
+            .sheet(item: $store.clozeDraft) { _ in
+                ClozeEditorView()
+            }
+            .sheet(item: $store.shareImageHighlight) { _ in
+                ShareImageView()
             }
             .alert("同步更新记忆卡？", isPresented: Binding(
                 get: { store.cardSyncOffer != nil },

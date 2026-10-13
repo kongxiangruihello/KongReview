@@ -134,6 +134,12 @@ final class ListState {
     var selection: Set<Int64> = []
     /// 上一次加载用的筛选条件（变化时回到第一页）
     var lastQuery: HighlightQuery?
+    /// 组合筛选（出处、多个标签、日期、只看收藏）
+    var extra = ListFilter()
+    /// 筛选条是否展开
+    var showFilters = false
+    /// 筛选条件属于哪个列表（切换列表时清空）
+    var extraOwner = ""
 
     static let pageSize = 200
     var hasMore: Bool { items.count < total }
@@ -233,4 +239,17 @@ enum ReviewSessionRecordStore {
         guard let data = UserDefaults.standard.data(forKey: "review.session._all") else { return nil }
         return try? JSONDecoder().decode(Snapshot.self, from: data)
     }
+}
+
+/// 填空卡制作
+struct ClozeDraft: Identifiable {
+    let id = UUID()
+    var highlightId: Int64?
+    /// 带 {{c1::…}} 标记的原文
+    var text: String
+    /// 背面附加内容（译文、按语、出处）
+    var extra: String
+    var deck: String
+    var tags: [String]
+    var numbers: [Int] { AnkiContent.clozeNumbers(text) }
 }

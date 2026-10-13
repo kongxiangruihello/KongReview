@@ -36,6 +36,8 @@ public struct Source: Codable, Identifiable, Hashable, Sendable {
     public var container: String?
     /// 卷期，如“55(34)”或“第3期”
     public var issue: String?
+    /// ISBN（用于取封面）；可空
+    public var isbn: String?
 
     public init(
         id: Int64? = nil,
@@ -65,6 +67,7 @@ public struct Source: Codable, Identifiable, Hashable, Sendable {
         self.place = place
         self.container = container
         self.issue = issue
+        self.isbn = nil
     }
 }
 
@@ -85,6 +88,8 @@ public struct Highlight: Codable, Identifiable, Hashable, Sendable {
 
     public var isFavorite: Bool
     public var isDiscarded: Bool
+    /// 在每日回顾中的出现频率：1 多出现，-1 少出现，nil / 0 正常（弃置另由 isDiscarded 表示）
+    public var frequency: Int?
 
     // 每日回顾状态
     public var lastSurfacedAt: Date?
@@ -133,6 +138,7 @@ public struct Highlight: Codable, Identifiable, Hashable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+        self.frequency = nil
     }
 
     public var isDeleted: Bool { deletedAt != nil }

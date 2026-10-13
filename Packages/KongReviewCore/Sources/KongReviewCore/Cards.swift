@@ -294,6 +294,58 @@ public enum AnkiContent {
         return (front + tail, back + tail)
     }
 
+    /// 填空题里出现的编号（c1、c2…），升序
+    public static func clozeNumbers(_ text: String) -> [Int] {
+        guard let re = try? NSRegularExpression(pattern: #"\{\{c(\d+)::"#) else { return [] }
+        let ns = text as NSString
+        let ns2 = re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+            .compactMap { Int(ns.substring(with: $0.range(at: 1))) }
+        return Array(Set(ns2)).sorted()
+    }
+
+    /// 与 Anki 相同：每个编号一张卡——只挖空这个编号，其余编号直接显示答案
+    public static func cloze(_ text: String, number: Int) -> (front: String, back: String) {
+        guard let re = try? NSRegularExpression(pattern: #"\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}"#, options: [.dotMatchesLineSeparators]) else {
+            return (text, text)
+        }
+        let ns = text as NSString
+        var front = "", back = ""
+        var last = 0
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let before = ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            front += before
+            back += before
+            let n = Int(ns.substring(with: m.range(at: 1))) ?? 0
+            let answer = ns.substring(with: m.range(at: 2))
+            let hint = m.range(at: 3).location != NSNotFound ? ns.substring(with: m.range(at: 3)) : nil
+            if n == number {
+                front += "<span class=\"cloze\">[\(hint ?? "…")]</span>"
+                back += "<span class=\"cloze\">\(answer)</span>"
+            } else {
+                front += answer
+                back += answer
+            }
+            last = m.range.location + m.range.length
+        }
+        let tail = ns.substring(from: last)
+        return (front + tail, back + tail)
+    }
+
+    /// 在 text 的 range 处挖空：包成 {{cN::…}}，N 取现有最大编号 + 1（sameNumber 为 true 时沿用最大编号，同一张卡里挖多处）
+    public static func wrapCloze(_ text: String, range: NSRange, sameNumber: Bool = false) -> String {
+        let ns = text as NSString
+        guard range.length > 0, range.location + range.length <= ns.length else { return text }
+        let existing = clozeNumbers(text).max() ?? 0
+        let n = sameNumber ? max(existing, 1) : existing + 1
+        let picked = ns.substring(with: range)
+        return ns.replacingCharacters(in: range, with: "{{c\(n)::\(picked)}}")
+    }
+
+    /// 去掉全部挖空标记，恢复原文
+    public static func unwrapCloze(_ text: String) -> String {
+        Markdown.replace(text, #"\{\{c\d+::(.*?)(?:::.*?)?\}\}"#, "$1")
+    }
+
     public static func isCloze(_ text: String) -> Bool {
         text.range(of: #"\{\{c\d+::"#, options: .regularExpression) != nil
     }

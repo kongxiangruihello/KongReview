@@ -14,6 +14,7 @@ enum SidebarItem: Hashable {
     case articles
     case sourceManager
     case help
+    case saved(String)
     case source(Int64)
     case tag(String)
 }
@@ -99,6 +100,18 @@ final class LibraryStore {
     var maintenanceProgress: String?
     /// 每次刷新后调用（菜单栏数字、提醒内容）
     var onReload: (() -> Void)?
+    /// 有封面的出处
+    var coverIDs: Set<Int64> = []
+    /// 封面变化计数（界面据此重新加载图片）
+    var coverRevision = 0
+    /// 填空卡制作面板
+    var clozeDraft: ClozeDraft?
+    /// 生成分享图的摘录
+    var shareImageHighlight: Highlight?
+    /// 已存搜索
+    var savedSearches: [SavedSearch] = SavedSearch.all()
+    /// 正在保存当前搜索（非空时弹出命名框）
+    var savingSearchName: String?
 
     /// 每次写入后递增，列表视图据此重新查询
     private(set) var revision = 0
@@ -120,8 +133,10 @@ final class LibraryStore {
             cardCount = try db.cards().count
             reviewedToday = try db.reviewedToday()
             noteTemplates = try db.noteTemplates()
+            coverIDs = try db.coverSourceIDs()
             revision += 1
             onReload?()
+            scheduleObsidianSync()
         } catch {
             report(error)
         }
@@ -485,6 +500,119 @@ final class LibraryStore {
         }
         nextCard()
         revisionBump()
+    }
+
+    // MARK: 0.9：封面、频率、填空卡、已存搜索、Obsidian、收件箱
+
+    func setCover(_ data: Data?, for sourceId: Int64) {
+        perform { try db.setCover(sourceId: sourceId, data: data) }
+        coverRevision += 1
+    }
+
+    /// 单条摘录的回顾频率：1 多出现、-1 少出现、nil 正常
+    func setFrequency(_ value: Int?, for highlight: Highlight) {
+        guard let id = highlight.id else { return }
+        perform { try db.setFrequency(value, highlightId: id) }
+    }
+
+    func startCloze(for highlight: Highlight) {
+        let src = source(for: highlight)
+        var back: [String] = []
+        if let t = highlight.translation, !t.isEmpty { back.append(t) }
+        if let n = highlight.note, !n.isEmpty { back.append("按：" + n) }
+        let cite = CitationFormatter.citation(for: highlight, source: src, style: CitationSettings.style)
+        if !cite.isEmpty { back.append("—— " + cite) }
+        clozeDraft = ClozeDraft(highlightId: highlight.id, text: highlight.text,
+                                extra: back.joined(separator: "\n\n"), deck: study.lastDeck ?? "填空", tags: highlight.tags)
+    }
+
+    /// 按填空编号生成卡片（与 Anki 相同：c1、c2… 各一张）
+    func commitCloze() {
+        guard let d = clozeDraft else { return }
+        let numbers = AnkiContent.clozeNumbers(d.text)
+        guard !numbers.isEmpty else { return }
+        let extra = Markdown.html(d.extra)
+        perform {
+            for n in numbers {
+                let c = AnkiContent.cloze(Markdown.html(d.text), number: n)
+                let back = extra.isEmpty ? c.back : c.back + "<hr>" + extra
+                _ = try db.save(Card(deck: d.deck.nilIfBlank ?? "填空", front: c.front, back: back, tags: d.tags,
+                                     highlightId: d.highlightId))
+            }
+        }
+        study.lastDeck = d.deck
+        clozeDraft = nil
+        infoMessage = "已生成 \(numbers.count) 张填空卡（牌组“\(d.deck)”）。"
+    }
+
+    func saveCurrentSearch(named name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        savedSearches.append(SavedSearch(name: n, text: list.query, filter: list.extra))
+        SavedSearch.save(savedSearches)
+        savingSearchName = nil
+    }
+
+    func deleteSavedSearch(_ id: String) {
+        savedSearches.removeAll { $0.id == id }
+        SavedSearch.save(savedSearches)
+        if case .saved(let cur) = selection, cur == id { selection = .all }
+    }
+
+    func renameSavedSearch(_ id: String, to name: String) {
+        guard let i = savedSearches.firstIndex(where: { $0.id == id }), !name.isEmpty else { return }
+        savedSearches[i].name = name
+        SavedSearch.save(savedSearches)
+    }
+
+    private var obsidianTask: Task<Void, Never>?
+
+    /// 数据变化后 3 秒同步一次 Obsidian（连续修改只同步最后一次）
+    func scheduleObsidianSync() {
+        guard ObsidianSync.isEnabled, let folder = ObsidianSync.folder else { return }
+        obsidianTask?.cancel()
+        let db = self.db
+        let style = CitationSettings.style
+        obsidianTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await Task.detached(priority: .utility) {
+                _ = try? ObsidianSync.run(db: db, to: folder, style: style)
+            }.value
+        }
+    }
+
+    /// 立即同步（设置里的按钮）
+    func syncObsidianNow() {
+        guard let folder = ObsidianSync.folder else { return }
+        let db = self.db
+        let style = CitationSettings.style
+        maintenanceProgress = "正在同步到 Obsidian…"
+        Task.detached(priority: .userInitiated) {
+            let result = Result { try ObsidianSync.run(db: db, to: folder, style: style) }
+            await MainActor.run {
+                self.maintenanceProgress = nil
+                switch result {
+                case .success(let r): self.infoMessage = "已同步到 \(folder.lastPathComponent)：写入 \(r.written) 个文件，\(r.unchanged) 个没有变化。"
+                case .failure(let e): self.report(e)
+                }
+            }
+        }
+    }
+
+    /// 检查收件箱；有新摘录时提示
+    func checkInbox(quiet: Bool = true) {
+        let r = InboxService.process(db: db)
+        guard r.files > 0 else {
+            if !quiet { infoMessage = "收件箱里没有新文件。" }
+            return
+        }
+        reload()
+        var lines: [String] = []
+        if r.added > 0 { lines.append("从收件箱导入 \(r.added) 条摘录：" + r.sources.joined(separator: "、") + "。") }
+        if r.duplicates > 0 { lines.append("\(r.duplicates) 条已导入过，跳过。") }
+        if !r.failed.isEmpty { lines.append("无法导入（已移到“出错”文件夹）：\n" + r.failed.joined(separator: "\n")) }
+        if !lines.isEmpty && (r.added > 0 || !r.failed.isEmpty || !quiet) { infoMessage = lines.joined(separator: "\n") }
     }
 
     // MARK: 牌组选项、模板、FSRS、整理

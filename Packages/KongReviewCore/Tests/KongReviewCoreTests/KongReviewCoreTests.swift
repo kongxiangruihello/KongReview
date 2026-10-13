@@ -764,3 +764,46 @@ final class RichHTMLTests: XCTestCase {
         XCTAssertTrue(h.contains("<strong>粗</strong>"), h)
     }
 }
+
+final class V09CoreTests: XCTestCase {
+    func testClozeMaking() {
+        var t = "学而时习之，不亦说乎"
+        t = AnkiContent.wrapCloze(t, range: NSRange(location: 3, length: 2))
+        XCTAssertEqual(t, "学而时{{c1::习之}}，不亦说乎")
+        t = AnkiContent.wrapCloze(t, range: (t as NSString).range(of: "说"))
+        XCTAssertEqual(AnkiContent.clozeNumbers(t), [1, 2])
+        let c2 = AnkiContent.cloze(t, number: 2)
+        XCTAssertTrue(c2.front.contains("习之") && c2.front.contains("[…]"))
+        XCTAssertTrue(c2.back.contains(#"<span class="cloze">说</span>"#))
+        XCTAssertEqual(AnkiContent.unwrapCloze(t), "学而时习之，不亦说乎")
+        let same = AnkiContent.wrapCloze(t, range: (t as NSString).range(of: "乎"), sameNumber: true)
+        XCTAssertEqual(AnkiContent.clozeNumbers(same), [1, 2])
+    }
+
+    func testFrequencyWeight() {
+        let s = ReviewScheduler()
+        var h = Highlight(id: 1, text: "x")
+        let base = s.weight(of: h, sourceWeight: 1, now: Date())
+        h.frequency = 1
+        XCTAssertEqual(s.weight(of: h, sourceWeight: 1, now: Date()), base * 2.5, accuracy: 1e-9)
+        h.frequency = -1
+        XCTAssertEqual(s.weight(of: h, sourceWeight: 1, now: Date()), base * 0.35, accuracy: 1e-9)
+    }
+
+    func testInboxParse() throws {
+        let json = #"{"version":1,"app":"KongPDF","source":{"title":"严复集","author":"严复","url":"file:///a.pdf"},"highlights":[{"id":"h1","text":"物竞天择","page":12,"tags":["严复"],"createdAt":"2026-10-13T08:00:00Z"},{"text":"适者生存","location":"卷一"}]}"#
+        let f = try InboxPayload.parse(Data(json.utf8))
+        XCTAssertEqual(f.source.sourceKind, .pdf)
+        XCTAssertEqual(f.highlights[0].resolvedLocation, "第 12 页")
+        XCTAssertEqual(f.highlights[1].resolvedLocation, "卷一")
+        XCTAssertNotNil(f.highlights[0].createdAt)
+        XCTAssertEqual(InboxPayload.key(app: f.app, item: f.highlights[0]), "KongPDF|h1")
+        XCTAssertThrowsError(try InboxPayload.parse(Data(#"{"version":2,"source":{"title":"x"},"highlights":[{"text":"a"}]}"#.utf8)))
+    }
+
+    func testSearchTerms() {
+        XCTAssertEqual(SearchTerms.terms("仁 “君子” #论语"), ["仁", "君子"])
+        let r = SearchTerms.ranges(of: ["仁", "Ren"], in: "仁者爱人，ren 也；仁")
+        XCTAssertEqual(r.count, 3)
+    }
+}

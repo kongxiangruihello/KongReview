@@ -215,6 +215,39 @@ private struct DataSettings: View {
                     }
                 }
             }
+            Section("自动同步到 Obsidian") {
+                Toggle("摘录有改动时自动更新 Markdown 文件", isOn: Binding(
+                    get: { ObsidianSync.isEnabled },
+                    set: { on in
+                        if on && ObsidianSync.folder == nil { chooseObsidianFolder() }
+                        ObsidianSync.isEnabled = on && ObsidianSync.folder != nil
+                        store.reload()
+                    }))
+                HStack {
+                    Text(ObsidianSync.folder?.path ?? "未选择文件夹")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("选择文件夹…") { chooseObsidianFolder() }
+                    Button("立即同步") { store.syncObsidianNow() }
+                        .disabled(ObsidianSync.folder == nil)
+                }
+                Text("每个出处一个 .md 文件（YAML 头 + 引用块 + 按语、出处、标签），建议选 Obsidian 库里的一个子文件夹，如“KongReview”。只在内容变化时写入；这些文件由 KongReview 生成，在 Obsidian 里的改动会在下次同步时被覆盖。"
+                     + ((UserDefaults.standard.object(forKey: ObsidianSync.lastSyncKey) as? Date).map { "上次同步：\($0.formatted(date: .abbreviated, time: .shortened))。" } ?? ""))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("收件箱（其他应用投递摘录）") {
+                HStack {
+                    Button("在访达中打开收件箱") {
+                        try? FileManager.default.createDirectory(at: InboxService.folder, withIntermediateDirectories: true)
+                        NSWorkspace.shared.activateFileViewerSelecting([InboxService.folder])
+                    }
+                    Button("立即检查") { store.checkInbox(quiet: false) }
+                }
+                Text("PDF 批注等应用把摘录写成 JSON 文件放进这个文件夹，KongReview 启动、回到前台时和每分钟自动导入（出处按标题 + 作者合并，重复投递不会重复导入）。格式见项目里的 docs/INTEGRATIONS.md。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section("导入") {
                 Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
                 Text("在 readwise.io/export 选择 CSV 下载。可重复导入同一文件，已存在的摘录会自动跳过。")
@@ -228,6 +261,18 @@ private struct DataSettings: View {
         }
         .formStyle(.grouped)
     }
+}
+
+@MainActor
+private func chooseObsidianFolder() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.canCreateDirectories = true
+    panel.prompt = "同步到这里"
+    panel.message = "选择 Obsidian 库里的一个文件夹（建议新建“KongReview”子文件夹）"
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    ObsidianSync.folder = url
 }
 
 private struct CardSettingsTab: View {

@@ -271,6 +271,22 @@ final class AppDatabase {
                           unique: true, condition: Column("ankiRevlogId") != nil)
             try db.create(index: "review_event_on_cardId", on: "review_event", columns: ["cardId"])
         }
+
+        m.registerMigration("v7-covers-frequency-inbox") { db in
+            try db.alter(table: "source") { t in t.add(column: "isbn", .text) }
+            try db.alter(table: "highlight") { t in t.add(column: "frequency", .integer) }
+            try db.create(table: "source_cover") { t in
+                t.column("sourceId", .integer).primaryKey().references("source", onDelete: .cascade)
+                t.column("data", .blob).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            // 外部应用投递的摘录：来源应用 + 外部 id → 本地摘录，防止重复导入
+            try db.create(table: "inbox_item") { t in
+                t.column("key", .text).primaryKey()
+                t.column("highlightId", .integer)
+                t.column("importedAt", .datetime).notNull()
+            }
+        }
         return m
     }
 }
@@ -642,6 +658,11 @@ struct HighlightQuery: Hashable {
     var masteryOnly = false
     var unsortedOnly = false
     var deletedOnly = false
+    /// 组合筛选：须同时带有这些标签
+    var tags: [String] = []
+    /// 添加日期范围（含首尾两天）
+    var dateFrom: Date?
+    var dateTo: Date?
 
     func sqlParts() -> (from: String, where: String, args: [(any DatabaseValueConvertible)?]) {
         var clauses: [String] = []
@@ -668,6 +689,18 @@ struct HighlightQuery: Hashable {
             // tags 以 JSON 数组存储，用 json_each 精确匹配
             clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ?)")
             args.append(tag)
+        }
+        for t in tags where !t.isEmpty {
+            clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ?)")
+            args.append(t)
+        }
+        if let dateFrom {
+            clauses.append("highlight.createdAt >= ?")
+            args.append(Calendar.current.startOfDay(for: dateFrom))
+        }
+        if let dateTo {
+            clauses.append("highlight.createdAt < ?")
+            args.append(Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: dateTo)))
         }
         if deletedOnly {
             clauses.append("highlight.deletedAt IS NOT NULL")

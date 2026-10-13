@@ -62,6 +62,7 @@ struct ReviewCardContainer<Content: View>: View {
 struct SourceThumb: View {
     let source: Source?
     var size = CGSize(width: 40, height: 54)
+    @Environment(LibraryStore.self) private var store
 
     private var color: Color {
         switch source?.kind {
@@ -75,6 +76,22 @@ struct SourceThumb: View {
     }
 
     var body: some View {
+        let _ = store.coverRevision
+        if let id = source?.id, let img = CoverCache.shared.image(for: id, store: store) {
+            // 有封面图：显示封面
+            Image(nsImage: img)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size.width, height: size.height)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(.black.opacity(0.08)))
+                .shadow(color: .black.opacity(0.12), radius: 1.5, y: 1)
+        } else {
+            placeholder
+        }
+    }
+
+    private var placeholder: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(LinearGradient(colors: [color.opacity(0.88), color], startPoint: .top, endPoint: .bottom))
