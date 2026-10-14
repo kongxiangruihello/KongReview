@@ -45,7 +45,8 @@ struct CardWebView: NSViewRepresentable {
     static func page(front: String, back: String?, adjustDarkColors: Bool = true) -> String {
         var body = "<div class=\"face\">" + Card.renderHTML(front) + "</div>"
         if let back {
-            body += "<hr id=\"answer\"><div class=\"face back\">" + Card.renderHTML(back) + "</div>"
+            // 1.8：正反面之间用“答”字小印隔开
+            body += "<div id=\"answer\" class=\"sep\"><span>答</span></div><div class=\"face back\">" + Card.renderHTML(back) + "</div>"
         }
         return """
         <!doctype html><html><head><meta charset="utf-8">
@@ -58,6 +59,12 @@ struct CardWebView: NSViewRepresentable {
         .back { font-size: 17px; color: #3B3833; }
         img { max-width: 100%; height: auto; }
         hr#answer { border: none; border-top: 1px solid rgba(128,128,128,.35); margin: 24px 0; }
+        /* 1.8：书斋风——短的正面（字词、短句）居中放大；正反面之间一枚“答”字小印 */
+        .face.short { text-align: center; font-size: 34px; line-height: 1.5; letter-spacing: .12em; margin: 40px 0 8px; }
+        #answer.sep { display: flex; align-items: center; gap: 14px; margin: 26px 0 22px;
+                      font: 13px "Kaiti SC", "STKaiti", serif; color: #B5493A; }
+        #answer.sep::before, #answer.sep::after { content: ""; flex: 1; border-top: 1px solid rgba(128,128,128,.28); }
+        #answer.sep span { border: 1px solid rgba(181,73,58,.55); border-radius: 3px; padding: 0 4px; line-height: 1.5; }
         .cloze { font-weight: 600; color: #3B73EF; }
         blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgba(128,128,128,.4); color: #555; }
         code, pre { font: 14px ui-monospace, Menlo, monospace; background: rgba(128,128,128,.12); border-radius: 4px; }
@@ -66,14 +73,19 @@ struct CardWebView: NSViewRepresentable {
         .kr-field + .kr-field { margin-top: 14px; }
         /* 1.5：背面的各项内容（答案、各栏目、模板字段）之间用细横线隔开 */
         .back > .kr-field + .kr-field { margin-top: 16px; padding-top: 14px; border-top: 1px dashed rgba(128,128,128,.4); }
-        .kr-label { font-size: 13px; color: #8e8e93; margin-bottom: 2px; }
+        .kr-label { font: 13px "Kaiti SC", "STKaiti", serif; letter-spacing: .08em; color: #9C5B3B; margin-bottom: 2px; }
         details.kr-field > summary { font-size: 14px; color: #8e8e93; cursor: pointer; }
         details.kr-field[open] > summary { margin-bottom: 4px; }
         @media (prefers-color-scheme: dark) {
           body { color: #EDEBE6; } .back { color: #D6D2CA; } .cloze { color: #5B8CF5; } blockquote { color: #bbb; }
+          #answer.sep { color: #D9826F; } .kr-label { color: #C9906F; }
         }
         </style></head><body>\(body)
-        <script>var a=document.getElementById('answer'); if(a){a.scrollIntoView({block:'start'});}</script>
+        <script>(function(){
+          var f=document.querySelector('.face'); if(f){ var t=(f.innerText||'').trim();
+            if(t.length>0 && t.length<=16 && t.indexOf('\\n')<0 && !f.querySelector('img,table,ul,ol,pre,blockquote,details')) f.classList.add('short'); }
+          var a=document.getElementById('answer'); if(a){a.scrollIntoView({block:'start'});}
+        })();</script>
         \(adjustDarkColors ? darkColorScript : "")
         </body></html>
         """
@@ -210,6 +222,16 @@ struct StudyView: View {
                             .padding(.horizontal, 8)
                             .padding(.bottom, 8)
                     }
+                    // 1.8：左侧书脊用牌组的传统色
+                    .overlay {
+                        // 只裁书脊本身，不裁卡片的阴影
+                        Rectangle()
+                            .fill(DeckColors.color(for: card.deck))
+                            .frame(width: 5)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .allowsHitTesting(false)
+                    }
                     .frame(maxWidth: 860, maxHeight: .infinity)
                     .padding(.horizontal, 40)
                     .padding(.top, 24)
@@ -245,13 +267,11 @@ struct StudyView: View {
                 .keyboardShortcut(.escape, modifiers: [])
             Spacer()
             let c = counts
-            HStack(spacing: 14) {
-                Text("新 \(c.new)").foregroundStyle(.blue)
-                Text("学习中 \(c.learning)").foregroundStyle(.red)
-                Text("待复习 \(c.review)").foregroundStyle(.green)
+            HStack(spacing: 16) {
+                headerCount(DeckColors.newColor, "新卡", c.new)
+                headerCount(DeckColors.learnColor, "学习中", c.learning)
+                headerCount(DeckColors.reviewColor, "待复习", c.review)
             }
-            .monospacedDigit()
-            .font(.callout)
             Spacer()
             // 与左边的返回按钮对称，让计数居中
             Label("牌组", systemImage: "chevron.left").hidden()
@@ -260,11 +280,25 @@ struct StudyView: View {
         .padding(.vertical, 10)
     }
 
+    private func headerCount(_ color: Color, _ label: String, _ n: Int) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(label).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
+            Text("\(n)").font(.system(size: 14, weight: .medium, design: .serif).monospacedDigit())
+                .foregroundStyle(n == 0 ? ReviewPalette.sub : ReviewPalette.ink)
+        }
+    }
+
     /// 卡片顶部：牌组、状态、记住概率；右侧原摘录、编辑、暂停
     private func cardHeader(_ card: Card) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "brain.head.profile").foregroundStyle(ReviewPalette.accent)
-            Text(card.deck).font(.system(size: 14, weight: .semibold)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+            let parts = DeckOverview.split(card.deck)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let parent = parts.parent {
+                    Text(parent + " ·").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+                }
+                Text(parts.leaf).font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+            }
             Text(stateLabel(card))
                 .font(.caption)
                 .padding(.horizontal, 7).padding(.vertical, 2)
@@ -300,9 +334,10 @@ struct StudyView: View {
 
     private func stateColor(_ c: Card) -> Color {
         switch c.state {
-        case .new: return .blue
-        case .learning, .relearning: return .red
-        case .review: return .green
+        case .new: return DeckColors.newColor
+        case .learning: return DeckColors.learnColor
+        case .relearning: return DeckColors.seal
+        case .review: return DeckColors.reviewColor
         }
     }
 
@@ -337,10 +372,10 @@ struct StudyView: View {
 
     private func answerColor(_ a: CardAnswer) -> Color {
         switch a {
-        case .again: return ReviewPalette.again
-        case .hard: return ReviewPalette.hard
+        case .again: return DeckColors.seal
+        case .hard: return DeckColors.all[3].color     // 藤黄
         case .good: return ReviewPalette.accent
-        case .easy: return ReviewPalette.easy
+        case .easy: return DeckColors.all[2].color     // 松绿
         }
     }
 
@@ -360,9 +395,9 @@ struct StudyView: View {
         }()
         let dueTomorrow = deckCards.filter { $0.state != .new && !$0.isSuspended && $0.due < tomorrowEnd }.count
         return VStack(spacing: 0) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 34))
-                .foregroundStyle(ReviewPalette.accent)
+            // 1.8：学完盖一枚“日课已毕”
+            SealStamp(text: "日课已毕", size: 20)
+                .padding(.bottom, 4)
             Text(study.notebookId != nil ? "这本笔记本的卡片今天学完了" : "这个牌组今天学完了")
                 .font(.system(size: 26, weight: .semibold, design: .serif))
                 .foregroundStyle(ReviewPalette.ink)
@@ -386,6 +421,10 @@ struct StudyView: View {
                 .font(.system(size: 12.5))
                 .foregroundStyle(ReviewPalette.sub)
                 .padding(.top, 18)
+            Text("温故而知新，可以为师矣。——《论语·为政》")
+                .font(.custom("Kaiti SC", size: 13))
+                .foregroundStyle(ReviewPalette.sub.opacity(0.9))
+                .padding(.top, 10)
             HStack(spacing: 8) {
                 PillButton(icon: "chevron.left", title: "返回牌组", style: .primary) {
                     study.deck = nil

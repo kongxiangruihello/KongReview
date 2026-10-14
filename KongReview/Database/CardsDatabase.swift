@@ -746,3 +746,31 @@ extension AppDatabase {
         }
     }
 }
+
+// MARK: - 1.8：复习热力图
+
+extension AppDatabase {
+    /// 某天以来每天复习记忆卡的次数，以及当天复习最多的牌组（键为本地日期“yyyy-MM-dd”）
+    func cardReviewDays(since: Date) throws -> [String: ReviewHeatmap.Day] {
+        try writer.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT date(e.at, 'localtime') AS d, coalesce(c.deck, '') AS deck, COUNT(*) AS n
+                FROM review_event e LEFT JOIN card c ON c.id = e.cardId
+                WHERE e.kind = 'card' AND e.at >= ?
+                GROUP BY d, deck
+                """, arguments: [since])
+            var out: [String: ReviewHeatmap.Day] = [:]
+            var best: [String: Int] = [:]
+            for r in rows {
+                guard let d: String = r["d"] else { continue }
+                let deck: String = r["deck"] ?? ""
+                let n: Int = r["n"] ?? 0
+                var day = out[d] ?? ReviewHeatmap.Day(count: 0, topDeck: nil)
+                day.count += n
+                if n > best[d, default: 0], !deck.isEmpty { best[d] = n; day.topDeck = deck }
+                out[d] = day
+            }
+            return out
+        }
+    }
+}

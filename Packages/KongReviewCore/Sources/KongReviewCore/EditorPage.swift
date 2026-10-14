@@ -535,10 +535,13 @@ public enum EditorPage {
       }
       function reportHeight() {
         if (!cfg.autoHeight) return;
-        var h = Math.ceil(document.documentElement.scrollHeight);
-        post({ type: 'height', value: h });
+        // 1.8：量内容本身（工具栏 + 编辑区）的高度。以前取 documentElement.scrollHeight，
+        // 它不会小于网页视图当前的高度，所以编辑器只会变高、删了内容也缩不回去
+        var h = Math.ceil(document.body.getBoundingClientRect().height);
+        if (h !== lastHeight) { lastHeight = h; post({ type: 'height', value: h }); }
       }
-      if (window.ResizeObserver) new ResizeObserver(reportHeight).observe(document.body);
+      var lastHeight = -1;
+      if (window.ResizeObserver) { var ro = new ResizeObserver(reportHeight); ro.observe(document.body); ro.observe(ed); }
 
       // ---------------- 命令 ----------------
 

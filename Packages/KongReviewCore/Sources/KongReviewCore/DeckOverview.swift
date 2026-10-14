@@ -89,3 +89,83 @@ public enum DeckOverview {
         return Int(h % UInt64(count))
     }
 }
+
+// MARK: - 复习热力图（1.8）
+
+/// 记忆卡首页“一年来的功课”：按周排列的日历格子（每列一周，周一在上）
+public enum ReviewHeatmap {
+    public struct Day: Hashable, Sendable {
+        public var count: Int
+        /// 这一天复习最多的牌组（格子用它的书脊色）
+        public var topDeck: String?
+        public init(count: Int, topDeck: String?) { self.count = count; self.topDeck = topDeck }
+    }
+
+    /// 以周一为一周开始的公历
+    public static func calendar(_ base: Calendar = .current) -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = base.timeZone
+        c.firstWeekday = 2
+        c.minimumDaysInFirstWeek = 1
+        return c
+    }
+
+    public static func dayKey(_ d: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: d)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// weeks 列，每列 7 格（周一……周日）；最后一列是 end 所在的一周，end 以后的格子为 nil
+    public static func weeks(end: Date, count: Int, calendar base: Calendar = .current) -> [[Date?]] {
+        let cal = calendar(base)
+        let today = cal.startOfDay(for: end)
+        let weekday = (cal.component(.weekday, from: today) + 5) % 7   // 周一 = 0
+        guard let thisMonday = cal.date(byAdding: .day, value: -weekday, to: today),
+              let first = cal.date(byAdding: .day, value: -7 * (max(1, count) - 1), to: thisMonday) else { return [] }
+        return (0..<max(1, count)).map { w in
+            (0..<7).map { d -> Date? in
+                guard let day = cal.date(byAdding: .day, value: w * 7 + d, to: first) else { return nil }
+                return day > today ? nil : day
+            }
+        }
+    }
+
+    /// 深浅等级 0–4：0 为没学；其余按当天次数占最多一天的比例分四档
+    public static func level(_ n: Int, max m: Int) -> Int {
+        guard n > 0, m > 0 else { return 0 }
+        let r = Double(n) / Double(m)
+        if r > 0.75 { return 4 }
+        if r > 0.5 { return 3 }
+        if r > 0.25 { return 2 }
+        return 1
+    }
+
+    /// 连续学习天数：从今天往前数；今天还没学时从昨天数起（今天还没过完，不算断）
+    public static func streak(_ days: Set<String>, today: Date, calendar: Calendar = .current) -> Int {
+        var d = calendar.startOfDay(for: today)
+        if !days.contains(dayKey(d, calendar: calendar)) {
+            guard let y = calendar.date(byAdding: .day, value: -1, to: d) else { return 0 }
+            d = y
+        }
+        var n = 0
+        while days.contains(dayKey(d, calendar: calendar)) {
+            n += 1
+            guard let p = calendar.date(byAdding: .day, value: -1, to: d) else { break }
+            d = p
+        }
+        return n
+    }
+
+    static let monthNames = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
+
+    /// 每列上方的月份标签：这一列第一天的月份与前一列不同时标出（第一列总标）
+    public static func monthLabels(_ weeks: [[Date?]], calendar: Calendar = .current) -> [String?] {
+        var prev: Int?
+        return weeks.map { col in
+            guard let firstDay = col.compactMap({ $0 }).first else { return nil }
+            let m = calendar.component(.month, from: firstDay)
+            defer { prev = m }
+            return m == prev ? nil : monthNames[m - 1]
+        }
+    }
+}

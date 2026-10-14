@@ -107,3 +107,54 @@ final class V17CoreTests: XCTestCase {
         XCTAssertEqual(DeckOverview.chineseDate(d2, calendar: cal), "十二月三十日 · 星期三")
     }
 }
+
+final class V18CoreTests: XCTestCase {
+    var cal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return c
+    }
+    func date(_ y: Int, _ m: Int, _ d: Int) -> Date { cal.date(from: DateComponents(year: y, month: m, day: d, hour: 10))! }
+
+    func testJuanCitation() {
+        XCTAssertEqual(ClassicCitation.juanName("卷七"), "卷七")
+        XCTAssertEqual(ClassicCitation.juanName("卷一百二十九"), "卷一百二十九")
+        XCTAssertEqual(ClassicCitation.juanName("卷三上"), "卷三上")
+        XCTAssertEqual(ClassicCitation.juanName("第七卷"), "卷七")
+        XCTAssertNil(ClassicCitation.juanName("卷首语"))
+        XCTAssertNil(ClassicCitation.juanName("学而"))
+        var s = Source(title: "史记", author: "（汉）司马迁", publisher: "中华书局", year: "1959", place: "北京")
+        s.classicTitle = "史记"
+        XCTAssertEqual(CitationFormatter.citation(for: Highlight(sourceId: 1, text: "x", location: "卷七 项羽本纪 第333页"), source: s),
+                       "（汉）司马迁：《史记》卷七《项羽本纪》，北京：中华书局，1959年，第333页。")
+        XCTAssertEqual(ClassicCitation.short(s, location: "卷一三〇"), "《史记》卷一三〇")
+        XCTAssertEqual(ClassicCitation.short(s, location: "项羽本纪"), "《史记·项羽本纪》")
+        XCTAssertEqual(ClassicCitation.presetAuthor("《史记》"), "（汉）司马迁")
+        XCTAssertNil(ClassicCitation.presetAuthor("论语"))
+        XCTAssertNil(ClassicCitation.presetAuthor("红楼梦"))
+    }
+
+    func testHeatmapWeeks() {
+        // 2026-10-14 是星期三
+        let w = ReviewHeatmap.weeks(end: date(2026, 10, 14), count: 3, calendar: cal)
+        XCTAssertEqual(w.count, 3)
+        XCTAssertEqual(w[2].compactMap { $0 }.count, 3, "本周只到星期三")
+        XCTAssertEqual(ReviewHeatmap.dayKey(w[2][0]!, calendar: cal), "2026-10-12")
+        XCTAssertEqual(ReviewHeatmap.dayKey(w[0][0]!, calendar: cal), "2026-09-28")
+        let labels = ReviewHeatmap.monthLabels(w, calendar: cal)
+        XCTAssertEqual(labels[0], "九月")
+        XCTAssertEqual(labels[1], "十月")
+        XCTAssertNil(labels[2])
+    }
+
+    func testHeatmapLevelAndStreak() {
+        XCTAssertEqual(ReviewHeatmap.level(0, max: 10), 0)
+        XCTAssertEqual(ReviewHeatmap.level(1, max: 10), 1)
+        XCTAssertEqual(ReviewHeatmap.level(6, max: 10), 3)
+        XCTAssertEqual(ReviewHeatmap.level(10, max: 10), 4)
+        let days: Set<String> = ["2026-10-13", "2026-10-12", "2026-10-11", "2026-10-09"]
+        XCTAssertEqual(ReviewHeatmap.streak(days, today: date(2026, 10, 14), calendar: cal), 3)
+        XCTAssertEqual(ReviewHeatmap.streak(days.union(["2026-10-14"]), today: date(2026, 10, 14), calendar: cal), 4)
+        XCTAssertEqual(ReviewHeatmap.streak(days, today: date(2026, 10, 16), calendar: cal), 0)
+    }
+}

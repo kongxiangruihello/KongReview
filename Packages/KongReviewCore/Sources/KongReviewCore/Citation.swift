@@ -182,6 +182,24 @@ public enum ClassicCitation {
     /// 位置 → (篇名, 页码部分)
     public static func split(_ location: String?) -> (chapter: String?, page: String?) {
         guard let loc = location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty else { return (nil, nil) }
+        let merged = tokens(loc)
+        let p = parts(merged)
+        let chapter: String?
+        if let j = p.juan {
+            chapter = ([j] + p.chapters).joined(separator: "·")
+        } else {
+            chapter = p.chapters.isEmpty ? nil : p.chapters.joined(separator: "·")
+        }
+        return (chapter, p.page)
+    }
+
+    /// 1.8：位置拆成卷次、篇名、页码，如“卷七 项羽本纪 第300页”→ (卷七, [项羽本纪], 第300页)
+    public static func components(_ location: String?) -> (juan: String?, chapters: [String], page: String?) {
+        guard let loc = location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty else { return (nil, [], nil) }
+        return parts(tokens(loc))
+    }
+
+    static func tokens(_ loc: String) -> [String] {
         var pieces: [String] = []
         var cur = ""
         for ch in loc {
@@ -190,17 +208,44 @@ public enum ClassicCitation {
             } else { cur.append(ch) }
         }
         if !cur.isEmpty { pieces.append(cur) }
-        // “p. 12”被空格拆开时并回去
         var merged: [String] = []
         for p in pieces {
             if let last = merged.last, ["p", "p.", "pp", "pp."].contains(last.lowercased()), p.first?.isNumber == true {
                 merged[merged.count - 1] = last + " " + p
             } else { merged.append(p) }
         }
+        return merged
+    }
+
+    static func parts(_ merged: [String]) -> (juan: String?, chapters: [String], page: String?) {
         let pages = merged.filter(isPage)
-        let chapters = merged.filter { !isPage($0) }.map(chapterName).filter { !$0.isEmpty }
-        return (chapters.isEmpty ? nil : chapters.joined(separator: "·"),
-                pages.isEmpty ? nil : pages.joined(separator: " "))
+        var juan: String?
+        var chapters: [String] = []
+        for piece in merged where !isPage(piece) {
+            if juan == nil, let j = juanName(piece) { juan = j; continue }
+            let c = chapterName(piece)
+            if !c.isEmpty { chapters.append(c) }
+        }
+        return (juan, chapters, pages.isEmpty ? nil : pages.joined(separator: " "))
+    }
+
+    static let numeralChars = Set("〇零一二三四五六七八九十百千廿卅0123456789")
+
+    /// “卷七”“卷一百二十”“卷三上”“第七卷”→ 卷次（统一写成“卷X”）；不是卷次返回 nil
+    public static func juanName(_ raw: String) -> String? {
+        let t = raw.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("卷") {
+            var body = t.dropFirst()
+            if let last = body.last, "上中下".contains(last) { body = body.dropLast() }
+            guard !body.isEmpty, body.allSatisfy({ numeralChars.contains($0) }) else { return nil }
+            return t
+        }
+        if t.hasPrefix("第"), t.hasSuffix("卷"), t.count > 2 {
+            let body = t.dropFirst().dropLast()
+            guard body.allSatisfy({ numeralChars.contains($0) }) else { return nil }
+            return "卷" + body
+        }
+        return nil
     }
 
     static let ordinalChars = Set("〇零一二三四五六七八九十百廿卅")
@@ -241,10 +286,30 @@ public enum ClassicCitation {
     }
 
     /// 只有书名、篇名：《论语·学而》
+    /// 有卷次时按史部通行写法：《史记》卷七《项羽本纪》
     public static func short(_ s: Source, location: String?) -> String {
         let book = bare(s.classicTitle?.nonEmpty ?? s.title)
-        if let ch = split(location).chapter { return "《\(book)·\(ch)》" }
+        let c = components(location)
+        if let j = c.juan {
+            return "《\(book)》\(j)" + (c.chapters.isEmpty ? "" : "《\(c.chapters.joined(separator: "·"))》")
+        }
+        if !c.chapters.isEmpty { return "《\(book)·\(c.chapters.joined(separator: "·"))》" }
         return "《\(book)》"
+    }
+
+    /// 1.8：常用古籍（原典书名 → 习惯上标注的朝代与作者；经部、子部多不标作者，留空）
+    public static let presets: [(title: String, author: String)] = [
+        ("论语", ""), ("孟子", ""), ("大学", ""), ("中庸", ""), ("周易", ""), ("尚书", ""), ("诗经", ""),
+        ("礼记", ""), ("左传", ""), ("老子", ""), ("庄子", ""), ("荀子", ""), ("韩非子", ""),
+        ("史记", "（汉）司马迁"), ("汉书", "（汉）班固"), ("后汉书", "（南朝宋）范晔"), ("三国志", "（晋）陈寿"),
+        ("资治通鉴", "（宋）司马光"), ("四书章句集注", "（宋）朱熹"), ("朱子语类", "（宋）黎靖德编"),
+        ("传习录", "（明）王守仁"), ("明夷待访录", "（清）黄宗羲"), ("日知录", "（清）顾炎武"),
+    ]
+
+    /// 预设里这部书的作者（没有或不标作者时为 nil）
+    public static func presetAuthor(_ title: String) -> String? {
+        let t = bare(title)
+        return presets.first { $0.title == t }?.author.nonEmpty
     }
 
     /// 脚注：

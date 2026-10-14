@@ -103,6 +103,7 @@ struct DeckHomeView: View {
                     }
                 }
                 legend
+                ReviewHeatmapView()
             }
             .padding(.horizontal, 36)
             .padding(.top, 28)
@@ -407,5 +408,122 @@ struct MaturityBar: View {
         .background(ReviewPalette.hair)
         .clipShape(Capsule())
         .help("熟记 \(m.mature) · 生疏 \(m.young) · 学习中 \(m.learning) · 新卡 \(m.new)" + (m.suspended > 0 ? " · 暂停 \(m.suspended)" : ""))
+    }
+}
+
+// MARK: - 1.8：一年来的功课（复习热力图）
+
+/// 每格一天、每列一周（周一在上）；颜色取当天复习最多的牌组的书脊色，深浅表示复习次数
+struct ReviewHeatmapView: View {
+    @Environment(LibraryStore.self) private var store
+
+    static let cell: CGFloat = 11
+    static let gap: CGFloat = 3
+
+    var body: some View {
+        let _ = store.revision
+        let days = store.reviewHeatmap()
+        let cal = ReviewHeatmap.calendar()
+        let keys = Set(days.filter { $0.value.count > 0 }.keys)
+        let streak = ReviewHeatmap.streak(keys, today: Date(), calendar: cal)
+        let yearAgo = ReviewHeatmap.dayKey(cal.date(byAdding: .day, value: -365, to: Date()) ?? Date(), calendar: cal)
+        let inYear = days.filter { $0.key > yearAgo && $0.value.count > 0 }
+        let total = inYear.values.reduce(0) { $0 + $1.count }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("一年来的功课").font(.system(size: 20, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                Spacer()
+                Text("过去一年学了 \(inYear.count) 天 · 复习 \(total) 次 · 连续 \(streak) 天")
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(ReviewPalette.sub)
+            }
+            .padding(.horizontal, 4)
+            GeometryReader { geo in
+                let weekCount = max(4, min(53, Int((geo.size.width - 22) / (Self.cell + Self.gap))))
+                grid(days: days, weeks: ReviewHeatmap.weeks(end: Date(), count: weekCount, calendar: cal), calendar: cal)
+            }
+            .frame(height: 7 * (Self.cell + Self.gap) + 18)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ReviewPalette.hair))
+            HStack(spacing: 6) {
+                Text("颜色取当天复习最多的牌组的书脊色。少").foregroundStyle(ReviewPalette.sub)
+                ForEach(0..<5, id: \.self) { l in
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(l == 0 ? ReviewPalette.hair : DeckColors.all[2].color.opacity(Self.opacity(l)))
+                        .frame(width: Self.cell, height: Self.cell)
+                }
+                Text("多").foregroundStyle(ReviewPalette.sub)
+            }
+            .font(.system(size: 11.5))
+            .padding(.horizontal, 4)
+        }
+    }
+
+    static func opacity(_ level: Int) -> Double { [0, 0.28, 0.5, 0.75, 1][max(0, min(4, level))] }
+
+    private func grid(days: [String: ReviewHeatmap.Day], weeks: [[Date?]], calendar: Calendar) -> some View {
+        let maxCount = weeks.joined().compactMap { $0 }.map { days[ReviewHeatmap.dayKey($0, calendar: calendar)]?.count ?? 0 }.max() ?? 0
+        let labels = ReviewHeatmap.monthLabels(weeks, calendar: calendar)
+        let step = Self.cell + Self.gap
+        return HStack(alignment: .top, spacing: 4) {
+            VStack(alignment: .trailing, spacing: 0) {
+                Color.clear.frame(height: 18)
+                ForEach(0..<7, id: \.self) { i in
+                    Text(i % 2 == 0 ? ["一", "", "三", "", "五", "", "日"][i] : "")
+                        .font(.system(size: 9))
+                        .foregroundStyle(ReviewPalette.sub)
+                        .frame(width: 14, height: step, alignment: .trailing)
+                }
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(labels.enumerated()), id: \.offset) { i, label in
+                        if let label {
+                            Text(label).font(.system(size: 9.5)).foregroundStyle(ReviewPalette.sub)
+                                .fixedSize()
+                                .offset(x: CGFloat(i) * step)
+                        }
+                    }
+                }
+                .frame(height: 18, alignment: .topLeading)
+                HStack(alignment: .top, spacing: Self.gap) {
+                    ForEach(Array(weeks.enumerated()), id: \.offset) { _, col in
+                        VStack(spacing: Self.gap) {
+                            ForEach(0..<7, id: \.self) { r in
+                                cellView(col[r], days: days, maxCount: maxCount, calendar: calendar)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cellView(_ date: Date?, days: [String: ReviewHeatmap.Day], maxCount: Int, calendar: Calendar) -> some View {
+        if let date {
+            let key = ReviewHeatmap.dayKey(date, calendar: calendar)
+            let day = days[key]
+            let n = day?.count ?? 0
+            let level = ReviewHeatmap.level(n, max: maxCount)
+            let tint = day?.topDeck.map { DeckColors.color(for: $0) } ?? DeckColors.all[2].color
+            let isToday = calendar.isDateInToday(date)
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(level == 0 ? ReviewPalette.hair : tint.opacity(Self.opacity(level)))
+                .frame(width: Self.cell, height: Self.cell)
+                .overlay(RoundedRectangle(cornerRadius: 2.5).stroke(isToday ? ReviewPalette.ink.opacity(0.5) : .clear, lineWidth: 1))
+                .help(Self.tooltip(date, n: n, deck: day?.topDeck, calendar: calendar))
+        } else {
+            Color.clear.frame(width: Self.cell, height: Self.cell)
+        }
+    }
+
+    static func tooltip(_ d: Date, n: Int, deck: String?, calendar: Calendar) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: d)
+        let date = "\(c.year ?? 0)年\(c.month ?? 0)月\(c.day ?? 0)日"
+        guard n > 0 else { return date + "：没有复习" }
+        return date + "：复习 \(n) 次" + (deck.map { "（主要是“\($0)”）" } ?? "")
     }
 }

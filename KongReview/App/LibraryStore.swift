@@ -51,6 +51,8 @@ final class LibraryStore {
     @ObservationIgnored var mergeBackupDone = false
     /// 1.3：每周小结（按周缓存）
     @ObservationIgnored var weeklyDigestCache: WeeklyDigest?
+    /// 1.8：记忆卡首页热力图（键为“数据版本|日期”）
+    @ObservationIgnored var heatmapCache: (key: String, days: [String: ReviewHeatmap.Day])?
     var trashCount = 0
     var articleCount = 0
 

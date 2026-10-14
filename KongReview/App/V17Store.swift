@@ -177,3 +177,17 @@ extension LibraryStore {
         }
     }
 }
+
+// MARK: - 1.8：复习热力图
+
+extension LibraryStore {
+    /// 过去约一年每天的记忆卡复习（数据变化或换日时重新查询）
+    func reviewHeatmap(now: Date = Date()) -> [String: ReviewHeatmap.Day] {
+        let key = "\(revision)|\(ReviewHeatmap.dayKey(now))"
+        if let c = heatmapCache, c.key == key { return c.days }
+        let since = Calendar.current.date(byAdding: .day, value: -380, to: Calendar.current.startOfDay(for: now)) ?? now
+        let days = (try? db.cardReviewDays(since: since)) ?? [:]
+        heatmapCache = (key, days)
+        return days
+    }
+}

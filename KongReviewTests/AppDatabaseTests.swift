@@ -1260,3 +1260,20 @@ final class V17Tests: XCTestCase {
     XCTAssertEqual(s.doneToday, 0)
   }
 }
+
+final class V18Tests: XCTestCase {
+  func testCardReviewDays() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let a = try db.save(Card(deck: "甲", front: "1"))
+    let b = try db.save(Card(deck: "乙", front: "2"))
+    let now = Date()
+    _ = try db.answer(a, .good, now: now)
+    _ = try db.answer(b, .good, now: now)
+    _ = try db.answer(try db.card(id: b.id!)!, .good, now: now.addingTimeInterval(1))
+    let days = try db.cardReviewDays(since: now.addingTimeInterval(-86400 * 3))
+    let key = ReviewHeatmap.dayKey(now)
+    XCTAssertEqual(days[key]?.count, 3)
+    XCTAssertEqual(days[key]?.topDeck, "乙")
+    XCTAssertEqual(days.count, 1)
+  }
+}

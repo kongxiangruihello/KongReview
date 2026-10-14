@@ -88,6 +88,14 @@ struct RichEditorRep: NSViewRepresentable {
         LocalSchemeHandler.register(on: config, store: store)
         let wv = EditorWebView(frame: .zero, configuration: config)
         wv.passScroll = autoHeight
+        // 1.8：同一个位置上次留下的高度（可能是另一张卡的长内容）不沿用，等网页量好再定
+        if autoHeight {
+            let key = slot
+            DispatchQueue.main.async { [weak c] in
+                // 网页已经报过高度就不要再清掉（否则高度不变时不会再报，编辑器会缩回最小高度）
+                if c?.gotHeight != true { WebHeights.shared.values[key] = nil }
+            }
+        }
         wv.setValue(false, forKey: "drawsBackground")
         wv.navigationDelegate = c
         c.lastValue = text
@@ -124,6 +132,8 @@ struct RichEditorRep: NSViewRepresentable {
         var wantsFocus = false
         var pendingSelectAll = false
         var pending: String?
+        /// 1.8：网页是否已经报过内容高度
+        var gotHeight = false
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             ready = true
@@ -152,6 +162,7 @@ struct RichEditorRep: NSViewRepresentable {
                 if p.text != v { p.text = v }
             case "height":
                 guard let h = (body["value"] as? NSNumber).map({ CGFloat($0.doubleValue) }), h > 0 else { return }
+                gotHeight = true
                 if WebHeights.shared.values[p.slot] != h { WebHeights.shared.values[p.slot] = h }
             case "submit":
                 p.onSubmit?()
