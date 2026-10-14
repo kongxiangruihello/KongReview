@@ -38,6 +38,9 @@ public struct Source: Codable, Identifiable, Hashable, Sendable {
     public var issue: String?
     /// ISBN（用于取封面）；可空
     public var isbn: String?
+    /// 1.7：古籍原典书名（如“论语”）。非空时脚注按古籍篇章体例写成“《论语·学而》”，
+    /// 与书名不同时（注本、整理本，如《论语译注》）再接整理本的出版信息与页码
+    public var classicTitle: String?
 
     public init(
         id: Int64? = nil,
@@ -68,7 +71,11 @@ public struct Source: Codable, Identifiable, Hashable, Sendable {
         self.container = container
         self.issue = issue
         self.isbn = nil
+        self.classicTitle = nil
     }
+
+    /// 1.7：是否按古籍篇章体例引用
+    public var isClassic: Bool { !(classicTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) }
 }
 
 // MARK: - 摘录

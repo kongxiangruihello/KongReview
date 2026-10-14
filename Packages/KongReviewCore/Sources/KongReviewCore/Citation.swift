@@ -29,6 +29,7 @@ public enum CitationFormatter {
     // MARK: 中文脚注
 
     static func footnote(_ s: Source, location: String?) -> String {
+        if s.isClassic { return ClassicCitation.footnote(s, location: location) }
         var parts: [String] = []
         let author = s.author.trimmingCharacters(in: .whitespaces)
         let title = "《\(s.title)》"
@@ -152,6 +153,122 @@ extension String {
     var nonEmpty: String? {
         let t = trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
+    }
+}
+
+// MARK: - 古籍篇章体例（1.7）
+
+/// 古籍按“《书名·篇名》”引用（如《论语·学而》《孟子·梁惠王上》《史记·项羽本纪》）。
+///
+/// 依据：《历史研究》等刊物通行的引文注释规范——常用古籍可只标书名、篇名，用间隔号“·”连接；
+/// 引自今人注本、整理本时，其后再注明整理本的责任者、书名、出版信息与页码。
+/// 篇名取自摘录的“位置”：去掉其中的页码部分（“第3页”“p. 3”），余下的就是篇名；
+/// “学而第一”“学而篇”这类带篇次的写法简化为“学而”。
+public enum ClassicCitation {
+
+    static let separators: Set<Character> = ["·", "・", "•", "，", ",", "；", ";", "|", "/", "／"]
+
+    /// 是否像页码：含“页”，“p. 12”“pp.12”，或整个是数字与连接号
+    static func isPage(_ piece: String) -> Bool {
+        let t = piece.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return false }
+        if t.contains("页") { return true }
+        let lower = t.lowercased()
+        if lower.hasPrefix("p"), lower.dropFirst().contains(where: { $0.isNumber }),
+           lower.allSatisfy({ $0.isNumber || "p. -–—~～".contains($0) }) { return true }
+        return t.allSatisfy { $0.isNumber || " -–—~～".contains($0) }
+    }
+
+    /// 位置 → (篇名, 页码部分)
+    public static func split(_ location: String?) -> (chapter: String?, page: String?) {
+        guard let loc = location?.trimmingCharacters(in: .whitespacesAndNewlines), !loc.isEmpty else { return (nil, nil) }
+        var pieces: [String] = []
+        var cur = ""
+        for ch in loc {
+            if separators.contains(ch) || ch == " " || ch == "\u{3000}" {
+                if !cur.isEmpty { pieces.append(cur); cur = "" }
+            } else { cur.append(ch) }
+        }
+        if !cur.isEmpty { pieces.append(cur) }
+        // “p. 12”被空格拆开时并回去
+        var merged: [String] = []
+        for p in pieces {
+            if let last = merged.last, ["p", "p.", "pp", "pp."].contains(last.lowercased()), p.first?.isNumber == true {
+                merged[merged.count - 1] = last + " " + p
+            } else { merged.append(p) }
+        }
+        let pages = merged.filter(isPage)
+        let chapters = merged.filter { !isPage($0) }.map(chapterName).filter { !$0.isEmpty }
+        return (chapters.isEmpty ? nil : chapters.joined(separator: "·"),
+                pages.isEmpty ? nil : pages.joined(separator: " "))
+    }
+
+    static let ordinalChars = Set("〇零一二三四五六七八九十百廿卅")
+
+    /// “学而第一”→“学而”，“学而篇”→“学而”，“《学而》”→“学而”；“第一章”这类整个是篇次的保持原样
+    public static func chapterName(_ raw: String) -> String {
+        var t = raw.trimmingCharacters(in: .whitespaces)
+        t = t.trimmingCharacters(in: CharacterSet(charactersIn: "《》〈〉<>"))
+        if let r = t.range(of: "第", options: .backwards), r.lowerBound != t.startIndex {
+            let tail = t[r.upperBound...]
+            if !tail.isEmpty, tail.allSatisfy({ ordinalChars.contains($0) || $0.isNumber }) {
+                t = String(t[..<r.lowerBound])
+            }
+        }
+        if t.count > 1, t.hasSuffix("篇") { t.removeLast() }
+        return t.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 打开“古籍体例”时预填的原典书名：去掉书名里“译注”“集解”“校注”“今注今译”之类的后缀
+    public static func guessClassicTitle(_ title: String) -> String {
+        var t = bare(title)
+        let suffixes = ["今注今译", "译注", "集解", "集释", "集注", "校注", "校释", "正义", "注疏", "新注", "今注", "今译",
+                        "通释", "解题", "讲义", "选注", "选译", "全译", "注", "疏"]
+        var changed = true
+        while changed {
+            changed = false
+            for s in suffixes where t.count > s.count + 1 && t.hasSuffix(s) {
+                t.removeLast(s.count)
+                changed = true
+                break
+            }
+        }
+        return t
+    }
+
+    static func bare(_ title: String) -> String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "《》"))
+    }
+
+    /// 只有书名、篇名：《论语·学而》
+    public static func short(_ s: Source, location: String?) -> String {
+        let book = bare(s.classicTitle?.nonEmpty ?? s.title)
+        if let ch = split(location).chapter { return "《\(book)·\(ch)》" }
+        return "《\(book)》"
+    }
+
+    /// 脚注：
+    /// - 原典本身（原典书名与书名相同）：（汉）司马迁：《史记·项羽本纪》，北京：中华书局，1959年，第300页。
+    /// - 注本、整理本：《论语·学而》，杨伯峻：《论语译注》，北京：中华书局，1980年，第3页。
+    static func footnote(_ s: Source, location: String?) -> String {
+        let parts = split(location)
+        let head = short(s, location: location)
+        var plain = s
+        plain.classicTitle = nil
+        let sameBook = bare(s.classicTitle ?? "") == bare(s.title)
+        if sameBook {
+            // 用普通脚注生成出版信息，再把开头的《书名》换成《书名·篇名》
+            var rest = CitationFormatter.footnote(plain, location: parts.page)
+            let author = s.author.trimmingCharacters(in: .whitespaces)
+            let oldHead = author.isEmpty ? "《\(s.title)》" : "\(author)：《\(s.title)》"
+            if rest.hasPrefix(oldHead) {
+                rest.removeFirst(oldHead.count)
+                return (author.isEmpty ? head : "\(author)：\(head)") + rest
+            }
+            return head + "。"
+        }
+        let edition = CitationFormatter.footnote(plain, location: parts.page)
+        return head + "，" + edition
     }
 }
 

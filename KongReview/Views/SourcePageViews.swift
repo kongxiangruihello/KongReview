@@ -48,6 +48,24 @@ struct SourcePageHeader: View {
                 .fixedSize()
                 .help("按页码：没有页码的摘录排在最后")
                 HStack(spacing: 8) {
+                    Button {
+                        store.reviewSource(sourceId)
+                    } label: {
+                        Label("回顾这本书", systemImage: "sun.max")
+                    }
+                    .buttonStyle(.borderless)
+                    .handCursor()
+                    .disabled(stats.total == 0)
+                    .help("在“今日回顾”里按页码顺序把这本书的摘录从头过一遍")
+                    Button {
+                        store.openPageRange(sourceId)
+                    } label: {
+                        Label("按页码…", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    }
+                    .buttonStyle(.borderless)
+                    .handCursor()
+                    .disabled(stats.withPage == 0)
+                    .help("选一个页码范围：回顾这一段、做成记忆卡、导出，或选中后批量加标签等")
                     Menu {
                         Button("Word 文档…") { ReadingNotesExport.export(store: store, sourceId: sourceId, format: .docx) }
                         Button("Markdown…") { ReadingNotesExport.export(store: store, sourceId: sourceId, format: .markdown) }
@@ -71,6 +89,9 @@ struct SourcePageHeader: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(ReviewPalette.card)
+        .sheet(item: Bindable(store).pageRange) { draft in
+            PageRangeSheet(draft: draft)
+        }
     }
 
     private func stat(_ number: String, _ label: String) -> some View {
@@ -85,13 +106,13 @@ struct SourcePageHeader: View {
 enum ReadingNotesExport {
     enum Format { case docx, markdown }
 
-    static func export(store: LibraryStore, sourceId: Int64, format: Format) {
+    static func export(store: LibraryStore, sourceId: Int64, format: Format, pages: ClosedRange<Int>? = nil) {
         guard let source = store.sources.first(where: { $0.id == sourceId }) else { return }
-        let hs = (try? store.db.sourceHighlightsByPage(sourceId)) ?? []
-        guard !hs.isEmpty else { store.infoMessage = "这个出处下还没有摘录。"; return }
+        let hs = (try? store.db.sourceHighlights(sourceId, pages: pages)) ?? []
+        guard !hs.isEmpty else { store.infoMessage = pages == nil ? "这个出处下还没有摘录。" : "这个页码范围内没有摘录。"; return }
         let bib = Bibliography.entries([source], order: .authorYear).first ?? ""
         let pieces = ReadingNotes.pieces(bibliography: bib, highlights: hs)
-        let title = "《\(source.title)》读书笔记"
+        let title = "《\(source.title)》读书笔记" + (pages.map { "（\(LibraryStore.pageLabel($0))）" } ?? "")
         let options = NotebookExportOptions(footnotes: false, bibliography: [], toc: false)
         switch format {
         case .docx:
@@ -106,5 +127,89 @@ enum ReadingNotesExport {
                 store.report(error)
             }
         }
+    }
+}
+
+// MARK: - 1.7：按页码范围批量
+
+struct PageRangeSheet: View {
+    @Environment(LibraryStore.self) private var store
+    let draft: PageRangeDraft
+
+    var body: some View {
+        let _ = store.revision
+        let source = store.sources.first { $0.id == draft.sourceId }
+        let range = draft.range
+        let hits = range.flatMap { try? store.db.sourceHighlights(draft.sourceId, pages: $0) } ?? []
+        let stats = (try? store.db.sourcePageStats(draft.sourceId)) ?? SourcePageStats()
+        VStack(alignment: .leading, spacing: 14) {
+            Text("按页码范围").font(.title2.bold())
+            if let source {
+                Text("《\(source.title)》" + ((stats.firstPage != nil && stats.lastPage != nil) ? "：摘录分布在第 \(stats.firstPage!)–\(stats.lastPage!) 页" : ""))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Text("第")
+                TextField("起", text: Bindable(draft).fromText).textFieldStyle(.roundedBorder).frame(width: 70)
+                Text("页 至 第")
+                TextField("止", text: Bindable(draft).toText).textFieldStyle(.roundedBorder).frame(width: 70)
+                Text("页")
+                Spacer()
+                Text(range == nil ? "请输入页码" : "\(hits.count) 条摘录")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(hits.isEmpty ? Color.secondary : ReviewPalette.accent)
+            }
+            Text("只填一头表示另一头不限；没有页码的摘录不在范围内。页码取摘录“位置”里的第一个数字。")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                action("回顾这一段", "sun.max", "在“今日回顾”里按页码顺序过一遍") {
+                    if let r = range { store.pageRange = nil; store.reviewSource(draft.sourceId, pages: r) }
+                }
+                action("做成记忆卡", "rectangle.on.rectangle.angled", "放进以书名命名的牌组“\(source?.title ?? "")”；已有卡片的不重复做") {
+                    if let r = range { store.makeCardsForPageRange(draft.sourceId, r) }
+                }
+                action("导出这一段的读书笔记（Word）", "doc.richtext", "按页码排列，附位置与按语") {
+                    if let r = range {
+                        store.pageRange = nil
+                        ReadingNotesExport.export(store: store, sourceId: draft.sourceId, format: .docx, pages: r)
+                    }
+                }
+                action("在列表中选中", "checklist", "选中后用工具栏的“批量操作”：加标签、移到出处、加入笔记本、弃置……") {
+                    if let r = range { store.selectPageRange(draft.sourceId, r) }
+                }
+            }
+            .disabled(hits.isEmpty)
+            HStack {
+                Spacer()
+                Button("关闭", role: .cancel) { store.pageRange = nil }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 460)
+    }
+
+    private func action(_ title: String, _ icon: String, _ detail: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(ReviewPalette.accent)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 13.5, weight: .medium)).foregroundStyle(ReviewPalette.ink)
+                    Text(detail).font(.caption).foregroundStyle(ReviewPalette.sub)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(ReviewPalette.sub)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 9).fill(ReviewPalette.page))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .handCursor()
     }
 }

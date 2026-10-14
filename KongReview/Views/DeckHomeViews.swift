@@ -1,0 +1,411 @@
+import SwiftUI
+import AppKit
+import KongReviewCore
+
+// MARK: - 1.7：记忆卡首页（牌组）重新设计
+//
+// 版式取“书斋”意趣：暖白纸色底、宋体标题、传统色书脊、印章表示“今日已毕”；
+// 顶部是今天的功课（还剩多少、已复习多少、预计用时），下面是牌组卡片网格。
+
+/// 牌组书脊用的传统色（色值为常见“中国传统色”色卡的近似值，略压暗以保证白底上的对比度）
+enum DeckColors {
+    static let all: [(name: String, color: Color)] = [
+        ("石青", Color(red: 0x1D / 255, green: 0x6F / 255, blue: 0x93 / 255)),
+        ("朱砂", Color(red: 0xB5 / 255, green: 0x49 / 255, blue: 0x3A / 255)),
+        ("松绿", Color(red: 0x2F / 255, green: 0x6B / 255, blue: 0x4F / 255)),
+        ("藤黄", Color(red: 0xC2 / 255, green: 0x8E / 255, blue: 0x1E / 255)),
+        ("黛蓝", Color(red: 0x42 / 255, green: 0x50 / 255, blue: 0x66 / 255)),
+        ("赭石", Color(red: 0x9C / 255, green: 0x5B / 255, blue: 0x3B / 255)),
+        ("胭脂", Color(red: 0x9D / 255, green: 0x29 / 255, blue: 0x33 / 255)),
+        ("竹青", Color(red: 0x5E / 255, green: 0x7D / 255, blue: 0x4E / 255)),
+    ]
+    static func color(for deck: String) -> Color {
+        all[DeckOverview.colorIndex(deck, count: all.count)].color
+    }
+    /// 印泥红
+    static let seal = Color(red: 0xC0 / 255, green: 0x2C / 255, blue: 0x38 / 255)
+    static let newColor = ReviewPalette.accent
+    static let learnColor = ReviewPalette.hard
+    static let reviewColor = ReviewPalette.easy
+}
+
+/// 印章：两字竖排或四字两列（自右向左读）
+struct SealStamp: View {
+    let text: String
+    var size: CGFloat = 13
+
+    var body: some View {
+        let chars = text.map(String.init)
+        let columns: [[String]] = chars.count <= 2
+            ? [chars]
+            : [Array(chars.prefix(2)), Array(chars.dropFirst(2).prefix(2))].reversed()
+        HStack(spacing: size * 0.12) {
+            ForEach(Array(columns.enumerated()), id: \.offset) { _, col in
+                VStack(spacing: 0) {
+                    ForEach(Array(col.enumerated()), id: \.offset) { _, c in
+                        Text(c).font(.custom("Kaiti SC", size: size).weight(.bold))
+                    }
+                }
+            }
+        }
+        .foregroundStyle(DeckColors.seal)
+        .padding(.horizontal, size * 0.32)
+        .padding(.vertical, size * 0.22)
+        .overlay(RoundedRectangle(cornerRadius: size * 0.22).stroke(DeckColors.seal, lineWidth: max(1.2, size * 0.1)))
+        .opacity(0.86)
+        .rotationEffect(.degrees(-7))
+        .accessibilityLabel(text)
+    }
+}
+
+/// 今日进度环
+struct DailyRing: View {
+    let done: Int
+    let remaining: Int
+
+    var body: some View {
+        let total = done + remaining
+        let p = total == 0 ? 0 : Double(done) / Double(total)
+        ZStack {
+            Circle().stroke(ReviewPalette.hair, lineWidth: 9)
+            Circle()
+                .trim(from: 0, to: max(0.001, p))
+                .stroke(DeckColors.reviewColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .opacity(total == 0 ? 0 : 1)
+            VStack(spacing: 2) {
+                Text("\(done)")
+                    .font(.system(size: 30, weight: .medium, design: .serif).monospacedDigit())
+                    .foregroundStyle(ReviewPalette.ink)
+                Text("今天已复习").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+            }
+        }
+        .frame(width: 118, height: 118)
+        .help(total == 0 ? "今天还没有到期的卡片" : "今天完成 \(Int((p * 100).rounded()))%（已复习 \(done) 张，还剩 \(remaining) 张）")
+    }
+}
+
+struct DeckHomeView: View {
+    @Environment(LibraryStore.self) private var store
+    let decks: [DeckSummary]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                hero
+                VStack(alignment: .leading, spacing: 14) {
+                    sectionHeader
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 560), spacing: 18, alignment: .top)],
+                              alignment: .leading, spacing: 18) {
+                        ForEach(decks) { d in
+                            DeckTile(deck: d, all: decks)
+                        }
+                    }
+                }
+                legend
+            }
+            .padding(.horizontal, 36)
+            .padding(.top, 28)
+            .padding(.bottom, 40)
+            .frame(maxWidth: 1120)
+            .frame(maxWidth: .infinity)
+        }
+        .background(ReviewPalette.page)
+    }
+
+    // MARK: 今日功课
+
+    private var totals: (due: StudyQueue.Counts, done: Int) {
+        var c = StudyQueue.Counts()
+        var done = 0
+        for d in decks {
+            c.new += d.counts.new; c.learning += d.counts.learning; c.review += d.counts.review
+            done += d.doneToday
+        }
+        return (c, done)
+    }
+
+    /// “开始复习”默认的牌组：上次学的（如果还有卡），否则待学最多的
+    private var suggestedDeck: DeckSummary? {
+        if let last = store.study.lastDeck, let d = decks.first(where: { $0.name == last && $0.counts.total > 0 }) { return d }
+        return decks.filter { $0.counts.total > 0 }.max { $0.counts.total < $1.counts.total }
+    }
+
+    private var hero: some View {
+        let t = totals
+        let remaining = t.due.total
+        return HStack(alignment: .center, spacing: 24) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(DeckOverview.chineseDate(Date()))
+                    .font(.system(size: 12, weight: .medium))
+                    .tracking(2)
+                    .foregroundStyle(ReviewPalette.sub)
+                headline(remaining: remaining, done: t.done)
+                    .padding(.top, 10)
+                HStack(spacing: 18) {
+                    dot(DeckColors.newColor, "新卡", t.due.new)
+                    dot(DeckColors.learnColor, "学习中", t.due.learning)
+                    dot(DeckColors.reviewColor, "待复习", t.due.review)
+                    if remaining > 0 {
+                        Text("约 \(DeckOverview.estimatedMinutes(t.due)) 分钟")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(ReviewPalette.sub)
+                    }
+                }
+                .padding(.top, 12)
+                HStack(spacing: 10) {
+                    if let d = suggestedDeck {
+                        PillButton(icon: "play.fill", title: "开始复习：\(DeckOverview.split(d.name).leaf)", style: .primary) {
+                            store.startStudy(deck: d.name)
+                        }
+                        .help("学习牌组“\(d.name)”")
+                    }
+                    PillButton(icon: "plus", title: "新建卡片") { store.newCard(deck: store.study.lastDeck) }
+                }
+                .padding(.top, 20)
+                Text("学而时习之，不亦说乎？——《论语·学而》")
+                    .font(.custom("Kaiti SC", size: 12.5))
+                    .foregroundStyle(ReviewPalette.sub.opacity(0.85))
+                    .padding(.top, 18)
+            }
+            Spacer(minLength: 12)
+            ZStack(alignment: .topTrailing) {
+                DailyRing(done: t.done, remaining: remaining)
+                    .padding(8)
+                if remaining == 0 && t.done > 0 {
+                    SealStamp(text: "日课已毕", size: 14)
+                        .offset(x: 14, y: -10)
+                }
+            }
+        }
+        .padding(.horizontal, 32)
+        .padding(.vertical, 26)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(ReviewPalette.card)
+                .overlay(alignment: .bottomTrailing) {
+                    // 淡淡的水墨晕染
+                    Circle()
+                        .fill(RadialGradient(colors: [ReviewPalette.accent.opacity(0.07), .clear],
+                                             center: .center, startRadius: 0, endRadius: 180))
+                        .frame(width: 360, height: 360)
+                        .offset(x: 120, y: 150)
+                        .allowsHitTesting(false)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ReviewPalette.hair))
+        .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
+        .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.07), radius: 16, y: 8)
+    }
+
+    @ViewBuilder
+    private func headline(remaining: Int, done: Int) -> some View {
+        let font = Font.system(size: 30, weight: .semibold, design: .serif)
+        if remaining > 0 {
+            Text("今天还有 \(Text("\(remaining)").foregroundStyle(ReviewPalette.accent)) 张卡片等你")
+                .font(font)
+                .foregroundStyle(ReviewPalette.ink)
+        } else if done > 0 {
+            Text("今日功课已毕").font(font).foregroundStyle(ReviewPalette.ink)
+        } else {
+            Text("今天没有到期的卡片").font(font).foregroundStyle(ReviewPalette.ink)
+        }
+    }
+
+    private func dot(_ color: Color, _ label: String, _ n: Int) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(label).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
+            Text("\(n)").font(.system(size: 12.5, weight: .semibold).monospacedDigit()).foregroundStyle(ReviewPalette.ink)
+        }
+    }
+
+    // MARK: 牌组
+
+    private var sectionHeader: some View {
+        let total = decks.reduce(0) { $0 + $1.total }
+        let m = decks.reduce(DeckMaturity()) { $0 + $1.maturity }
+        return HStack(alignment: .firstTextBaseline) {
+            Text("牌组").font(.system(size: 20, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+            Spacer()
+            Text("\(decks.count) 个牌组 · 共 \(total) 张" + (m.matureRatio.map { " · 熟记 \(Int(($0 * 100).rounded()))%" } ?? ""))
+                .font(.system(size: 12))
+                .foregroundStyle(ReviewPalette.sub)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var legend: some View {
+        HStack(spacing: 14) {
+            Text("条形图").foregroundStyle(ReviewPalette.sub)
+            swatch(DeckColors.all[2].color, "书脊色：熟记（间隔 ≥ 21 天）")
+            swatch(DeckColors.all[2].color.opacity(0.4), "浅色：生疏")
+            swatch(DeckColors.learnColor, "学习中")
+            swatch(DeckColors.newColor.opacity(0.25), "新卡")
+            Spacer()
+            Text("右键牌组可重命名、设置每日上限与算法（SM-2 / FSRS）。未单独设置的牌组：每天新卡 \(CardSettings.newPerDay)、复习 \(CardSettings.reviewsPerDay)。")
+                .foregroundStyle(ReviewPalette.sub)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(.system(size: 11.5))
+        .padding(.horizontal, 4)
+    }
+
+    private func swatch(_ c: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 2).fill(c).frame(width: 14, height: 6)
+            Text(label).foregroundStyle(ReviewPalette.sub)
+        }
+        .fixedSize()
+    }
+}
+
+/// 一个牌组：传统色书脊、宋体名、三项计数、熟练度条、操作
+struct DeckTile: View {
+    @Environment(LibraryStore.self) private var store
+    let deck: DeckSummary
+    let all: [DeckSummary]
+
+    var body: some View {
+        let tint = DeckColors.color(for: deck.name)
+        let parts = DeckOverview.split(deck.name)
+        let o = store.options(for: deck.name)
+        let finishedToday = deck.counts.total == 0 && deck.maturity.active > 0 && deck.doneToday > 0
+        return HStack(spacing: 0) {
+            Rectangle().fill(tint).frame(width: 5)
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(parts.parent ?? " ")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(parts.parent == nil ? Color.clear : ReviewPalette.sub)
+                        .lineLimit(1)
+                    Text(parts.leaf)
+                        .font(.system(size: 20, weight: .semibold, design: .serif))
+                        .foregroundStyle(ReviewPalette.ink)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(.trailing, finishedToday ? 56 : 0)
+                HStack(spacing: 0) {
+                    stat("新卡", deck.counts.new, DeckColors.newColor)
+                    Rectangle().fill(ReviewPalette.hair).frame(width: 1, height: 30)
+                    stat("学习中", deck.counts.learning, DeckColors.learnColor)
+                    Rectangle().fill(ReviewPalette.hair).frame(width: 1, height: 30)
+                    stat("待复习", deck.counts.review, DeckColors.reviewColor)
+                }
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(ReviewPalette.soft))
+                VStack(alignment: .leading, spacing: 6) {
+                    MaturityBar(m: deck.maturity, tint: tint)
+                    HStack {
+                        Text("共 \(deck.total) 张" + (deck.maturity.matureRatio.map { " · 熟记 \(Int(($0 * 100).rounded()))%" } ?? " · 尚未开始"))
+                        Spacer()
+                        if deck.maturity.suspended > 0 { Text("暂停 \(deck.maturity.suspended)") }
+                        if deck.maturity.new > deck.counts.new && deck.maturity.new > 0 { Text("新卡尚余 \(deck.maturity.new)") }
+                    }
+                    .font(.system(size: 11.5).monospacedDigit())
+                    .foregroundStyle(ReviewPalette.sub)
+                }
+                HStack(spacing: 8) {
+                    Text(o.algorithm == .fsrs ? "FSRS \(Int((o.desiredRetention * 100).rounded()))%" : "SM-2")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(ReviewPalette.sub)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(ReviewPalette.soft))
+                        .overlay(Capsule().stroke(ReviewPalette.hair))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .help("排程算法；每天新卡 \(o.newPerDay ?? CardSettings.newPerDay) 张、复习 \(o.reviewsPerDay ?? CardSettings.reviewsPerDay) 张（右键“牌组选项…”修改）")
+                    Spacer(minLength: 4)
+                    PillButton(title: "浏览") {
+                        store.study.browseSelection = []
+                        store.study.browsingDeck = deck.name
+                    }
+                    .fixedSize()
+                    PillButton(icon: finishedToday ? nil : "play.fill", title: "学习", style: .primary, disabled: deck.counts.total == 0) {
+                        store.startStudy(deck: deck.name)
+                    }
+                    .fixedSize()
+                }
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 18)
+            .padding(.vertical, 16)
+        }
+        .background {
+            ZStack(alignment: .bottomTrailing) {
+                ReviewPalette.card
+                // 牌组名首字作水印
+                Text(String(parts.leaf.prefix(1)))
+                    .font(.system(size: 120, weight: .bold, design: .serif))
+                    .foregroundStyle(tint.opacity(0.05))
+                    .offset(x: 12, y: 34)
+                    .allowsHitTesting(false)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ReviewPalette.hair))
+        .overlay(alignment: .topTrailing) {
+            if finishedToday {
+                SealStamp(text: "今日已毕", size: 13)
+                    .padding(.top, 16)
+                    .padding(.trailing, 18)
+                    .help("这个牌组今天学完了")
+            }
+        }
+        .shadow(color: .black.opacity(0.03), radius: 1, y: 1)
+        .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.06), radius: 10, y: 5)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { if deck.counts.total > 0 { store.startStudy(deck: deck.name) } }
+        .contextMenu {
+            Button("在此牌组新建卡片") { store.newCard(deck: deck.name) }
+            Button("重命名牌组…") {
+                store.study.renameText = deck.name
+                store.study.renamingDeck = deck.name
+            }
+            Button("牌组选项…") {
+                var opt = (try? store.db.deckOptions())?[deck.name] ?? DeckOptions(deck: deck.name)
+                opt.deck = deck.name
+                store.deckOptionsEditor = opt
+            }
+            Divider()
+            Button("导出到 Anki…") { store.apkgExport = ApkgExportRequest(allDecks: all.map(\.name), decks: [deck.name]) }
+        }
+    }
+
+    private func stat(_ label: String, _ n: Int, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(n)")
+                .font(.system(size: 22, weight: .medium, design: .serif).monospacedDigit())
+                .foregroundStyle(n == 0 ? ReviewPalette.sub.opacity(0.55) : color)
+            Text(label).font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// 熟练度条：熟记（书脊色深）、生疏（书脊色浅）、学习中（橙）、新卡（淡蓝）
+struct MaturityBar: View {
+    let m: DeckMaturity
+    let tint: Color
+
+    var body: some View {
+        let f = m.fractions
+        GeometryReader { geo in
+            let w = geo.size.width
+            HStack(spacing: 0) {
+                Rectangle().fill(tint).frame(width: w * f.mature)
+                Rectangle().fill(tint.opacity(0.4)).frame(width: w * f.young)
+                Rectangle().fill(DeckColors.learnColor).frame(width: w * f.learning)
+                Rectangle().fill(DeckColors.newColor.opacity(0.22)).frame(width: w * f.new)
+            }
+        }
+        .frame(height: 6)
+        .background(ReviewPalette.hair)
+        .clipShape(Capsule())
+        .help("熟记 \(m.mature) · 生疏 \(m.young) · 学习中 \(m.learning) · 新卡 \(m.new)" + (m.suspended > 0 ? " · 暂停 \(m.suspended)" : ""))
+    }
+}

@@ -47,6 +47,54 @@ enum ReviewScope {
         guard let t = theme, t.hasPrefix(notebookPrefix) else { return nil }
         return Int64(t.dropFirst(notebookPrefix.count))
     }
+
+    /// 1.7：按书回顾——“src:12”是整本书，“src:12:10-20”是第 10–20 页
+    static let sourcePrefix = "src:"
+    /// 不限的一头写成空：“src:12:-50”（第 50 页以前）、“src:12:10-”（第 10 页以后）
+    static func source(_ id: Int64, pages: ClosedRange<Int>? = nil) -> String {
+        guard let p = pages else { return sourcePrefix + String(id) }
+        let a = p.lowerBound == Int.min ? "" : String(p.lowerBound)
+        let b = p.upperBound == Int.max ? "" : String(p.upperBound)
+        return sourcePrefix + String(id) + ":" + a + "-" + b
+    }
+    static func sourceScope(_ theme: String?) -> (id: Int64, pages: ClosedRange<Int>?)? {
+        guard let t = theme, t.hasPrefix(sourcePrefix) else { return nil }
+        let parts = t.dropFirst(sourcePrefix.count).split(separator: ":", maxSplits: 1)
+        guard let first = parts.first, let id = Int64(first) else { return nil }
+        guard parts.count == 2 else { return (id, nil) }
+        let r = parts[1].split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard r.count == 2 else { return (id, nil) }
+        let a = r[0].isEmpty ? Int.min : Int(r[0])
+        let b = r[1].isEmpty ? Int.max : Int(r[1])
+        guard let a, let b, !(r[0].isEmpty && r[1].isEmpty) else { return (id, nil) }
+        return (id, min(a, b)...max(a, b))
+    }
+}
+
+/// 1.7：出处书页“按页码范围”面板
+@MainActor
+@Observable
+final class PageRangeDraft: Identifiable {
+    nonisolated let id = UUID()
+    let sourceId: Int64
+    var fromText: String
+    var toText: String
+    init(sourceId: Int64, from: Int?, to: Int?) {
+        self.sourceId = sourceId
+        self.fromText = from.map(String.init) ?? ""
+        self.toText = to.map(String.init) ?? ""
+    }
+    /// 输入的范围（只填一头时另一头不限）；都没填为 nil
+    var range: ClosedRange<Int>? {
+        let a = Int(fromText.trimmingCharacters(in: .whitespaces))
+        let b = Int(toText.trimmingCharacters(in: .whitespaces))
+        switch (a, b) {
+        case let (a?, b?): return min(a, b)...max(a, b)
+        case let (a?, nil): return a...Int.max
+        case let (nil, b?): return Int.min...b
+        default: return nil
+        }
+    }
 }
 
 /// 回顾卡片就地编辑的草稿
@@ -75,6 +123,9 @@ final class StudyState {
     /// 正在重命名的牌组与输入框文字
     var renamingDeck: String?
     var renameText = ""
+    /// 1.7：按笔记本学习（deck 里放显示名“《笔记本》”）
+    var notebookId: Int64?
+    var notebookCounts = StudyQueue.Counts()
 }
 
 /// 记忆卡编辑面板的草稿
@@ -183,6 +234,8 @@ final class ListState {
     var limit = ListState.pageSize
     /// 多选的摘录 id
     var selection: Set<Int64> = []
+    /// 1.7：列表按新条件载入后再选中的摘录（出处书页“按页码…→在列表中选中”）
+    var pendingSelection: Set<Int64>?
     /// 上一次加载用的筛选条件（变化时回到第一页）
     var lastQuery: HighlightQuery?
     /// 组合筛选（出处、多个标签、日期、只看收藏）
@@ -317,5 +370,7 @@ struct ClozeDraft: Identifiable {
     var extra: String
     var deck: String
     var tags: [String]
+    /// 1.7：逐条做填空卡时的进度，如“第 2 / 12 条”
+    var progress: String?
     var numbers: [Int] { AnkiContent.clozeNumbers(text) }
 }

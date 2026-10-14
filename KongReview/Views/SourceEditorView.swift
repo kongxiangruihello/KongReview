@@ -37,6 +37,34 @@ struct SourceEditorView: View {
                         TextField("卷期（如：55(34) 或 第3期）", text: optional(sourceBinding.issue))
                     }
                 }
+                if source.kind == .book || source.kind == .pdf || source.kind == .other {
+                    Section {
+                        Toggle("按古籍篇章体例引用", isOn: Binding(
+                            get: { source.classicTitle != nil },
+                            set: { on in
+                                store.editingSource?.classicTitle = on ? ClassicCitation.guessClassicTitle(source.title) : nil
+                            }
+                        ))
+                        if source.classicTitle != nil {
+                            TextField("原典书名（如：论语、史记）", text: Binding(
+                                get: { source.classicTitle ?? "" },
+                                set: { store.editingSource?.classicTitle = $0 }
+                            ))
+                            let sample = CitationFormatter.citation(
+                                for: Highlight(sourceId: source.id, text: "", location: "学而第一 · 第3页"), source: source)
+                            Text("示例（位置“学而第一 · 第3页”）：\(sample)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    } header: {
+                        Text("古籍")
+                    } footer: {
+                        Text("脚注写成“《书名·篇名》”；篇名取摘录的“位置”（去掉页码部分，“学而第一”记作“学而”）。原典书名与标题不同（注本、整理本）时，后面再接整理本的作者、书名、出版信息与页码。GB/T 7714 格式不受影响。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 CoverEditorSection(source: source, isbn: optional(sourceBinding.isbn))
                 Section("每日回顾") {
                     Picker("出现频率", selection: sourceBinding.reviewWeight) {

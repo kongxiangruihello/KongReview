@@ -8,6 +8,10 @@ struct DeckSummary: Identifiable, Hashable {
     var name: String
     var total: Int
     var counts: StudyQueue.Counts
+    /// 1.7：新卡 / 学习中 / 生疏 / 熟记 / 暂停的构成（首页条形图）
+    var maturity = DeckMaturity()
+    /// 1.7：今天已经学过的卡数
+    var doneToday = 0
     var id: String { name }
 }
 
@@ -98,8 +102,52 @@ extension AppDatabase {
             return DeckSummary(name: name, total: cs.count,
                                counts: StudyQueue.counts(cs, now: now,
                                                          newLimitLeft: (o?.newPerDay ?? newPerDay) - done.new,
-                                                         reviewLimitLeft: (o?.reviewsPerDay ?? reviewsPerDay) - done.review))
+                                                         reviewLimitLeft: (o?.reviewsPerDay ?? reviewsPerDay) - done.review),
+                               maturity: DeckMaturity(cs),
+                               doneToday: done.new + done.review)
         }
+    }
+
+    // MARK: 1.7：按笔记本做卡、学习
+
+    /// 由这些摘录做成的卡片（任何牌组；不含已删除）
+    func cards(highlightIds ids: [Int64]) throws -> [Card] {
+        guard !ids.isEmpty else { return [] }
+        return try writer.read { db in
+            try Card.filter(ids.contains(Column("highlightId")) && Column("deletedAt") == nil)
+                .order(Column("createdAt").desc, Column("id").desc)
+                .fetchAll(db)
+        }
+    }
+
+    /// 今天已学过的新卡、复习卡数量（限定在这些卡片内）
+    func studiedToday(cardIds: [Int64], now: Date = Date()) throws -> (new: Int, review: Int) {
+        guard !cardIds.isEmpty else { return (0, 0) }
+        let start = Calendar.current.startOfDay(for: now)
+        let set = Set(cardIds)
+        return try writer.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT e.cardId AS id,
+                       NOT EXISTS (SELECT 1 FROM review_event p WHERE p.cardId = e.cardId AND p.kind = 'card' AND p.at < ?) AS first
+                FROM review_event e WHERE e.kind = 'card' AND e.at >= ? GROUP BY e.cardId
+                """, arguments: [start, start])
+            var n = 0, r = 0
+            for row in rows {
+                guard let id: Int64 = row["id"], set.contains(id) else { continue }
+                if (row["first"] as Bool?) == true { n += 1 } else { r += 1 }
+            }
+            return (n, r)
+        }
+    }
+
+    /// 把一组摘录做成记忆卡放进 deck；已有卡片的摘录（无论在哪个牌组）不重复制作。
+    /// 返回 (新建, 已有)
+    func makeCardsReport(fromHighlights ids: [Int64], deck: String, style: CitationStyle) throws -> (made: Int, existing: Int) {
+        var seen = Set<Int64>()
+        let unique = ids.filter { seen.insert($0).inserted }
+        let before = try cards(highlightIds: unique).compactMap(\.highlightId)
+        let made = try makeCards(fromHighlights: unique, deck: deck, style: style)
+        return (made, Set(before).count)
     }
 
     /// 回答一张卡：更新调度并写入回顾日志（一个事务）
@@ -119,7 +167,12 @@ extension AppDatabase {
     func makeCards(fromHighlights ids: [Int64], deck: String = "摘录", style: CitationStyle = .footnote) throws -> Int {
         try writer.write { db in
             var n = 0
-            for h in try Highlight.fetchAll(db, keys: ids) where h.deletedAt == nil {
+            // 按给出的顺序建卡（笔记本里的顺序 = 新卡出现的顺序）
+            let fetched = try Highlight.fetchAll(db, keys: ids)
+            let byID = Dictionary(fetched.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
+            var seen = Set<Int64>()
+            let ordered = ids.filter { seen.insert($0).inserted }.compactMap { byID[$0] }
+            for h in ordered where h.deletedAt == nil {
                 let exists = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM card WHERE highlightId = ? AND deletedAt IS NULL)", arguments: [h.id]) ?? false
                 if exists { continue }
                 let src = try h.sourceId.flatMap { try Source.fetchOne(db, key: $0) }

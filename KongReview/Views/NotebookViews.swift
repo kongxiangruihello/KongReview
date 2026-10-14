@@ -60,6 +60,24 @@ struct NotebookView: View {
                 .disabled(st.quoteCount == 0)
             }
             ToolbarItem {
+                // 1.7：笔记本 ↔ 记忆卡
+                Menu {
+                    let _ = store.revision
+                    let cs = store.notebookCardStatus(notebookId)
+                    Text("\(cs.quotes) 条摘录，\(cs.withCards) 条已有记忆卡（共 \(cs.cards) 张）")
+                    Divider()
+                    Button("做成问答卡（牌组“\(store.notebookTitle(notebookId))”）") { store.makeNotebookCards(notebookId) }
+                    Button("逐条做填空卡…") { store.startNotebookCloze(notebookId) }
+                    Divider()
+                    Button("学习这本的记忆卡") { store.startNotebookStudy(notebookId) }
+                        .disabled(cs.cards == 0)
+                } label: {
+                    Label("记忆卡", systemImage: "rectangle.on.rectangle.angled")
+                }
+                .help("把笔记本里的摘录做成记忆卡（牌组以笔记本命名），或只学习这本笔记本的卡片")
+                .disabled(st.quoteCount == 0)
+            }
+            ToolbarItem {
                 Button { store.openNotebookPicker(after: st.blocks.last?.id) } label: {
                     Label("插入摘录", systemImage: "text.quote")
                 }

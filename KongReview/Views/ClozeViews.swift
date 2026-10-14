@@ -85,7 +85,12 @@ struct ClozeEditorView: View {
         let numbers = d?.numbers ?? []
         let decks = (try? store.db.deckNames()) ?? []
         return VStack(alignment: .leading, spacing: 12) {
-            Text("做成填空卡").font(.title2.bold())
+            HStack(alignment: .firstTextBaseline) {
+                Text("做成填空卡").font(.title2.bold())
+                if let p = d?.progress {
+                    Text("逐条制作 · \(p)").font(.callout).foregroundStyle(ReviewPalette.accent)
+                }
+            }
             Text("在下面选中要背的字词，点“挖空”。每个编号（c1、c2…）生成一张卡，只遮住这一处；想在同一张卡里遮住几处，用“同卡再挖”。")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -143,9 +148,16 @@ struct ClozeEditorView: View {
             }
             HStack {
                 Spacer()
-                Button("取消", role: .cancel) { store.clozeDraft = nil }
-                    .keyboardShortcut(.cancelAction)
-                Button("生成 \(max(numbers.count, 1)) 张卡") { store.commitCloze() }
+                if d?.progress != nil {
+                    Button("结束逐条制作") { store.endClozeQueue() }
+                        .keyboardShortcut(.cancelAction)
+                    Button("跳过这条") { store.skipCloze() }
+                        .keyboardShortcut("s", modifiers: .command)
+                } else {
+                    Button("取消", role: .cancel) { store.clozeDraft = nil }
+                        .keyboardShortcut(.cancelAction)
+                }
+                Button(d?.progress != nil ? "生成 \(max(numbers.count, 1)) 张卡，下一条" : "生成 \(max(numbers.count, 1)) 张卡") { store.commitCloze() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
                     .handCursor()

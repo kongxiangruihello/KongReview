@@ -143,24 +143,8 @@ struct CardsHomeView: View {
                     }
                 }
             } else {
-                List {
-                    Section {
-                        ForEach(decks) { d in
-                            deckRow(d)
-                        }
-                    } header: {
-                        HStack {
-                            Text("牌组").frame(maxWidth: .infinity, alignment: .leading)
-                            Text("新").frame(width: 48).foregroundStyle(.blue)
-                            Text("学习中").frame(width: 48).foregroundStyle(.red)
-                            Text("待复习").frame(width: 48).foregroundStyle(.green)
-                            Text("").frame(width: 150)
-                        }
-                    } footer: {
-                        Text("未单独设置的牌组：每天最多学 \(CardSettings.newPerDay) 张新卡、复习 \(CardSettings.reviewsPerDay) 张（“设置 → 记忆卡”）。右键牌组可设置它自己的上限与算法。")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                // 1.7：重新设计的牌组首页（见 DeckHomeViews.swift）
+                DeckHomeView(decks: decks)
             }
         }
         .navigationTitle("记忆卡")
@@ -202,51 +186,6 @@ struct CardsHomeView: View {
         }
     }
 
-    private func deckRow(_ d: DeckSummary) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(d.name).font(.headline)
-                let o = store.options(for: d.name)
-                Text("共 \(d.total) 张 · \(o.algorithm == .fsrs ? "FSRS \(Int((o.desiredRetention * 100).rounded()))%" : "SM-2") · 每天新卡 \(o.newPerDay ?? CardSettings.newPerDay)、复习 \(o.reviewsPerDay ?? CardSettings.reviewsPerDay)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            count(d.counts.new, .blue)
-            count(d.counts.learning, .red)
-            count(d.counts.review, .green)
-            HStack {
-                Button("浏览") {
-                    store.study.browseSelection = []
-                    store.study.browsingDeck = d.name
-                }
-                Button("学习") { store.startStudy(deck: d.name) }
-                    .buttonStyle(.borderedProminent)
-                    .handCursor()
-                    .disabled(d.counts.total == 0)
-            }
-            .frame(width: 150, alignment: .trailing)
-        }
-        .padding(.vertical, 4)
-        .contextMenu {
-            Button("在此牌组新建卡片") { store.newCard(deck: d.name) }
-            Button("重命名牌组…") {
-                store.study.renameText = d.name
-                store.study.renamingDeck = d.name
-            }
-            Button("牌组选项…") {
-                var o = (try? store.db.deckOptions())?[d.name] ?? DeckOptions(deck: d.name)
-                o.deck = d.name
-                store.deckOptionsEditor = o
-            }
-            Divider()
-            Button("导出到 Anki…") { store.apkgExport = ApkgExportRequest(allDecks: summaries.map(\.name), decks: [d.name]) }
-        }
-    }
-
-    private func count(_ n: Int, _ color: Color) -> some View {
-        Text("\(n)").monospacedDigit().frame(width: 48)
-            .foregroundStyle(n == 0 ? Color.secondary : color)
-    }
 }
 
 // MARK: - 学习（仿 Anki：先看正面，空格显示答案，1–4 评分）
@@ -289,6 +228,7 @@ struct StudyView: View {
 
     private var counts: StudyQueue.Counts {
         _ = store.revision
+        if study.notebookId != nil { return study.notebookCounts }
         guard let deck = study.deck,
               let s = store.deckSummaryCache.first(where: { $0.name == deck }) else { return .init() }
         return s.counts
@@ -298,6 +238,7 @@ struct StudyView: View {
         HStack {
             Button {
                 study.deck = nil
+                study.notebookId = nil
                 study.current = nil
                 study.finished = false
             } label: { Label("牌组", systemImage: "chevron.left") }
@@ -410,13 +351,19 @@ struct StudyView: View {
         let answers = (try? store.db.cardAnswersToday()) ?? (total: 0, correct: 0)
         let accuracy = answers.total == 0 ? "—" : "\(Int((Double(answers.correct) / Double(answers.total) * 100).rounded()))"
         let tomorrowEnd = Calendar.current.date(byAdding: .day, value: 2, to: start) ?? start
-        let deckCards = study.deck.flatMap { try? store.db.cards(deck: $0) } ?? []
+        let deckCards: [Card] = {
+            if let nid = study.notebookId {
+                let ids = ((try? store.db.notebookHighlights(nid)) ?? []).compactMap(\.id)
+                return (try? store.db.cards(highlightIds: ids)) ?? []
+            }
+            return study.deck.flatMap { try? store.db.cards(deck: $0) } ?? []
+        }()
         let dueTomorrow = deckCards.filter { $0.state != .new && !$0.isSuspended && $0.due < tomorrowEnd }.count
         return VStack(spacing: 0) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 34))
                 .foregroundStyle(ReviewPalette.accent)
-            Text("这个牌组今天学完了")
+            Text(study.notebookId != nil ? "这本笔记本的卡片今天学完了" : "这个牌组今天学完了")
                 .font(.system(size: 26, weight: .semibold, design: .serif))
                 .foregroundStyle(ReviewPalette.ink)
                 .padding(.top, 12)
@@ -442,6 +389,7 @@ struct StudyView: View {
             HStack(spacing: 8) {
                 PillButton(icon: "chevron.left", title: "返回牌组", style: .primary) {
                     study.deck = nil
+                    study.notebookId = nil
                     study.finished = false
                 }
                 PillButton(icon: "arrow.clockwise", title: "再查一次") { store.nextCard() }

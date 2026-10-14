@@ -364,6 +364,11 @@ final class AppDatabase {
         m.registerMigration("v10-notebook-block-note") { db in
             try db.alter(table: "notebook_block") { t in t.add(column: "note", .text) }
         }
+
+        // 1.7：古籍原典书名（按“《书名·篇名》”体例引用）
+        m.registerMigration("v11-source-classic") { db in
+            try db.alter(table: "source") { t in t.add(column: "classicTitle", .text) }
+        }
         return m
     }
 }

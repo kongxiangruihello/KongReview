@@ -1135,3 +1135,128 @@ final class V16Tests: XCTestCase {
     XCTAssertTrue(md.contains("> 學而時習之，不亦說乎（第 1 页）"))
   }
 }
+
+final class V17Tests: XCTestCase {
+  func testClassicColumnAndCitation() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    var s = Source(title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980", place: "北京")
+    s.classicTitle = "论语"
+    s = try db.save(s)
+    let back = try XCTUnwrap(try db.writer.read { try Source.fetchOne($0, key: s.id) })
+    XCTAssertEqual(back.classicTitle, "论语")
+    let h = try db.save(Highlight(sourceId: s.id, text: "学而时习之", location: "学而第一 · 第3页"))
+    XCTAssertEqual(try db.makeCards(fromHighlights: [h.id!], deck: "论语"), 1)
+    let card = try XCTUnwrap(try db.cards(deck: "论语").first)
+    XCTAssertTrue(card.back.contains("《论语·学而》"), card.back)
+  }
+
+  func testNotebookCardsStudyAndPageRange() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      let src = try db.save(Source(title: "论语译注", author: "杨伯峻"))
+      let a = try db.save(Highlight(sourceId: src.id, text: "学而时习之", location: "第 1 页"))
+      let b = try db.save(Highlight(sourceId: src.id, text: "温故而知新", location: "第 17 页"))
+      let c = try db.save(Highlight(sourceId: src.id, text: "学而不思则罔", location: "p.18"))
+      let d = try db.save(Highlight(sourceId: src.id, text: "无页码"))
+      // c 原来就有卡片（另一个牌组）
+      XCTAssertEqual(try db.makeCards(fromHighlights: [c.id!], deck: "旧牌组"), 1)
+      store.reload()
+      let nid = try XCTUnwrap(store.createNotebook(title: "论学", with: [b.id!, a.id!, c.id!]))
+      store.reload()
+      XCTAssertEqual(store.notebookTitle(nid), "论学")
+      store.makeNotebookCards(nid)
+      let deck = try db.cards(deck: "论学")
+      XCTAssertEqual(deck.count, 2)
+      // 按笔记本中的顺序建卡：b 在前
+      XCTAssertEqual(deck.sorted { ($0.createdAt, $0.id!) < ($1.createdAt, $1.id!) }.first?.highlightId, b.id)
+      let st = store.notebookCardStatus(nid)
+      XCTAssertEqual(st.quotes, 3); XCTAssertEqual(st.withCards, 3); XCTAssertEqual(st.cards, 3)
+      store.makeNotebookCards(nid)
+      XCTAssertEqual(try db.cards(deck: "论学").count, 2, "不重复做")
+
+      // 按笔记本学习：包括其他牌组里的卡
+      store.startNotebookStudy(nid)
+      XCTAssertEqual(store.study.notebookId, nid)
+      XCTAssertEqual(store.study.notebookCounts.new, 3)
+      XCTAssertNotNil(store.study.current)
+      var seen = Set<Int64>()
+      for _ in 0..<3 {
+        guard let cur = store.study.current else { break }
+        seen.insert(cur.highlightId!)
+        store.answerCurrent(.good)
+      }
+      XCTAssertEqual(seen, [a.id!, b.id!, c.id!])
+      XCTAssertEqual(try db.studiedToday(cardIds: try db.cards(highlightIds: [a.id!, b.id!, c.id!]).compactMap(\.id)).new, 3)
+      store.startStudy(deck: "论学")
+      XCTAssertNil(store.study.notebookId)
+
+      // 逐条做填空卡
+      store.startNotebookCloze(nid)
+      XCTAssertEqual(store.clozeDraft?.progress, "第 1 / 3 条")
+      XCTAssertEqual(store.clozeDraft?.deck, "论学")
+      XCTAssertEqual(store.clozeDraft?.highlightId, b.id)
+      store.clozeDraft?.text = "温故而{{c1::知新}}"
+      store.commitCloze()
+      XCTAssertEqual(store.clozeDraft?.progress, "第 2 / 3 条")
+      store.skipCloze()
+      XCTAssertEqual(store.clozeDraft?.highlightId, c.id)
+      store.endClozeQueue()
+      XCTAssertNil(store.clozeDraft)
+      XCTAssertTrue(store.infoMessage?.contains("共生成 1 张") ?? false, store.infoMessage ?? "")
+      // 再次逐条：b 已做过填空卡，从 a 开始
+      store.startNotebookCloze(nid)
+      XCTAssertEqual(store.clozeDraft?.highlightId, a.id)
+      XCTAssertEqual(store.clozeDraft?.progress, "第 1 / 2 条")
+      store.endClozeQueue()
+
+      // 页码范围
+      XCTAssertEqual(try db.sourceHighlights(src.id!, pages: 10...20).map(\.id), [b.id, c.id])
+      XCTAssertEqual(try db.sourceHighlights(src.id!, pages: nil).last?.id, d.id)
+      XCTAssertEqual(try db.sourceHighlights(src.id!, pages: Int.min...5).map(\.id), [a.id])
+      store.makeCardsForPageRange(src.id!, 1...17)
+      XCTAssertEqual(try db.cards(deck: "论语译注").count, 0, "1–17 页的都已有卡片")
+      store.selectPageRange(src.id!, 15...100)
+      XCTAssertEqual(store.list.pendingSelection, [b.id!, c.id!])
+
+      // 按书回顾的范围
+      store.reviewSource(src.id!, pages: 10...20)
+      XCTAssertEqual(store.review.theme, "src:\(src.id!):10-20")
+      XCTAssertEqual(ReviewScope.sourceScope(store.review.theme)?.pages, 10...20)
+      XCTAssertEqual(ReviewScope.sourceScope("src:\(src.id!)")?.id, src.id)
+      XCTAssertNil(ReviewScope.sourceScope("src:\(src.id!)")?.pages)
+      XCTAssertNil(ReviewScope.sourceScope("儒家"))
+      XCTAssertEqual(store.sourceScopeLabel(store.review.theme), "《论语译注》 第 10–20 页")
+      let draft = PageRangeDraft(sourceId: src.id!, from: nil, to: 9)
+      XCTAssertEqual(draft.range, Int.min...9)
+      XCTAssertEqual(LibraryStore.pageLabel(draft.range!), "第 9 页以前")
+      // 不限的一头
+      let open1 = ReviewScope.source(7, pages: Int.min...50)
+      XCTAssertEqual(open1, "src:7:-50")
+      XCTAssertEqual(ReviewScope.sourceScope(open1)?.pages, Int.min...50)
+      XCTAssertEqual(ReviewScope.sourceScope(ReviewScope.source(7, pages: 10...Int.max))?.pages, 10...Int.max)
+      XCTAssertNil(ReviewScope.sourceScope("src:7:-")?.pages)
+      // 删除出处后回顾范围复位
+      store.review.theme = ReviewScope.source(src.id!)
+      store.clearSourceReviewScope([src.id!])
+      XCTAssertNil(store.review.theme)
+      // 没有卡片的笔记本不进入学习
+      let empty = try XCTUnwrap(store.createNotebook(title: "空", with: [d.id!]))
+      store.reload()
+      store.startNotebookStudy(empty)
+      XCTAssertNil(store.study.deck)
+      XCTAssertNil(store.study.notebookId)
+    }
+  }
+
+  func testDeckSummaryMaturity() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    _ = try db.save(Card(deck: "A::B", front: "1"))
+    _ = try db.save(Card(deck: "A::B", front: "2", state: .review, interval: 30, due: Date().addingTimeInterval(86400 * 10)))
+    _ = try db.save(Card(deck: "A::B", front: "3", state: .review, interval: 3, due: Date().addingTimeInterval(-60)))
+    let s = try XCTUnwrap(try db.deckSummaries(newPerDay: 20, reviewsPerDay: 200).first)
+    XCTAssertEqual(s.maturity, DeckMaturity(new: 1, learning: 0, young: 1, mature: 1))
+    XCTAssertEqual(s.counts.review, 1)
+    XCTAssertEqual(s.doneToday, 0)
+  }
+}

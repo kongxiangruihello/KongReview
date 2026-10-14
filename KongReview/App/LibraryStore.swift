@@ -133,6 +133,13 @@ final class LibraryStore {
     var coverRevision = 0
     /// 填空卡制作面板
     var clozeDraft: ClozeDraft?
+    /// 1.7：逐条做填空卡的队列（笔记本里的摘录）
+    var clozeQueue: [Int64] = []
+    var clozeQueueTotal = 0
+    var clozeQueueDeck = ""
+    var clozeQueueMade = 0
+    /// 1.7：出处书页的“按页码范围”面板
+    var pageRange: PageRangeDraft?
     /// 生成分享图的摘录
     var shareImageHighlight: Highlight?
     /// 已存搜索
@@ -364,6 +371,7 @@ final class LibraryStore {
             return
         }
         perform { try db.mergeSources(ids, into: m.target) }
+        clearSourceReviewScope(ids.filter { $0 != m.target })
         mergeRequest = nil
         if case .source(let id) = selection, ids.contains(id), id != m.target { selection = .source(m.target) }
     }
@@ -377,6 +385,7 @@ final class LibraryStore {
         let before = try? db.snapshot(sourceIds: ids)
         defer { if let before { registerUndo("删除出处", before, reviewPosition: nil) } }
         perform { try db.deleteSources(ids) }
+        clearSourceReviewScope(ids)
         sourcesPendingDeletion = []
         if case .source(let id) = selection, ids.contains(id) { selection = .sourceManager }
     }
@@ -713,6 +722,7 @@ final class LibraryStore {
     }
 
     func startStudy(deck: String) {
+        study.notebookId = nil
         study.deck = deck
         study.lastDeck = deck
         study.browsingDeck = nil
@@ -722,6 +732,10 @@ final class LibraryStore {
     /// 学习：取下一张（按牌组自己的每日上限）
     func nextCard(now: Date = Date()) {
         guard let deck = study.deck else { return }
+        if let nid = study.notebookId {
+            nextNotebookCard(nid, now: now)
+            return
+        }
         let cards = (try? db.cards(deck: deck)) ?? []
         let done = (try? db.studiedToday(deck: deck, now: now)) ?? (new: 0, review: 0)
         let o = options(for: deck)
@@ -791,6 +805,7 @@ final class LibraryStore {
         let numbers = AnkiContent.clozeNumbers(d.text)
         guard !numbers.isEmpty else { return }
         let extra = Markdown.html(d.extra)
+        var saved = false
         perform {
             for n in numbers {
                 let c = AnkiContent.cloze(Markdown.html(d.text), number: n)
@@ -798,9 +813,17 @@ final class LibraryStore {
                 _ = try db.save(Card(deck: d.deck.nilIfBlank ?? "填空", front: c.front, back: back, tags: d.tags,
                                      highlightId: d.highlightId))
             }
+            saved = true
         }
+        guard saved else { return }   // 出错时留在面板上（错误已提示）
         study.lastDeck = d.deck
         clozeDraft = nil
+        if d.progress != nil {
+            clozeQueueDeck = d.deck
+            clozeQueueMade += numbers.count
+            advanceClozeQueue()
+            return
+        }
         infoMessage = "已生成 \(numbers.count) 张填空卡（牌组“\(d.deck)”）。"
     }
 
@@ -1038,6 +1061,7 @@ final class LibraryStore {
         let before = source.id.flatMap { try? db.snapshot(sourceIds: [$0]) }
         defer { if let before { registerUndo("删除出处", before, reviewPosition: nil) } }
         perform { try db.delete(source) }
+        clearSourceReviewScope(source.id.map { [$0] } ?? [])
         if case .source(let id) = selection, id == source.id { selection = .all }
     }
 

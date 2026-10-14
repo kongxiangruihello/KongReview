@@ -211,7 +211,16 @@ struct HighlightListView: View {
                 }
             }
             state.total = try store.db.count(query)
+            // 1.7：待选中的摘录可能超出当前分页：先放宽分页（limit 变化会再次触发 load）
+            if state.pendingSelection != nil, state.limit < state.total {
+                state.limit = state.total
+                return
+            }
             state.items = try store.db.highlights(query, limit: state.limit)
+            if let pending = state.pendingSelection {
+                state.selection = pending
+                state.pendingSelection = nil
+            }
             state.selection = state.selection.filter { id in state.items.contains { $0.id == id } }
         } catch {
             store.report(error)

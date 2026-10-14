@@ -48,3 +48,14 @@ extension AppDatabase {
         try highlights(HighlightQuery(sourceId: sourceId, orderByPage: true))
     }
 }
+
+// MARK: - 1.7：按页码范围
+
+extension AppDatabase {
+    /// 书中某个页码范围内的摘录（按页码排序；没有页码的不算）。pages 为 nil 时返回全书（含没有页码的，排在最后）
+    func sourceHighlights(_ sourceId: Int64, pages: ClosedRange<Int>?) throws -> [Highlight] {
+        let all = try sourceHighlightsByPage(sourceId)
+        guard let pages else { return all }
+        return all.filter { h in SearchSyntax.firstNumber(h.location).map { pages.contains($0) } ?? false }
+    }
+}
