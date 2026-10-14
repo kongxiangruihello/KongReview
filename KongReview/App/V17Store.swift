@@ -191,3 +191,49 @@ extension LibraryStore {
         return days
     }
 }
+
+// MARK: - 1.9：引文核对
+
+extension LibraryStore {
+    /// 核对当前打开的笔记本里的引文；没有问题返回 nil
+    func notebookCitationCheck(export: CitationCheckRequest.Export? = nil) -> CitationCheckRequest? {
+        flushNotebookSaves()
+        let st = notebookState
+        let items: [CitationCheck.Item] = st.blocks.compactMap { b in
+            guard b.kind == .highlight, let hid = b.highlightId, let h = st.highlights[hid] else { return nil }
+            return CitationCheck.Item(highlight: h, source: source(for: h))
+        }
+        let issues = CitationCheck.check(items)
+        guard !issues.isEmpty else { return nil }
+        var snippets: [Int64: String] = [:]
+        for it in items {
+            guard let id = it.highlight.id else { continue }
+            let t = it.highlight.text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+            snippets[id] = t.count > 36 ? String(t.prefix(36)) + "…" : t
+        }
+        return CitationCheckRequest(issues: issues, snippets: snippets, export: export)
+    }
+
+    /// 菜单“引文核对…”：有问题弹出清单，没有问题给一句提示
+    func runNotebookCitationCheck() {
+        if let r = notebookCitationCheck() {
+            citationCheck = r
+        } else {
+            infoMessage = "引文核对：笔记本里的引文都有出处，页码、篇名齐全。"
+        }
+    }
+
+    /// 从核对清单里去改某条摘录 / 某个出处（先关掉清单）
+    func fixCitationIssue(_ issue: CitationCheck.Issue) {
+        citationCheck = nil
+        if let hid = issue.highlightId, let h = try? db.highlights(ids: [hid]).first {
+            if issue.kind == .noSource || issue.kind == .noPage || issue.kind == .noChapter || issue.kind == .juanStyle {
+                edit(h)
+                return
+            }
+        }
+        if let sid = issue.sourceId, let s = sources.first(where: { $0.id == sid }) {
+            editingSource = s
+        }
+    }
+}

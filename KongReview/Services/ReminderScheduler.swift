@@ -25,20 +25,29 @@ final class ReminderScheduler {
         let dailyCount = d.object(forKey: SettingsKeys.dailyCount) as? Int ?? 10
         let today = store?.todayCounts()
         let calendar = Calendar.current
-        /// 提醒正文：写明当天要看的摘录条数与待学的卡数（未来几天按每日条数与卡片到期日估算）
-        func message(for fire: Date) -> String {
-            let highlights = calendar.isDateInToday(fire) ? (today?.highlights ?? dailyCount) : dailyCount
-            var cards = 0
-            if calendar.isDateInToday(fire) {
-                cards = today?.cards ?? 0
+        /// 1.9：日课卡——当天要看的摘录、记忆卡（新 / 学习中 / 复习）、约几分钟；今天、明天的还写上前一天做了多少
+        /// （未来几天按每日条数与卡片到期日估算）
+        func info(for fire: Date) -> (highlights: Int, cards: StudyQueue.Counts, yesterday: (highlights: Int, cards: Int)?, streak: Int) {
+            let isToday = calendar.isDateInToday(fire)
+            let highlights = isToday ? (today?.highlights ?? dailyCount) : dailyCount
+            var cards = StudyQueue.Counts()
+            if isToday {
+                for d in store?.deckSummaryCache ?? [] {
+                    cards.new += d.counts.new; cards.learning += d.counts.learning; cards.review += d.counts.review
+                }
             } else if let db = store?.db,
                       let n = try? db.cardsDue(on: fire, newPerDay: CardSettings.newPerDay, reviewsPerDay: CardSettings.reviewsPerDay) {
-                cards = n
+                cards.review = n
             }
-            var parts: [String] = []
-            if highlights > 0 { parts.append("\(highlights) 条摘录") }
-            if cards > 0 { parts.append("\(cards) 张记忆卡") }
-            return parts.isEmpty ? "几条旧摘录在等你。" : "今天有" + parts.joined(separator: "、") + "等你回顾。"
+            var yesterday: (highlights: Int, cards: Int)?
+            let streak = store?.stats.currentStreak ?? 0
+            if let db = store?.db {
+                // 只有今天这条写“昨天”：明天的提醒是今天排的，那时今天还没做完
+                if isToday, let y = calendar.date(byAdding: .day, value: -1, to: fire) {
+                    yesterday = try? db.activity(on: y)
+                }
+            }
+            return (highlights, cards, yesterday, streak)
         }
         let prefix = self.prefix
         let legacy = legacyIdentifier
@@ -58,11 +67,17 @@ final class ReminderScheduler {
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
             guard granted else { return }
 
-            for fire in ReminderPlan.days(now: Date(), hour: hour, minute: minute, reviewedToday: reviewed) {
+            for (i, fire) in ReminderPlan.days(now: Date(), hour: hour, minute: minute, reviewedToday: reviewed).enumerated() {
                 let content = UNMutableNotificationContent()
-                content.title = "今日回顾"
-                content.body = message(for: fire)
+                let x = info(for: fire)
+                content.title = DailyCard.title(fire)
+                content.body = DailyCard.body(highlights: x.highlights, cards: x.cards, yesterday: x.yesterday, streak: x.streak)
                 content.sound = .default
+                // 最近两天的提醒附一张“日课卡”小图（生成失败就只有文字）
+                if i < 2, let url = DailyCardImage.write(date: fire, highlights: x.highlights, cards: x.cards, streak: x.streak),
+                   let att = try? UNNotificationAttachment(identifier: "dailycard", url: url, options: nil) {
+                    content.attachments = [att]
+                }
                 let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
                 let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                 let request = UNNotificationRequest(identifier: ReminderPlan.identifier(for: fire),

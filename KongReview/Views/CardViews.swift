@@ -200,6 +200,59 @@ struct CardsHomeView: View {
 
 }
 
+// MARK: - 1.9：原文语境
+
+/// 记忆卡背面下方：同一出处里按页码排在这条前后的几条摘录，这条用书脊色标出
+struct CardContextPanel: View {
+    @Environment(LibraryStore.self) private var store
+    let highlightId: Int64
+
+    var body: some View {
+        let ctx = try? store.db.contextHighlights(around: highlightId, radius: 2)
+        let src = ctx?.items.first.flatMap { store.source(for: $0) }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("原文语境").font(.custom("Kaiti SC", size: 13)).foregroundStyle(Color(red: 0x9C / 255, green: 0x5B / 255, blue: 0x3B / 255))
+                if let src { Text("《\(src.title)》按页码").font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub) }
+                Spacer()
+            }
+            if let ctx, ctx.items.count > 1 {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(ctx.items.enumerated()), id: \.offset) { i, h in
+                            let current = i == ctx.index
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(h.location?.trimmingCharacters(in: .whitespaces).isEmpty == false ? h.location! : "—")
+                                    .font(.system(size: 11).monospacedDigit())
+                                    .foregroundStyle(ReviewPalette.sub)
+                                    .frame(width: 78, alignment: .trailing)
+                                    .lineLimit(1)
+                                Text(RichText.attributed(h.text))
+                                    .font(.system(size: 13.5, design: .serif))
+                                    .foregroundStyle(current ? ReviewPalette.ink : ReviewPalette.sub)
+                                    .lineLimit(current ? 3 : 2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 3)
+                            .padding(.horizontal, 6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(current ? ReviewPalette.accentSoft : .clear))
+                        }
+                    }
+                }
+                .frame(maxHeight: 170)
+            } else {
+                Text(ctx == nil ? "这条摘录没有出处，无法排出前后文。" : "这个出处里只有这一条摘录。")
+                    .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 14)
+        .background(ReviewPalette.soft)
+        .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
+        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 16, bottomTrailingRadius: 16, style: .continuous))
+    }
+}
+
 // MARK: - 学习（仿 Anki：先看正面，空格显示答案，1–4 评分）
 
 struct StudyView: View {
@@ -221,6 +274,10 @@ struct StudyView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.horizontal, 8)
                             .padding(.bottom, 8)
+                        // 1.9：原文语境——同一出处里按页码排在前后的摘录
+                        if study.showingAnswer, study.showContext, let hid = card.highlightId {
+                            CardContextPanel(highlightId: hid)
+                        }
                     }
                     // 1.8：左侧书脊用牌组的传统色
                     .overlay {
@@ -312,6 +369,13 @@ struct StudyView: View {
             }
             Spacer()
             if card.highlightId != nil {
+                if study.showingAnswer {
+                    CardIconButton(icon: "text.alignleft", help: study.showContext ? "收起原文语境（C）" : "原文语境：同一出处里前后几条摘录，按页码（C）",
+                                   active: study.showContext) {
+                        study.showContext.toggle()
+                    }
+                    .keyboardShortcut("c", modifiers: [])
+                }
                 CardIconButton(icon: "text.quote", help: "原摘录（出处、按语、标签）") { store.openHighlight(of: card) }
             }
             CardIconButton(icon: "square.and.pencil", help: "编辑这张卡（E）") { store.editCard(card) }

@@ -42,6 +42,9 @@ struct NotebookView: View {
         .navigationTitle(st.titleDraft.isEmpty ? "专题笔记本" : st.titleDraft)
         .navigationSubtitle("\(st.quoteCount) 条摘录 · \(st.blocks.count - st.quoteCount) 段文字")
         .task(id: notebookId) { store.loadNotebook(notebookId) }
+        .sheet(item: Bindable(store).citationCheck) { req in
+            CitationCheckSheet(request: req)
+        }
         .onChange(of: store.revision) { store.refreshNotebookHighlights() }
         .onDisappear { store.flushNotebookSaves() }
         .toolbar {
@@ -85,11 +88,13 @@ struct NotebookView: View {
             }
             ToolbarItem {
                 Menu {
-                    Button("Word 文档（含脚注、目录、页码）…") { NotebookExport.exportDocx(store: store) }
+                    Button("Word 文档（含脚注、目录、页码）…") { NotebookExport.checkThenExport(store: store, .docx) }
                     Button("演示稿（PowerPoint / Keynote）…") { NotebookExport.exportPptx(store: store) }
-                    Button("PDF（讲义、打印）…") { NotebookExport.exportPDF(store: store) }
+                    Button("PDF（讲义、打印）…") { NotebookExport.checkThenExport(store: store, .pdf) }
                     Button("Markdown（脚注 [^1]）…") { NotebookExport.exportMarkdown(store: store) }
                     Button("复制到剪贴板（粘到 Word、Pages，含脚注）") { NotebookExport.copyRTF(store: store) }
+                    Divider()
+                    Button("引文核对…") { store.runNotebookCitationCheck() }
                     Divider()
                     Toggle("出处做成脚注（否则写在引文后的括号里）", isOn: Bindable(st).exportFootnotes)
                     Toggle("文末附参考文献表（GB/T 7714）", isOn: Bindable(st).exportBibliography)
@@ -505,6 +510,22 @@ enum NotebookExport {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
+    /// 1.9：导出 Word / PDF 前先核对引文；有问题先列出来，可去修改或“仍然导出”
+    static func checkThenExport(store: LibraryStore, _ kind: CitationCheckRequest.Export) {
+        if let r = store.notebookCitationCheck(export: kind) {
+            store.citationCheck = r
+        } else {
+            run(kind, store: store)
+        }
+    }
+
+    static func run(_ kind: CitationCheckRequest.Export, store: LibraryStore) {
+        switch kind {
+        case .docx: exportDocx(store: store)
+        case .pdf: exportPDF(store: store)
+        }
+    }
+
     static func exportDocx(store: LibraryStore) {
         store.flushNotebookSaves()
         let t = title(store)
@@ -592,5 +613,82 @@ enum NotebookExport {
         }
         pb.setString(NotebookExporter.markdown(title: t, pieces: pieces, options: opts), forType: .string)
         store.infoMessage = "已复制。在 Word 或 Pages 里按 ⌘V 粘贴，摘录出处会成为脚注。"
+    }
+}
+
+// MARK: - 1.9：引文核对清单
+
+struct CitationCheckSheet: View {
+    @Environment(LibraryStore.self) private var store
+    let request: CitationCheckRequest
+
+    var body: some View {
+        let issues = request.issues
+        let groups = CitationCheck.Kind.allCases.compactMap { k -> (CitationCheck.Kind, [CitationCheck.Issue])? in
+            let list = issues.filter { $0.kind == k }
+            return list.isEmpty ? nil : (k, list)
+        }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("引文核对").font(.system(size: 22, weight: .semibold, design: .serif))
+                Text("\(issues.count) 处需要留意").font(.callout).foregroundStyle(ReviewPalette.hard)
+            }
+            Text("导出前检查每条引文：有没有出处、页码，古籍体例的篇名，卷次写法是否统一，书籍的出版者与年份。点“修改”打开对应的摘录或出处，改完可在“导出”菜单里再核对一次。")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(groups, id: \.0) { kind, list in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(kind.label)（\(list.count)）")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(ReviewPalette.ink)
+                            ForEach(list) { issue in row(issue) }
+                        }
+                    }
+                }
+                .padding(.trailing, 6)
+            }
+            .frame(minHeight: 220, maxHeight: 420)
+            HStack {
+                Spacer()
+                Button("关闭", role: .cancel) { store.citationCheck = nil }
+                    .keyboardShortcut(.cancelAction)
+                if let kind = request.export {
+                    Button(kind == .docx ? "仍然导出 Word…" : "仍然导出 PDF…") {
+                        store.citationCheck = nil
+                        // 等清单收起再弹出保存面板
+                        DispatchQueue.main.async { NotebookExport.run(kind, store: store) }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .handCursor()
+                }
+            }
+        }
+        .padding(22)
+        .frame(width: 620)
+    }
+
+    private func row(_ issue: CitationCheck.Issue) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                if let hid = issue.highlightId, let snip = request.snippets[hid] {
+                    Text(snip).font(.system(size: 13, design: .serif)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+                }
+                Text(issue.message).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button(issue.highlightId != nil && issue.kind != .sourceInfo ? "修改摘录" : "修改出处") {
+                // 先收起清单，再打开摘录或出处的编辑面板（两个面板同时切换在 macOS 上可能打不开）
+                store.citationCheck = nil
+                DispatchQueue.main.async { store.fixCitationIssue(issue) }
+            }
+            .controlSize(.small)
+            .handCursor()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(ReviewPalette.soft))
     }
 }

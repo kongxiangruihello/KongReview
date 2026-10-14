@@ -1277,3 +1277,47 @@ final class V18Tests: XCTestCase {
     XCTAssertEqual(days.count, 1)
   }
 }
+
+final class V19Tests: XCTestCase {
+  func testContextActivityAndCitationCheck() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      let src = try db.save(Source(title: "论语译注", author: "杨伯峻"))
+      var hs: [Highlight] = []
+      for (i, p) in [5, 1, 3, 9, 7, 11].enumerated() {
+        hs.append(try db.save(Highlight(sourceId: src.id, text: "第\(i)条", location: "第 \(p) 页")))
+      }
+      let none = try db.save(Highlight(text: "无出处"))
+      // 页码顺序：1 3 5 7 9 11 → 第1条 第2条 第0条 第4条 第3条 第5条
+      let ctx = try XCTUnwrap(try db.contextHighlights(around: hs[0].id!, radius: 2))
+      XCTAssertEqual(ctx.items.map(\.text), ["第1条", "第2条", "第0条", "第4条", "第3条"])
+      XCTAssertEqual(ctx.index, 2)
+      let edge = try XCTUnwrap(try db.contextHighlights(around: hs[1].id!, radius: 2))
+      XCTAssertEqual(edge.index, 0)
+      XCTAssertEqual(edge.items.count, 3)
+      XCTAssertNil(try db.contextHighlights(around: none.id!))
+
+      let card = try db.save(Card(deck: "a", front: "x"))
+      _ = try db.answer(card, .good)
+      XCTAssertEqual(try db.activity(on: Date()).cards, 1)
+      XCTAssertEqual(try db.activity(on: Date().addingTimeInterval(-86400 * 2)).cards, 0)
+
+      store.reload()
+      let nid = try XCTUnwrap(store.createNotebook(title: "核对", with: [hs[0].id!, none.id!]))
+      store.reload()
+      store.loadNotebook(nid)
+      let req = try XCTUnwrap(store.notebookCitationCheck(export: .docx))
+      XCTAssertEqual(Set(req.issues.map(\.kind)), [.noSource, .sourceInfo])
+      XCTAssertEqual(req.snippets[none.id!], "无出处")
+      // 去修改：出处信息不全 → 打开出处编辑
+      store.citationCheck = req
+      store.fixCitationIssue(req.issues.first { $0.kind == .sourceInfo }!)
+      XCTAssertNil(store.citationCheck)
+      XCTAssertEqual(store.editingSource?.id, src.id)
+      store.editingSource = nil
+      store.fixCitationIssue(req.issues.first { $0.kind == .noSource }!)
+      XCTAssertEqual(store.editorDraft?.highlight.id, none.id)
+    }
+  }
+}

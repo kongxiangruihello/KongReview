@@ -158,3 +158,72 @@ final class V18CoreTests: XCTestCase {
         XCTAssertEqual(ReviewHeatmap.streak(days, today: date(2026, 10, 16), calendar: cal), 0)
     }
 }
+
+final class V19CoreTests: XCTestCase {
+    func testCitationCheck() {
+        var shiji = Source(id: 1, title: "史记", author: "（汉）司马迁", publisher: "中华书局", year: "1959", place: "北京")
+        shiji.classicTitle = "史记"
+        let lunyuBook = Source(id: 2, title: "论语译注", author: "杨伯峻")       // 缺出版者、年份
+        var lunyu = Source(id: 3, title: "论语")
+        lunyu.classicTitle = "论语"                                           // 直接引原典，不要求页码
+        let web = Source(id: 4, title: "某网页", kind: .web)
+        func h(_ id: Int64, _ loc: String?) -> Highlight { Highlight(id: id, sourceId: 1, text: "x", location: loc) }
+        let items: [CitationCheck.Item] = [
+            .init(highlight: h(1, "卷七 项羽本纪 第300页"), source: shiji),
+            .init(highlight: h(2, "卷八 高祖本纪 第341页"), source: shiji),
+            .init(highlight: h(3, "第九卷 吕太后本纪 第395页"), source: shiji),   // 写法不统一
+            .init(highlight: h(4, "第400页"), source: shiji),                    // 缺篇名
+            .init(highlight: h(5, "学而第一"), source: lunyuBook),               // 缺页码
+            .init(highlight: h(6, "第3页"), source: lunyuBook),
+            .init(highlight: h(7, "学而"), source: lunyu),
+            .init(highlight: h(8, nil), source: lunyu),                          // 缺篇名
+            .init(highlight: h(9, nil), source: web),
+            .init(highlight: h(10, nil), source: nil),                           // 没有出处
+            .init(highlight: h(1, "重复"), source: shiji),                        // 重复的 id 跳过
+        ]
+        let issues = CitationCheck.check(items)
+        func kinds(_ id: Int64) -> [CitationCheck.Kind] { issues.filter { $0.highlightId == id }.map(\.kind) }
+        XCTAssertEqual(kinds(1), [])
+        XCTAssertEqual(kinds(3), [.juanStyle])
+        XCTAssertEqual(kinds(4), [.noChapter])
+        XCTAssertEqual(kinds(5), [.noPage])
+        XCTAssertEqual(kinds(6), [])
+        XCTAssertEqual(kinds(7), [])
+        XCTAssertEqual(kinds(8), [.noChapter])
+        XCTAssertEqual(kinds(9), [])
+        XCTAssertEqual(kinds(10), [.noSource])
+        let src = issues.filter { $0.kind == .sourceInfo }
+        XCTAssertEqual(src.count, 1)
+        XCTAssertEqual(src.first?.sourceId, 2)
+        XCTAssertTrue(src.first?.message.contains("出版者、年份") ?? false)
+        XCTAssertTrue(issues.first { $0.kind == .juanStyle }?.message.contains("“卷七”") ?? false)
+    }
+
+    func testDailyCard() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let d = cal.date(from: DateComponents(year: 2026, month: 10, day: 15, hour: 8))!
+        XCTAssertEqual(DailyCard.title(d, calendar: cal), "日课 · 十月十五日 · 星期四")
+        let body = DailyCard.body(highlights: 10, cards: .init(new: 5, learning: 0, review: 30),
+                                  yesterday: (12, 34), streak: 6)
+        XCTAssertEqual(body, "今天：摘录 10 条，记忆卡 35 张（新 5 · 复习 30），约 9 分钟\n昨天看了 12 条摘录、复习 34 次记忆卡，已连续 6 天。")
+        XCTAssertEqual(DailyCard.body(highlights: 0, cards: .init(), yesterday: (0, 0), streak: 0),
+                       "今天没有到期的功课，翻几条旧摘录吧。\n昨天没有回顾。")
+        XCTAssertEqual(DailyCard.body(highlights: 3, cards: .init(review: 2), yesterday: nil, streak: 0),
+                       "今天：摘录 3 条，记忆卡 2 张，约 1 分钟")
+    }
+}
+
+final class V19TieTests: XCTestCase {
+    func testJuanTiePrefersHanzi() {
+        var s = Source(id: 1, title: "史记", publisher: "中华书局", year: "1959")
+        s.classicTitle = "史记"
+        let items: [CitationCheck.Item] = [
+            .init(highlight: Highlight(id: 1, sourceId: 1, text: "a", location: "卷7 项羽本纪 第1页"), source: s),
+            .init(highlight: Highlight(id: 2, sourceId: 1, text: "b", location: "卷八 高祖本纪 第2页"), source: s),
+        ]
+        let issues = CitationCheck.check(items)
+        XCTAssertEqual(issues.map(\.highlightId), [1])
+        XCTAssertTrue(issues[0].message.contains("多数写作“卷七”"))
+    }
+}

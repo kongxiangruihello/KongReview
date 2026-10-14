@@ -71,6 +71,17 @@ enum ReviewScope {
     }
 }
 
+/// 1.9：引文核对的结果（导出前检查）
+struct CitationCheckRequest: Identifiable {
+    enum Export { case docx, pdf }
+    let id = UUID()
+    var issues: [CitationCheck.Issue]
+    /// 摘录 id → 开头几个字（列表里显示）
+    var snippets: [Int64: String]
+    /// 从导出菜单进来时，核对完可“仍然导出”
+    var export: Export?
+}
+
 /// 1.7：出处书页“按页码范围”面板
 @MainActor
 @Observable
@@ -126,6 +137,10 @@ final class StudyState {
     /// 1.7：按笔记本学习（deck 里放显示名“《笔记本》”）
     var notebookId: Int64?
     var notebookCounts = StudyQueue.Counts()
+    /// 1.9：显示答案后是否展开“原文语境”（记住上次状态）
+    var showContext: Bool = UserDefaults.standard.bool(forKey: "study.showContext") {
+        didSet { UserDefaults.standard.set(showContext, forKey: "study.showContext") }
+    }
 }
 
 /// 记忆卡编辑面板的草稿

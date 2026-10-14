@@ -59,3 +59,30 @@ extension AppDatabase {
         return all.filter { h in SearchSyntax.firstNumber(h.location).map { pages.contains($0) } ?? false }
     }
 }
+
+// MARK: - 1.9：原文语境、每日活动
+
+extension AppDatabase {
+    /// 同一出处里按页码排在这条前后的几条摘录（记忆卡背面“原文语境”）；index 为这条在结果里的位置
+    func contextHighlights(around highlightId: Int64, radius: Int = 2) throws -> (items: [Highlight], index: Int)? {
+        guard let h = try highlights(ids: [highlightId]).first, let sid = h.sourceId else { return nil }
+        let all = try sourceHighlightsByPage(sid)
+        guard let i = all.firstIndex(where: { $0.id == highlightId }) else { return nil }
+        let lo = max(0, i - radius), hi = min(all.count - 1, i + radius)
+        return (Array(all[lo...hi]), i - lo)
+    }
+
+    /// 某一天看过的摘录条数与复习记忆卡的次数（本地日期）
+    func activity(on day: Date) throws -> (highlights: Int, cards: Int) {
+        let start = Calendar.current.startOfDay(for: day)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+        return try writer.read { db in
+            let r = try Row.fetchOne(db, sql: """
+                SELECT SUM(CASE WHEN kind NOT IN ('card', 'note') THEN 1 ELSE 0 END) AS h,
+                       SUM(CASE WHEN kind = 'card' THEN 1 ELSE 0 END) AS c
+                FROM review_event WHERE at >= ? AND at < ?
+                """, arguments: [start, end])
+            return ((r?["h"] as Int?) ?? 0, (r?["c"] as Int?) ?? 0)
+        }
+    }
+}

@@ -142,6 +142,8 @@ final class LibraryStore {
     var clozeQueueMade = 0
     /// 1.7：出处书页的“按页码范围”面板
     var pageRange: PageRangeDraft?
+    /// 1.9：引文核对结果
+    var citationCheck: CitationCheckRequest?
     /// 生成分享图的摘录
     var shareImageHighlight: Highlight?
     /// 已存搜索
