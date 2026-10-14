@@ -38,6 +38,9 @@ final class NotebookState {
     }
 
     @ObservationIgnored var pendingSaves: [Int64: Task<Void, Never>] = [:]
+    @ObservationIgnored var pendingNoteSaves: [Int64: Task<Void, Never>] = [:]
+    /// 1.5：正在编辑本文批注的块
+    var editingNote: Int64?
 
     var quoteCount: Int { blocks.filter { $0.kind == .highlight }.count }
 }
@@ -143,6 +146,7 @@ extension LibraryStore {
         let hs = (try? db.highlights(ids: ids)) ?? []
         st.highlights = Dictionary(hs.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
         st.picker = nil
+        st.editingNote = nil
     }
 
     /// 摘录被编辑后刷新引用到的文字
@@ -210,6 +214,14 @@ extension LibraryStore {
             if let b = st.blocks.first(where: { $0.id == id }) { try? db.updateBlockText(id, text: b.text) }
         }
         st.pendingSaves = [:]
+        for (id, task) in st.pendingNoteSaves {
+            task.cancel()
+            if let b = st.blocks.first(where: { $0.id == id }) {
+                let t = (b.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                try? db.updateBlockNote(id, note: t.isEmpty ? nil : b.note)
+            }
+        }
+        st.pendingNoteSaves = [:]
     }
 
     func moveNotebookBlock(_ id: Int64, by delta: Int) {
@@ -305,6 +317,10 @@ extension LibraryStore {
                 let cite = h.map { CitationFormatter.citation(for: $0, source: source(for: $0), style: CitationSettings.style) } ?? ""
                 var out = [NotebookPiece(.quote(text, cite: cite))]
                 if notes, let n = h?.note, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    out.append(NotebookPiece(.comment(n)))
+                }
+                // 1.5：本文批注一律导出（它是这篇文字的一部分）
+                if let n = b.note, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     out.append(NotebookPiece(.comment(n)))
                 }
                 return out

@@ -35,17 +35,20 @@ public struct NotebookBlock: Codable, Identifiable, Hashable, Sendable {
     public var kind: Kind
     public var highlightId: Int64?
     public var text: String
+    /// 1.5：本文批注——只属于这本笔记本，不改原摘录的按语（只用于摘录块）
+    public var note: String?
     public var createdAt: Date
     public var updatedAt: Date
 
     public init(id: Int64? = nil, notebookId: Int64, position: Double, kind: Kind, highlightId: Int64? = nil,
-                text: String = "", createdAt: Date = Date(), updatedAt: Date = Date()) {
+                text: String = "", note: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.notebookId = notebookId
         self.position = position
         self.kind = kind
         self.highlightId = highlightId
         self.text = text
+        self.note = note
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

@@ -116,6 +116,9 @@ struct DailyReviewView: View {
             Button { store.review.theme = nil } label: {
                 if theme == nil { Label("全部摘录", systemImage: "checkmark") } else { Text("全部摘录") }
             }
+            Button { store.review.theme = ReviewScope.stale } label: {
+                if theme == ReviewScope.stale { Label("久未回顾的摘录", systemImage: "checkmark") } else { Text("久未回顾的摘录") }
+            }
             if !store.notebooks.isEmpty {
                 Divider()
                 Section("专题回顾（按笔记本，按笔记本中的顺序全部过一遍）") {
@@ -141,7 +144,9 @@ struct DailyReviewView: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: theme == nil ? "tray.full" : (ReviewScope.notebookID(theme) != nil ? "text.book.closed" : "number"))
+                Image(systemName: theme == nil ? "tray.full"
+                      : (theme == ReviewScope.stale ? "clock.arrow.circlepath"
+                         : (ReviewScope.notebookID(theme) != nil ? "text.book.closed" : "number")))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(ReviewPalette.accent)
                 Text(scopeLabel)
@@ -172,6 +177,7 @@ struct DailyReviewView: View {
     /// 范围的显示名
     private var scopeLabel: String {
         guard let t = state.theme else { return "全部摘录" }
+        if t == ReviewScope.stale { return "久未回顾" }
         if let nid = ReviewScope.notebookID(t) {
             return store.notebooks.first { $0.id == nid }.map { "《\($0.title)》" } ?? "专题笔记本"
         }
@@ -180,6 +186,7 @@ struct DailyReviewView: View {
 
     private var scopeTitle: String {
         guard let t = state.theme else { return "今日回顾" }
+        if t == ReviewScope.stale { return "今日回顾 · 久未回顾的摘录" }
         if ReviewScope.notebookID(t) != nil { return "专题回顾 · " + scopeLabel }
         return "主题回顾 · #\(t)"
     }
@@ -755,7 +762,15 @@ struct DailyReviewView: View {
                 persist()
                 return
             }
-            let (highlights, weights) = try store.db.reviewCandidates(tag: state.theme)
+            let highlights: [Highlight]
+            let weights: [Int64: Double]
+            if state.theme == ReviewScope.stale {
+                // 1.5：久未回顾——只从从未出现或半年以上没出现的摘录里抽
+                highlights = try store.db.staleHighlights()
+                weights = try store.db.sourceWeights()
+            } else {
+                (highlights, weights) = try store.db.reviewCandidates(tag: state.theme)
+            }
             let session: ReviewScheduler.Session
             if forceNew {
                 session = scheduler.makeSession(highlights: highlights, sourceWeights: weights)

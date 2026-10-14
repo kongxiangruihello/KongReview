@@ -348,6 +348,11 @@ final class AppDatabase {
             try db.create(index: "notebook_block_order", on: "notebook_block", columns: ["notebookId", "position"])
             try db.create(index: "notebook_block_highlight", on: "notebook_block", columns: ["highlightId"])
         }
+
+        // 1.5：笔记本里摘录块的“本文批注”
+        m.registerMigration("v10-notebook-block-note") { db in
+            try db.alter(table: "notebook_block") { t in t.add(column: "note", .text) }
+        }
         return m
     }
 }

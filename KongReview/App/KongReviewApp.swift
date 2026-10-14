@@ -63,6 +63,8 @@ struct KongReviewApp: App {
                 Button("导出诊断信息…") { ExportService.exportDiagnostics(store: store) }
             }
             CommandGroup(after: .importExport) {
+                Button("查找重复摘录…") { WindowOpener.showMain(); store.findDuplicates() }
+                Divider()
                 Button("导出全部为 Markdown…") { ExportService.exportAll(store: store) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("立即备份") { ExportService.backupNow(store: store) }

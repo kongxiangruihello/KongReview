@@ -134,7 +134,12 @@ final class V14CoreTests: XCTestCase {
         // 封面 + 章節 + 引文 + 正文 + 長引文（拆 2 頁以上）+ 章節 + 引文 + 參考文獻
         XCTAssertGreaterThanOrEqual(slides.count, 9)
         for (_, xml) in files { XCTAssertNoThrow(try XMLDocumentCheck.parse(xml)) }
-        XCTAssertTrue(files["ppt/slides/slide3.xml"]!.contains("按："))
+        // 1.5：按语进演讲者备注，不印在幻灯片上
+        XCTAssertFalse(files["ppt/slides/slide3.xml"]!.contains("按："))
+        XCTAssertTrue(files["ppt/slides/_rels/slide3.xml.rels"]!.contains("notesSlide1.xml"))
+        XCTAssertTrue(files["ppt/notesSlides/notesSlide1.xml"]!.contains("“習”是溫習"))
+        XCTAssertTrue(files["ppt/presentation.xml"]!.contains("<p:notesMasterIdLst>"))
+        XCTAssertNotNil(files["ppt/notesMasters/notesMaster1.xml"])
         XCTAssertTrue(files["ppt/presentation.xml"]!.contains("<p:sldId id=\"256\" r:id=\"rId2\"/>"))
         if let dir = ProcessInfo.processInfo.environment["KR_PPTX_DIR"] {
             for (path, xml) in files {
@@ -143,5 +148,49 @@ final class V14CoreTests: XCTestCase {
                 try xml.write(to: url, atomically: true, encoding: .utf8)
             }
         }
+    }
+}
+
+final class V15CoreTests: XCTestCase {
+    func testDuplicateKeyAndGroups() {
+        XCTAssertEqual(DuplicateFinder.key("除了紅衛兵和工 人造反派，**上海**還有"), DuplicateFinder.key("除了红卫兵和工人造反派上海还有"))
+        let items: [DuplicateFinder.Item] = [
+            .init(id: 1, text: "除了紅衛兵和工人造反派，上海還有一支文革力量", sourceId: 1),
+            .init(id: 2, text: "除了紅衛兵和工 人造反派，上海還有一支文革力量", sourceId: 1),
+            .init(id: 3, text: "除了紅衛兵和工人造反派，上海還有一支文革力量：寫作組", sourceId: 1),
+            .init(id: 4, text: "完全不同的一句話，講的是別的事情", sourceId: 1),
+            .init(id: 5, text: "除了红卫兵和工人造反派，上海还有一支文革力量", sourceId: 2),
+            .init(id: 6, text: "朱維錚", sourceId: 1),
+            .init(id: 7, text: "朱維錚", sourceId: 1),
+            .init(id: 8, text: "完全不同的一句話，講的是別的事", sourceId: 3),
+        ]
+        let g = DuplicateFinder.groups(items)
+        // 1、2、5 完全相同（跨出处也算）；3 与之相似（同出处、多几个字）→ 并成一组；6、7 短但完全相同也算
+        XCTAssertEqual(g.count, 2)
+        XCTAssertEqual(g.first { $0.ids.contains(1) }?.ids, [1, 2, 3, 5])
+        XCTAssertEqual(g.first { $0.ids.contains(1) }?.exact, false)
+        XCTAssertEqual(g.first { $0.ids.contains(6) }?.exact, true)
+        // 4 与 8 不同出处、只是相似：不算
+        XCTAssertNil(g.first { $0.ids.contains(4) })
+        // 忽略过的组不再出现
+        XCTAssertEqual(DuplicateFinder.groups(items, ignored: ["6-7"]).count, 1)
+    }
+
+    func testMergedFields() {
+        let now = Date()
+        var a = Highlight(sourceId: 1, text: "甲", note: "按一", location: nil, tags: ["儒"], createdAt: now)
+        a.surfacedCount = 2
+        var b = Highlight(sourceId: 1, text: "甲", translation: "譯", note: "按二", location: "第 3 页", tags: ["孔", "儒"], isFavorite: true,
+                          createdAt: now.addingTimeInterval(-100))
+        b.surfacedCount = 3; b.frequency = 1
+        let m = DuplicateFinder.merged(keeper: a, others: [b])
+        XCTAssertEqual(m.note, "按一\n\n按二")
+        XCTAssertEqual(m.translation, "譯")
+        XCTAssertEqual(m.location, "第 3 页")
+        XCTAssertEqual(m.tags, ["儒", "孔"])
+        XCTAssertTrue(m.isFavorite)
+        XCTAssertEqual(m.surfacedCount, 5)
+        XCTAssertEqual(m.frequency, 1)
+        XCTAssertEqual(m.createdAt, b.createdAt)
     }
 }

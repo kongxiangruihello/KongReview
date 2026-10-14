@@ -44,6 +44,11 @@ final class LibraryStore {
     var newNotebookRequest: NewNotebookRequest?
     /// 1.3：确认删除笔记本
     var notebookPendingDeletion: Notebook?
+    /// 1.5：查找重复摘录的结果（非 nil 时显示整理面板）
+    var duplicateReview: DuplicateReview?
+    /// 1.5：久未回顾的统计（数据变化时刷新）
+    var staleSummary = AppDatabase.StaleSummary()
+    @ObservationIgnored var mergeBackupDone = false
     /// 1.3：每周小结（按周缓存）
     @ObservationIgnored var weeklyDigestCache: WeeklyDigest?
     var trashCount = 0
@@ -559,6 +564,7 @@ final class LibraryStore {
     var deckSummaryCache: [DeckSummary] = []
 
     func refreshDerived() {
+        staleSummary = (try? db.staleSummary()) ?? AppDatabase.StaleSummary()
         stats = (try? db.reviewSummary(now: Date(), days: 30)) ?? .empty
         deckSummaryCache = (try? db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
                                                   reviewsPerDay: CardSettings.reviewsPerDay)) ?? []

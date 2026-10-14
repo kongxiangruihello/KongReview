@@ -256,6 +256,12 @@ struct NotebookBlockRow: View {
         }
     }
 
+    /// 有本文批注，或刚点了“＋ 本文批注”
+    private var hasNote: Bool {
+        let cur = store.notebookState.blocks.first { $0.id == block.id }?.note ?? block.note
+        return !(cur ?? "").isEmpty || (block.id != nil && store.notebookState.editingNote == block.id)
+    }
+
     private var quote: some View {
         let h = block.highlightId.flatMap { store.notebookState.highlights[$0] }
         let text = h?.text ?? block.text
@@ -281,6 +287,27 @@ struct NotebookBlockRow: View {
                             .font(.system(size: 11.5))
                             .handCursor()
                     }
+                    if !hasNote, let id = block.id {
+                        Button("＋ 本文批注") { store.notebookState.editingNote = id }
+                            .buttonStyle(.link)
+                            .font(.system(size: 11.5))
+                            .handCursor()
+                            .help("只属于这本笔记本的批注，不改原摘录的按语；导出 Word 时排在引文后，导出演示稿时放进演讲者备注")
+                    }
+                }
+                if hasNote, let id = block.id {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("本文批注").font(.system(size: 11, weight: .medium)).foregroundStyle(ReviewPalette.sub)
+                        RichEditor(text: Binding(
+                            get: { store.notebookState.blocks.first { $0.id == id }?.note ?? "" },
+                            set: { store.updateNotebookBlockNote(id, $0) }
+                        ), font: .note, placeholder: "写下这条引文在本文中的用意、要讲的要点……", toolbar: false, autoHeight: true,
+                           minHeight: 40, focus: store.notebookState.editingNote == id && (block.note ?? "").isEmpty,
+                           slot: "nb-note-\(id)")
+                        .richEditorFrame()
+                    }
+                    .padding(.top, 4)
+                    .onDisappear { if store.notebookState.editingNote == id { store.notebookState.editingNote = nil } }
                 }
             }
         }

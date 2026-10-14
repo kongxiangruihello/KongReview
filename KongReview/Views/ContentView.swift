@@ -94,6 +94,7 @@ struct ContentView: View {
         .modifier(TagSheets())
         .modifier(WritingSheets())
         .modifier(NotebookSheets())
+        .modifier(MaintenanceSheets())
         .alert("完成", isPresented: Binding(
             get: { store.infoMessage != nil },
             set: { if !$0 { store.infoMessage = nil } }

@@ -63,6 +63,8 @@ struct StatsView: View {
                     .monospacedDigit()
                 }
 
+                staleSection
+
                 Text("统计从 0.7 版开始记录：每日回顾里“下一条 / 收藏 / 弃置 / 做成记忆卡”算回顾一条摘录；记忆卡每评一次分算一次。")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -74,6 +76,57 @@ struct StatsView: View {
         .navigationTitle("回顾统计")
         // 卡片统计只在打开本页、数据变化时重算（SQL 汇总，不读出全部卡片）
         .task(id: store.revision) { store.refreshCardInsights() }
+    }
+
+    /// 1.5：久未回顾——从未在每日回顾里出现过、或半年以上没出现的摘录
+    private var staleSection: some View {
+        let s = store.staleSummary
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("久未回顾").font(.headline)
+                Spacer()
+                if s.never + s.old > 0 {
+                    Button {
+                        store.review.theme = ReviewScope.stale
+                        store.review.sessionToken += 1
+                        store.selection = .review
+                    } label: {
+                        Label("本周优先回顾这些", systemImage: "arrow.right.circle")
+                    }
+                    .buttonStyle(.link)
+                    .handCursor()
+                    .help("今日回顾改为只从这些摘录里抽（在回顾页顶部的范围菜单可改回“全部摘录”）")
+                }
+            }
+            HStack(spacing: 12) {
+                tile("从未出现", "\(s.never) 条", "eye.slash")
+                tile("半年以上没出现", "\(s.old) 条", "clock.arrow.circlepath")
+                tile("占全部摘录", s.total > 0 ? String(format: "%.0f%%", Double(s.never + s.old) * 100 / Double(s.total)) : "—", "percent")
+            }
+            if !s.bySource.isEmpty && s.never > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("从未出现的摘录较多的出处").font(.caption).foregroundStyle(.secondary)
+                    ForEach(Array(s.bySource.enumerated()), id: \.offset) { _, item in
+                        HStack {
+                            if let id = item.0, let src = store.sources.first(where: { $0.id == id }) {
+                                Button("《\(src.title)》") { store.selection = .source(id) }
+                                    .buttonStyle(.link)
+                                    .handCursor()
+                            } else {
+                                Text("未归类")
+                            }
+                            Spacer()
+                            Text("\(item.1) 条").monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .font(.callout)
+                    }
+                }
+                .frame(maxWidth: 420)
+            }
+            Text("每日回顾按出处权重随机抽取，摘录多的出处里总有一些轮不到。可在“出处管理”里调高某个出处的回顾权重，或点上面的按钮集中看一周。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func tile(_ title: String, _ value: String, _ icon: String) -> some View {

@@ -998,3 +998,104 @@ final class V14NotebookTests: XCTestCase {
     }
   }
 }
+
+final class V15Tests: XCTestCase {
+  func testMergeAndUndo() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let s = try db.save(Source(title: "革命造反年代", author: "李逊"))
+    var a = Highlight(sourceId: s.id, text: "除了紅衛兵和工人造反派", note: "按一", location: "第 14 页")
+    a.surfacedCount = 2
+    a = try db.save(a)
+    var b = Highlight(sourceId: s.id, text: "除了紅衛兵和工 人造反派", note: "按二", tags: ["文革"], isFavorite: true)
+    b.surfacedCount = 3
+    b = try db.save(b)
+    XCTAssertEqual(try db.makeCards(fromHighlights: [b.id!]), 1)
+    try db.writer.write { d in
+      var e = ReviewEvent(kind: .keep, highlightId: b.id); try e.insert(d)
+      try d.execute(sql: "INSERT INTO inbox_item (key, highlightId, importedAt) VALUES ('k1', ?, ?)", arguments: [b.id, Date()])
+    }
+    let nid = try XCTUnwrap(try db.createNotebook(title: "n").id)
+    try db.insertBlocks([NotebookBlock(notebookId: nid, position: 0, kind: .highlight, highlightId: b.id, text: b.text)], into: nid, after: nil)
+
+    let groups = DuplicateFinder.groups(try db.duplicateCandidates())
+    XCTAssertEqual(groups.map(\.ids), [[a.id!, b.id!]])
+    let undo = try db.mergeHighlights(keeper: a.id!, others: [b.id!])
+    let kept = try XCTUnwrap(try db.highlights(ids: [a.id!]).first)
+    XCTAssertEqual(kept.note, "按一\n\n按二")
+    XCTAssertEqual(kept.tags, ["文革"])
+    XCTAssertTrue(kept.isFavorite)
+    XCTAssertEqual(kept.surfacedCount, 5)
+    XCTAssertNotNil(try db.writer.read { d in try Highlight.fetchOne(d, key: b.id!) }?.deletedAt)
+    XCTAssertEqual(try db.cards().first?.highlightId, a.id)
+    XCTAssertEqual(try db.notebookBlocks(nid).first?.highlightId, a.id)
+    try db.writer.read { d in
+      XCTAssertEqual(try Int64.fetchOne(d, sql: "SELECT highlightId FROM review_event"), a.id)
+      XCTAssertEqual(try Int64.fetchOne(d, sql: "SELECT highlightId FROM inbox_item"), a.id)
+    }
+    XCTAssertTrue(DuplicateFinder.groups(try db.duplicateCandidates()).isEmpty)
+    // 撤销
+    try db.undoMerge(undo)
+    XCTAssertNil(try db.writer.read { d in try Highlight.fetchOne(d, key: b.id!) }?.deletedAt)
+    XCTAssertEqual(try db.highlights(ids: [a.id!]).first?.note, "按一")
+    XCTAssertEqual(try db.cards().first?.highlightId, b.id)
+    XCTAssertEqual(try db.notebookBlocks(nid).first?.highlightId, b.id)
+    try db.writer.read { d in
+      XCTAssertEqual(try Int64.fetchOne(d, sql: "SELECT highlightId FROM inbox_item"), b.id)
+    }
+  }
+
+  func testStale() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let s = try db.save(Source(title: "甲書"))
+    _ = try db.save(Highlight(sourceId: s.id, text: "從未出現"))
+    var old = Highlight(sourceId: s.id, text: "很久以前出現過")
+    old.surfacedCount = 1; old.lastSurfacedAt = Date().addingTimeInterval(-400 * 86400)
+    _ = try db.save(old)
+    var recent = Highlight(text: "最近出現過")
+    recent.surfacedCount = 4; recent.lastSurfacedAt = Date()
+    _ = try db.save(recent)
+    var discarded = Highlight(text: "已棄置")
+    discarded.isDiscarded = true
+    _ = try db.save(discarded)
+    XCTAssertEqual(Set(try db.staleHighlights().map(\.text)), ["從未出現", "很久以前出現過"])
+    let sum = try db.staleSummary()
+    XCTAssertEqual(sum.never, 1); XCTAssertEqual(sum.old, 1); XCTAssertEqual(sum.total, 3)
+    XCTAssertEqual(sum.bySource.first?.0, s.id)
+  }
+
+  func testStoreMergeAndBlockNote() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      let um = UndoManager()
+      store.undoManager = um
+      let a = try db.save(Highlight(text: "學而時習之，不亦說乎"))
+      let b = try db.save(Highlight(text: "學而時習之 不亦說乎", isFavorite: true))
+      store.reload()
+      var r = DuplicateReview()
+      r.scanning = false
+      r.groups = DuplicateFinder.groups(try db.duplicateCandidates())
+      r.highlights = [a.id!: a, b.id!: b]
+      for g in r.groups { r.keeper[g.id] = store.defaultKeeper(g, in: r.highlights) }
+      XCTAssertEqual(r.keeper.values.first, b.id, "收藏过的优先保留")
+      store.duplicateReview = r
+      store.mergeDuplicateGroup(r.groups[0].id)
+      XCTAssertEqual(store.duplicateReview?.groups.count, 0)
+      XCTAssertEqual(try db.count(HighlightQuery()), 1)
+      um.undo()
+      XCTAssertEqual(try db.count(HighlightQuery()), 2)
+      store.duplicateReview = nil
+
+      // 本文批注：写入、导出
+      let nid = try XCTUnwrap(store.createNotebook(title: "x", with: [a.id!]))
+      store.loadNotebook(nid)
+      let bid = store.notebookState.blocks[0].id!
+      store.updateNotebookBlockNote(bid, "本文要講的是“時習”。")
+      store.flushNotebookSaves()
+      XCTAssertEqual(try db.notebookBlocks(nid).first?.note, "本文要講的是“時習”。")
+      let pieces = store.notebookPieces()
+      XCTAssertEqual(pieces.count, 2)
+      if case .comment(let c) = pieces[1].kind { XCTAssertTrue(c.contains("時習")) } else { XCTFail() }
+    }
+  }
+}

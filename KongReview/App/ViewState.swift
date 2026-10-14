@@ -41,6 +41,8 @@ struct BibliographyRequest: Identifiable {
 enum ReviewScope {
     static let notebookPrefix = "nb:"
     static func notebook(_ id: Int64) -> String { notebookPrefix + String(id) }
+    /// 1.5：久未回顾的摘录（从未出现或半年以上没出现）
+    static let stale = "__stale"
     static func notebookID(_ theme: String?) -> Int64? {
         guard let t = theme, t.hasPrefix(notebookPrefix) else { return nil }
         return Int64(t.dropFirst(notebookPrefix.count))

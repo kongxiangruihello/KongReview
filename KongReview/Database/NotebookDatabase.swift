@@ -134,6 +134,13 @@ extension AppDatabase {
         }
     }
 
+    /// 1.5：本文批注
+    func updateBlockNote(_ id: Int64, note: String?, now: Date = Date()) throws {
+        try writer.write { db in
+            try db.execute(sql: "UPDATE notebook_block SET note = ?, updatedAt = ? WHERE id = ?", arguments: [note, now, id])
+        }
+    }
+
     func setBlockPosition(_ id: Int64, position: Double) throws {
         try writer.write { db in
             try db.execute(sql: "UPDATE notebook_block SET position = ? WHERE id = ?", arguments: [position, id])

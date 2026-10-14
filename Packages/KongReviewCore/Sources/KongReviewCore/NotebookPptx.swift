@@ -8,7 +8,8 @@ import Foundation
 /// - 封面：标题 + 日期；
 /// - 小标题 → 章节页（大字居中，下方一道蓝线）；
 /// - 摘录 → 引文页（左侧蓝色竖条，宋体大字，右下角出处）；字多时自动缩小字号，特别长的按句子拆成几页（标“续”）；
-/// - 文字 → 正文页（同样按长度拆页）；按语（可选）排在引文下方，小字灰色；
+/// - 文字 → 正文页（同样按长度拆页）；
+/// - 按语与笔记本里的批注（1.5）放进该页的“演讲者备注”：投影上只有引文，讲解要点只在演示者视图里看得到；
 /// - 文末可附参考文献页。
 public enum NotebookPptx {
 
@@ -25,6 +26,8 @@ public enum NotebookPptx {
     public static func files(title: String, pieces: [NotebookPiece], options: NotebookExportOptions = .init(),
                              date: Date = Date(), palette: Palette = .init()) -> [String: String] {
         var slides: [String] = []
+        /// 1.5：演讲者备注（页序号 → 文字）
+        var notes: [Int: String] = [:]
         let p = palette
 
         // 封面
@@ -38,13 +41,21 @@ public enum NotebookPptx {
                     anchor: "t"),
         ]))
 
-        var pendingComment: String?
+        var pendingComments: [String] = []
         var lastQuote: (text: String, cite: String)?
         func flushQuote() {
             guard let q = lastQuote else { return }
-            slides += quoteSlides(q.text, cite: q.cite, comment: pendingComment, p)
+            let start = slides.count
+            slides += quoteSlides(q.text, cite: q.cite, comment: nil, p)
+            var lines = pendingComments.map { NotebookExporter.plain($0) }.filter { !$0.isEmpty }
+            if !lines.isEmpty {
+                if !q.cite.isEmpty { lines.append("出处：" + q.cite) }
+                notes[start] = lines.joined(separator: "\n\n")
+                // 拆成几页的长引文：后面几页也带上同样的备注
+                for k in (start + 1)..<slides.count { notes[k] = notes[start] }
+            }
             lastQuote = nil
-            pendingComment = nil
+            pendingComments = []
         }
 
         for piece in pieces {
@@ -73,7 +84,7 @@ public enum NotebookPptx {
                 flushQuote()
                 lastQuote = (q, cite)
             case .comment(let cm):
-                if lastQuote != nil { pendingComment = cm }
+                if lastQuote != nil { pendingComments.append(cm) }
             }
         }
         flushQuote()
@@ -91,7 +102,7 @@ public enum NotebookPptx {
             }
         }
 
-        return package(slides: slides, title: title, date: date)
+        return package(slides: slides, notes: notes, title: title, date: date)
     }
 
     // MARK: 各类页面
@@ -263,7 +274,7 @@ public enum NotebookPptx {
 
     // MARK: 包
 
-    static func package(slides: [String], title: String, date: Date) -> [String: String] {
+    static func package(slides: [String], notes: [Int: String] = [:], title: String, date: Date) -> [String: String] {
         var files: [String: String] = [:]
         let head = NotebookDocx.xmlHead
         var overrides = """
@@ -275,20 +286,47 @@ public enum NotebookPptx {
         """
         var sldIds = ""
         var presRels = "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster\" Target=\"slideMasters/slideMaster1.xml\"/>"
+        var noteCount = 0
         for (i, s) in slides.enumerated() {
             let n = i + 1
             files["ppt/slides/slide\(n).xml"] = s
-            files["ppt/slides/_rels/slide\(n).xml.rels"] = head + """
-            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\
-            <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>\
-            </Relationships>
-            """
+            var slideRels = "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/slideLayout1.xml\"/>"
+            if let text = notes[i], !text.isEmpty {
+                noteCount += 1
+                let m = noteCount
+                slideRels += "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide\" Target=\"../notesSlides/notesSlide\(m).xml\"/>"
+                files["ppt/notesSlides/notesSlide\(m).xml"] = head + notesSlide(text)
+                files["ppt/notesSlides/_rels/notesSlide\(m).xml.rels"] = head + """
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\
+                <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="../notesMasters/notesMaster1.xml"/>\
+                <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide\(n).xml"/>\
+                </Relationships>
+                """
+                overrides += "<Override PartName=\"/ppt/notesSlides/notesSlide\(m).xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml\"/>"
+            }
+            files["ppt/slides/_rels/slide\(n).xml.rels"] = head
+                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\(slideRels)</Relationships>"
             overrides += "<Override PartName=\"/ppt/slides/slide\(n).xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>"
             sldIds += "<p:sldId id=\"\(255 + n)\" r:id=\"rId\(n + 1)\"/>"
             presRels += "<Relationship Id=\"rId\(n + 1)\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide\(n).xml\"/>"
         }
         let themeRel = "rId\(slides.count + 2)"
         presRels += "<Relationship Id=\"\(themeRel)\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme\" Target=\"theme/theme1.xml\"/>"
+        var notesMasterList = ""
+        if noteCount > 0 {
+            let rid = "rId\(slides.count + 3)"
+            presRels += "<Relationship Id=\"\(rid)\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster\" Target=\"notesMasters/notesMaster1.xml\"/>"
+            notesMasterList = "<p:notesMasterIdLst><p:notesMasterId r:id=\"\(rid)\"/></p:notesMasterIdLst>"
+            files["ppt/notesMasters/notesMaster1.xml"] = head + notesMaster
+            files["ppt/notesMasters/_rels/notesMaster1.xml.rels"] = head + """
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\
+            <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme2.xml"/>\
+            </Relationships>
+            """
+            files["ppt/theme/theme2.xml"] = head + theme
+            overrides += "<Override PartName=\"/ppt/notesMasters/notesMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml\"/>"
+                + "<Override PartName=\"/ppt/theme/theme2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/>"
+        }
 
         files["[Content_Types].xml"] = head + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
             + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
@@ -301,6 +339,7 @@ public enum NotebookPptx {
         """
         files["ppt/presentation.xml"] = head + "<p:presentation \(ns) saveSubsetFonts=\"1\">"
             + "<p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst>"
+            + notesMasterList
             + "<p:sldIdLst>\(sldIds)</p:sldIdLst>"
             + "<p:sldSz cx=\"\(W)\" cy=\"\(H)\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/></p:presentation>"
         files["ppt/_rels/presentation.xml.rels"] = head
@@ -339,6 +378,43 @@ public enum NotebookPptx {
         """
         return files
     }
+
+    // MARK: 演讲者备注（1.5）
+
+    static let grpSpPr = "<p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>"
+        + "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>"
+
+    static func notesSlide(_ text: String) -> String {
+        let paras = text.components(separatedBy: "\n").map { line -> String in
+            line.isEmpty ? "<a:p><a:endParaRPr lang=\"zh-CN\"/></a:p>"
+                : "<a:p><a:r><a:rPr lang=\"zh-CN\" altLang=\"en-US\" dirty=\"0\"/><a:t>\(NotebookDocx.esc(line))</a:t></a:r></a:p>"
+        }.joined()
+        return "<p:notes \(ns)><p:cSld><p:spTree>" + grpSpPr
+            + "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"幻灯片图像占位符 1\"/><p:cNvSpPr><a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/></p:cNvSpPr>"
+            + "<p:nvPr><p:ph type=\"sldImg\"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp>"
+            + "<p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"备注占位符 2\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>"
+            + "<p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:spPr/>"
+            + "<p:txBody><a:bodyPr/><a:lstStyle/>\(paras)</p:txBody></p:sp>"
+            + "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>"
+    }
+
+    static let notesMaster = "<p:notesMaster \(ns)><p:cSld><p:bg><p:bgRef idx=\"1001\"><a:schemeClr val=\"bg1\"/></p:bgRef></p:bg><p:spTree>"
+        + grpSpPr
+        + "<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"幻灯片图像占位符 1\"/><p:cNvSpPr><a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/></p:cNvSpPr>"
+        + "<p:nvPr><p:ph type=\"sldImg\" idx=\"2\"/></p:nvPr></p:nvSpPr>"
+        + "<p:spPr><a:xfrm><a:off x=\"685800\" y=\"1143000\"/><a:ext cx=\"5486400\" cy=\"3086100\"/></a:xfrm>"
+        + "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln w=\"12700\"><a:solidFill><a:prstClr val=\"black\"/></a:solidFill></a:ln></p:spPr></p:sp>"
+        + "<p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"备注占位符 2\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>"
+        + "<p:nvPr><p:ph type=\"body\" sz=\"quarter\" idx=\"3\"/></p:nvPr></p:nvSpPr>"
+        + "<p:spPr><a:xfrm><a:off x=\"685800\" y=\"4400550\"/><a:ext cx=\"5486400\" cy=\"3600450\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>"
+        + "<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"zh-CN\"/></a:p></p:txBody></p:sp>"
+        + "</p:spTree></p:cSld>"
+        + "<p:clrMap bg1=\"lt1\" tx1=\"dk1\" bg2=\"lt2\" tx2=\"dk2\" accent1=\"accent1\" accent2=\"accent2\" accent3=\"accent3\" "
+        + "accent4=\"accent4\" accent5=\"accent5\" accent6=\"accent6\" hlink=\"hlink\" folHlink=\"folHlink\"/>"
+        + "<p:notesStyle><a:lvl1pPr marL=\"0\" algn=\"l\" defTabSz=\"914400\" rtl=\"0\" eaLnBrk=\"1\" latinLnBrk=\"0\" hangingPunct=\"1\">"
+        + "<a:defRPr sz=\"1400\" kern=\"1200\"><a:solidFill><a:schemeClr val=\"tx1\"/></a:solidFill>"
+        + "<a:latin typeface=\"+mn-lt\"/><a:ea typeface=\"+mn-ea\"/><a:cs typeface=\"+mn-cs\"/></a:defRPr></a:lvl1pPr></p:notesStyle>"
+        + "</p:notesMaster>"
 
     /// 最小但完整的主题（颜色、字体、格式方案三部分都必须有）
     static let theme = """
