@@ -71,6 +71,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    /// 1.5.1：关掉主窗口后应用仍在后台运行；点程序坞图标时把主窗口重新打开
+    /// （单窗口的 SwiftUI Window 场景不会自动重开，以前点图标没有反应）
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag || !WindowOpener.mainWindowVisible { WindowOpener.showMain() }
+        return false
+    }
+
     @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
         guard let string = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
               let url = URL(string: string),
@@ -123,13 +130,47 @@ enum WindowOpener {
         }
     }
 
+    /// 主窗口（不含设置窗口、浮窗）
+    static var mainWindows: [NSWindow] {
+        NSApp.windows.filter { w in
+            w.canBecomeMain && !(w is NSPanel)
+                && w.identifier?.rawValue.contains("Settings") != true && !w.title.contains("设置")
+        }
+    }
+
+    static var mainWindowVisible: Bool {
+        mainWindows.contains { $0.isVisible && !$0.isMiniaturized }
+    }
+
     static func showMain() {
         NSApp.activate()
-        if let window = NSApp.windows.first(where: { $0.canBecomeMain && !($0 is NSPanel) && $0.isVisible }) {
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            openMain?()
+        if let window = mainWindows.first(where: { $0.isVisible || $0.isMiniaturized }) {
+            bringToFront(window)
+            return
         }
+        if let open = openMain {
+            open()
+        } else if let windowMenu = NSApp.windowsMenu,
+                  let index = windowMenu.items.firstIndex(where: { $0.title == "KongReview" }) {
+            // 主窗口从未出现过（openMain 还没登记）：用“窗口”菜单里的同名项打开
+            windowMenu.performActionForItem(at: index)
+        } else if let window = mainWindows.first {
+            bringToFront(window)
+            return
+        }
+        // 新开的窗口有时在其他窗口后面：稍后提到最前
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            if let w = mainWindows.first(where: { $0.isVisible || $0.isMiniaturized }) { bringToFront(w) }
+        }
+    }
+
+    private static func bringToFront(_ window: NSWindow) {
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        // 窗口落在已断开的显示器上时挪回主屏幕
+        if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(window.frame) }) { window.center() }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
     }
 }
 
