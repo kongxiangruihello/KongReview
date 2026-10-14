@@ -369,6 +369,17 @@ final class AppDatabase {
         m.registerMigration("v11-source-classic") { db in
             try db.alter(table: "source") { t in t.add(column: "classicTitle", .text) }
         }
+
+        // 2.1：摘录在同一古籍其他版本（整理本）里的页码
+        m.registerMigration("v12-edition-page") { db in
+            try db.create(table: "highlight_edition_page") { t in
+                t.column("highlightId", .integer).notNull().references("highlight", onDelete: .cascade)
+                t.column("sourceId", .integer).notNull().references("source", onDelete: .cascade)
+                t.column("page", .text).notNull()
+                t.primaryKey(["highlightId", "sourceId"])
+            }
+            try db.create(index: "edition_page_source", on: "highlight_edition_page", columns: ["sourceId"])
+        }
         return m
     }
 }

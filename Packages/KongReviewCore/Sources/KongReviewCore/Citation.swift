@@ -297,6 +297,18 @@ public enum ClassicCitation {
         return "《\(book)》"
     }
 
+    /// 2.1：位置去掉页码部分（保留卷次、篇名），如“学而第一 · 第3页”→“学而第一”；没有剩余为 nil
+    public static func withoutPage(_ location: String?) -> String? {
+        guard let loc = location else { return nil }
+        let kept = tokens(loc).filter { !isPage($0) }
+        return kept.isEmpty ? nil : kept.joined(separator: " ")
+    }
+
+    /// 2.1：换成另一个版本的页码后的位置：“学而第一 · 第3页”+ 另一版“5”→“学而第一 · 第5页”
+    public static func location(_ original: String?, withPage page: String) -> String? {
+        CitationCheck.addingPage(page, to: withoutPage(original))
+    }
+
     /// 2.0：按篇分组用的篇名——位置里的第一个篇名；只有卷次时用卷次；都没有为 nil
     public static func chapterKey(_ location: String?) -> String? {
         let c = components(location)

@@ -32,6 +32,10 @@ final class NotebookState {
     var exportNotes: Bool = UserDefaults.standard.bool(forKey: "notebook.notes") {
         didSet { UserDefaults.standard.set(exportNotes, forKey: "notebook.notes") }
     }
+    /// 2.1：导出时各部古籍用哪个版本出注（原典书名 → 出处 id）；按笔记本记住
+    var exportEditions: [String: Int64] = [:]
+    /// 本笔记本摘录的版本页码（摘录 id → 出处 id → 页码）
+    var editionPages: [Int64: [Int64: String]] = [:]
     /// 1.4：Word 导出加目录
     var exportTOC: Bool = UserDefaults.standard.object(forKey: "notebook.toc") as? Bool ?? true {
         didSet { UserDefaults.standard.set(exportTOC, forKey: "notebook.toc") }
@@ -147,6 +151,8 @@ extension LibraryStore {
         st.highlights = Dictionary(hs.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
         st.picker = nil
         st.editingNote = nil
+        st.exportEditions = NotebookEditionChoice.load(id)
+        st.editionPages = (try? db.editionPages(highlightIds: ids)) ?? [:]
     }
 
     /// 摘录被编辑后刷新引用到的文字
@@ -156,6 +162,7 @@ extension LibraryStore {
         let ids = st.blocks.compactMap(\.highlightId)
         let hs = (try? db.highlights(ids: ids)) ?? []
         st.highlights = Dictionary(hs.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
+        st.editionPages = (try? db.editionPages(highlightIds: ids)) ?? [:]
     }
 
     /// 插入文字或小标题，返回新块 id
@@ -314,7 +321,7 @@ extension LibraryStore {
             case .highlight:
                 let h = b.highlightId.flatMap { st.highlights[$0] }
                 let text = h?.text ?? b.text
-                let cite = h.map { CitationFormatter.citation(for: $0, source: source(for: $0), style: CitationSettings.style) } ?? ""
+                let cite = h.map { notebookCitation(for: $0) } ?? ""
                 var out = [NotebookPiece(.quote(text, cite: cite))]
                 if notes, let n = h?.note, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     out.append(NotebookPiece(.comment(n)))
@@ -332,7 +339,10 @@ extension LibraryStore {
         let st = notebookState
         var ids: [Int64] = []
         for b in st.blocks {
-            if let hid = b.highlightId, let sid = st.highlights[hid]?.sourceId, !ids.contains(sid) { ids.append(sid) }
+            // 2.1：参考文献表也按导出所用的版本
+            if let hid = b.highlightId, let h = st.highlights[hid],
+               let sid = editionChoice(for: h).flatMap({ $0.location == nil ? nil : $0.source.id }) ?? h.sourceId,
+               !ids.contains(sid) { ids.append(sid) }
         }
         let list = ids.compactMap { id in sources.first { $0.id == id } }
         return Bibliography.entries(list, order: .numbered)

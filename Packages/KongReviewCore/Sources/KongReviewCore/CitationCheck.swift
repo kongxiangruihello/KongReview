@@ -11,7 +11,7 @@ import Foundation
 public enum CitationCheck {
 
     public enum Kind: String, Sendable, CaseIterable {
-        case noSource, noPage, noChapter, juanStyle, sourceInfo
+        case noSource, noPage, noChapter, juanStyle, sourceInfo, editionPage
 
         public var label: String {
             switch self {
@@ -20,6 +20,7 @@ public enum CitationCheck {
             case .noChapter: return "缺篇名"
             case .juanStyle: return "卷次写法不统一"
             case .sourceInfo: return "出处信息不全"
+            case .editionPage: return "缺所选版本的页码"
             }
         }
     }
@@ -30,6 +31,9 @@ public enum CitationCheck {
         public var highlightId: Int64?
         public var sourceId: Int64?
         public var message: String
+        public init(kind: Kind, highlightId: Int64?, sourceId: Int64?, message: String) {
+            self.kind = kind; self.highlightId = highlightId; self.sourceId = sourceId; self.message = message
+        }
         public var id: String { "\(kind.rawValue)-\(highlightId.map(String.init) ?? "")-\(sourceId.map(String.init) ?? "")" }
     }
 
@@ -197,3 +201,32 @@ public enum DailyCard {
     }
 }
 
+
+// MARK: - 篇目进度（2.1）
+
+public struct ChapterProgress: Sendable, Equatable, Identifiable {
+    public var name: String
+    public var total: Int
+    /// 在每日回顾里出现过的条数
+    public var reviewed: Int
+    /// 已做成记忆卡的条数
+    public var withCards: Int
+    public var id: String { name }
+    public init(name: String, total: Int, reviewed: Int, withCards: Int) {
+        self.name = name; self.total = total; self.reviewed = reviewed; self.withCards = withCards
+    }
+    public var reviewedRatio: Double { total == 0 ? 0 : Double(reviewed) / Double(total) }
+    /// 菜单里的简短说明，如“12 条 · 回顾 8 · 卡 5”
+    public var summary: String {
+        "\(total) 条 · 回顾 \(reviewed)" + (withCards > 0 ? " · 卡 \(withCards)" : "")
+    }
+
+    /// 由按篇分组的摘录和“有卡片的摘录 id”算出各篇进度
+    public static func compute(_ groups: [(name: String, highlights: [Highlight])], carded: Set<Int64>) -> [ChapterProgress] {
+        groups.map { g in
+            ChapterProgress(name: g.name, total: g.highlights.count,
+                            reviewed: g.highlights.filter { $0.surfacedCount > 0 }.count,
+                            withCards: g.highlights.filter { $0.id.map(carded.contains) ?? false }.count)
+        }
+    }
+}

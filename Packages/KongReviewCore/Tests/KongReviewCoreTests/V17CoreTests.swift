@@ -267,3 +267,25 @@ final class V20PageTests: XCTestCase {
         XCTAssertEqual(ClassicCitation.components(CitationCheck.addingPage("xii", to: "学而第一")).chapters, ["学而"])
     }
 }
+
+final class V21CoreTests: XCTestCase {
+    func testEditionLocation() {
+        XCTAssertEqual(ClassicCitation.withoutPage("学而第一 · 第3页"), "学而第一")
+        XCTAssertEqual(ClassicCitation.withoutPage("卷七 项羽本纪 第300页"), "卷七 项羽本纪")
+        XCTAssertNil(ClassicCitation.withoutPage("第3页"))
+        XCTAssertEqual(ClassicCitation.location("学而第一 · 第3页", withPage: "5"), "学而第一 · 第5页")
+        XCTAssertEqual(ClassicCitation.location("第3页", withPage: "8"), "第8页")
+        XCTAssertNil(ClassicCitation.location("学而", withPage: " "))
+    }
+
+    func testChapterProgress() {
+        var a = Highlight(id: 1, text: "a", location: "学而 第1页"); a.surfacedCount = 2
+        let b = Highlight(id: 2, text: "b", location: "学而 第2页")
+        let c = Highlight(id: 3, text: "c", location: "为政 第9页")
+        let p = ChapterProgress.compute(ClassicCitation.groupByChapter([a, b, c]), carded: [2, 3])
+        XCTAssertEqual(p, [ChapterProgress(name: "学而", total: 2, reviewed: 1, withCards: 1),
+                           ChapterProgress(name: "为政", total: 1, reviewed: 0, withCards: 1)])
+        XCTAssertEqual(p[0].summary, "2 条 · 回顾 1 · 卡 1")
+        XCTAssertEqual(p[0].reviewedRatio, 0.5)
+    }
+}

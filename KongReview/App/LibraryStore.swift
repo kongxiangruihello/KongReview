@@ -144,6 +144,8 @@ final class LibraryStore {
     var pageRange: PageRangeDraft?
     /// 1.9：引文核对结果
     var citationCheck: CitationCheckRequest?
+    /// 2.1：篇目进度面板
+    var chapterProgressRequest: ChapterProgressRequest?
     /// 2.0：补齐页码后要接着导出的格式（笔记本界面看到后执行）
     var pendingCitationExport: CitationCheckRequest.Export?
     /// 生成分享图的摘录
@@ -1078,7 +1080,9 @@ final class LibraryStore {
     }
 
     func edit(_ highlight: Highlight) {
-        editorDraft = HighlightDraft(highlight: highlight, tagsText: TagParser.format(highlight.tags))
+        var d = HighlightDraft(highlight: highlight, tagsText: TagParser.format(highlight.tags))
+        if let id = highlight.id { d.editionPages = (try? db.editionPages(id)) ?? [:] }
+        editorDraft = d
     }
 
     /// kongreview://add 链接：先放进编辑面板，让用户补页码、标签后再保存
@@ -1160,7 +1164,12 @@ final class LibraryStore {
                 )
                 h.sourceId = s.id
             }
-            try db.save(h)
+            let saved = try db.save(h)
+            // 2.1：其他版本的页码（只存仍属同一部古籍的版本）
+            if let id = saved.id, draft.editionPages != ((try? db.editionPages(id)) ?? [:]) {
+                let valid = Set(editions(for: saved.sourceId).compactMap(\.id))
+                try db.setEditionPages(id, draft.editionPages.filter { valid.contains($0.key) })
+            }
             ok = true
         }
         return ok
@@ -1218,6 +1227,8 @@ struct HighlightDraft: Identifiable {
     var newSourceKind: SourceKind = .book
     /// 是否展开“新建出处”表单
     var showNewSource = false
+    /// 2.1：在同一古籍其他版本里的页码（出处 id → 页码）
+    var editionPages: [Int64: String] = [:]
 
     var isNew: Bool { highlight.id == nil }
 }

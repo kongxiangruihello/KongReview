@@ -89,6 +89,12 @@ struct CitationCheckRequest: Identifiable {
     var filledPages: Int { pageDrafts.values.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count }
 }
 
+/// 2.1：篇目进度面板
+struct ChapterProgressRequest: Identifiable {
+    let id = UUID()
+    var sourceId: Int64
+}
+
 /// 2.0：按篇回顾——“chap:12:学而”
 extension ReviewScope {
     static let chapterPrefix = "chap:"

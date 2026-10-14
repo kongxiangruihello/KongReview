@@ -55,6 +55,26 @@ struct HighlightEditorView: View {
                     TextField("位置（页码、卷次、章节）", text: optional(draftBinding.highlight.location))
                 }
 
+                // 2.1：同一部古籍的其他版本（整理本）里的页码；笔记本导出时可选用哪个版本出注
+                let eds = store.editions(for: draft.highlight.sourceId)
+                if !eds.isEmpty {
+                    Section {
+                        ForEach(eds) { e in
+                            if let eid = e.id {
+                                TextField(editionLabel(e), text: Binding(
+                                    get: { store.editorDraft?.editionPages[eid] ?? "" },
+                                    set: { store.editorDraft?.editionPages[eid] = $0 }
+                                ), prompt: Text("页码，如 12"))
+                            }
+                        }
+                    } header: {
+                        Text("其他版本的页码")
+                    } footer: {
+                        Text("这部古籍还有上面几个版本。填上这条在各版本里的页码，专题笔记本导出时就能选用其中一个版本出注（篇名沿用上面的位置）。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("译文 / 白话（可选）") {
                     RichEditor(text: optional(draftBinding.highlight.translation), placeholder: "译文或白话",
                                toolbar: false, autoHeight: true, minHeight: 60, slot: "hl-translation",
@@ -104,6 +124,11 @@ struct HighlightEditorView: View {
             .padding()
         }
         .frame(minWidth: 560, idealWidth: 620, minHeight: 620)
+    }
+
+    private func editionLabel(_ s: Source) -> String {
+        let info = [s.author, s.publisher ?? "", s.year ?? ""].filter { !$0.isEmpty }.joined(separator: "，")
+        return "《\(s.title)》" + (info.isEmpty ? "" : "（\(info)）")
     }
 
     private func cancel() {

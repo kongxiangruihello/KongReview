@@ -1366,3 +1366,68 @@ final class V20Tests: XCTestCase {
     }
   }
 }
+
+final class V21Tests: XCTestCase {
+  func testProgressAndEditions() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      var yang = Source(title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980", place: "北京")
+      yang.classicTitle = "论语"
+      yang = try db.save(yang)
+      var cheng = Source(title: "论语集释", author: "程树德", publisher: "中华书局", year: "1990", place: "北京")
+      cheng.classicTitle = "《论语》"
+      cheng = try db.save(cheng)
+      let other = try db.save(Source(title: "孟子译注", author: "杨伯峻"))
+      var a = Highlight(sourceId: yang.id, text: "学而时习之", location: "学而第一 · 第1页")
+      a.surfacedCount = 1
+      a = try db.save(a)
+      let b = try db.save(Highlight(sourceId: yang.id, text: "巧言令色", location: "学而第一 · 第3页"))
+      _ = try db.save(Highlight(sourceId: yang.id, text: "为政以德", location: "为政第二 · 第11页"))
+      store.reload()
+
+      // 篇目进度
+      _ = try db.makeCards(fromHighlights: [b.id!], deck: "x")
+      let p = try db.chapterProgress(yang.id!)
+      XCTAssertEqual(p.map(\.name), ["学而", "为政"])
+      XCTAssertEqual(p[0].reviewed, 1); XCTAssertEqual(p[0].withCards, 1); XCTAssertEqual(p[0].total, 2)
+
+      // 版本：同一古籍（书名号不影响）
+      XCTAssertEqual(store.editions(for: yang.id).map(\.id), [cheng.id])
+      XCTAssertEqual(store.editions(for: other.id).count, 0)
+      // 编辑器保存版本页码（非同一古籍的版本不存）
+      store.edit(a)
+      store.editorDraft?.editionPages = [cheng.id!: "5", other.id!: "9"]
+      XCTAssertTrue(store.save(draft: store.editorDraft!))
+      XCTAssertEqual(try db.editionPages(a.id!), [cheng.id!: "5"])
+      store.edit(a)
+      XCTAssertEqual(store.editorDraft?.editionPages, [cheng.id!: "5"])
+      store.editorDraft = nil
+
+      // 笔记本：改用《论语集释》出注
+      let nid = try XCTUnwrap(store.createNotebook(title: "学而", with: [a.id!, b.id!]))
+      store.reload()
+      store.loadNotebook(nid)
+      XCTAssertEqual(store.notebookClassics().first?.title, "论语")
+      XCTAssertEqual(store.notebookClassics().first?.editions.count, 2)
+      XCTAssertTrue(store.notebookCitation(for: a).hasPrefix("《论语·学而》，杨伯峻"))
+      store.setNotebookEdition("论语", cheng.id)
+      XCTAssertEqual(NotebookEditionChoice.load(nid)["论语"], cheng.id)
+      XCTAssertEqual(store.notebookCitation(for: a), "《论语·学而》，程树德：《论语集释》，北京：中华书局，1990年，第5页。")
+      XCTAssertTrue(store.notebookCitation(for: b).contains("杨伯峻"), "没有该版页码的仍按原出处")
+      XCTAssertTrue(store.notebookBibliography().joined().contains("论语集释"))
+      // 核对：b 缺该版页码，可在清单里补
+      var req = try XCTUnwrap(store.notebookCitationCheck())
+      XCTAssertEqual(req.issues.map(\.kind), [.editionPage])
+      XCTAssertEqual(req.issues.first?.highlightId, b.id)
+      req.pageDrafts[b.id!] = "12"
+      store.citationCheck = req
+      store.applyCitationPages()
+      XCTAssertNil(store.citationCheck)
+      XCTAssertEqual(try db.editionPages(b.id!)[cheng.id!], "第12页")
+      XCTAssertTrue(store.notebookCitation(for: b).contains("程树德"))
+      XCTAssertEqual(try db.highlights(ids: [b.id!]).first?.location, "学而第一 · 第3页", "原位置不变")
+      UserDefaults.standard.removeObject(forKey: NotebookEditionChoice.key(nid))
+    }
+  }
+}

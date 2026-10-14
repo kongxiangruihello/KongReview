@@ -99,6 +99,26 @@ struct NotebookView: View {
                     Button("PDF（讲义、打印）…") { NotebookExport.checkThenExport(store: store, .pdf) }
                     Button("Markdown（脚注 [^1]）…") { NotebookExport.exportMarkdown(store: store) }
                     Button("复制到剪贴板（粘到 Word、Pages，含脚注）") { NotebookExport.copyRTF(store: store) }
+                    // 2.1：同一部古籍有几个版本时，选用哪个版本出注
+                    let classics = store.notebookClassics()
+                    if !classics.isEmpty {
+                        Divider()
+                        ForEach(classics, id: \.title) { c in
+                            Menu("《\(c.title)》出注用的版本") {
+                                let chosen = st.exportEditions[c.title]
+                                Button { store.setNotebookEdition(c.title, nil) } label: {
+                                    if chosen == nil { Label("各条原来的出处", systemImage: "checkmark") } else { Text("各条原来的出处") }
+                                }
+                                Divider()
+                                ForEach(c.editions) { e in
+                                    let name = NotebookExport.editionName(e)
+                                    Button { store.setNotebookEdition(c.title, e.id) } label: {
+                                        if chosen == e.id { Label(name, systemImage: "checkmark") } else { Text(name) }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Divider()
                     Button("引文核对…") { store.runNotebookCitationCheck() }
                     Divider()
@@ -516,6 +536,12 @@ enum NotebookExport {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
+    /// 2.1：版本菜单里的名称，如“《论语集释》（中华书局 1990）”
+    static func editionName(_ s: Source) -> String {
+        let info = [s.publisher ?? "", s.year ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
+        return "《\(s.title)》" + (info.isEmpty ? "" : "（\(info)）")
+    }
+
     /// 1.9：导出 Word / PDF 前先核对引文；有问题先列出来，可去修改或“仍然导出”
     static func checkThenExport(store: LibraryStore, _ kind: CitationCheckRequest.Export) {
         if let r = store.notebookCitationCheck(export: kind) {
@@ -700,7 +726,10 @@ struct CitationCheckSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            if issue.kind == .noPage, let hid = issue.highlightId {
+            // 同一条既缺原页码又缺所选版本页码时，只在“缺页码”那行填（先补原页码）
+            if let hid = issue.highlightId,
+               issue.kind == .noPage
+                || (issue.kind == .editionPage && !request.issues.contains { $0.kind == .noPage && $0.highlightId == hid }) {
                 TextField("页码", text: pageBinding(hid))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 72)

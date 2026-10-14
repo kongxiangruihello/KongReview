@@ -202,9 +202,22 @@ extension LibraryStore {
         let st = notebookState
         let items: [CitationCheck.Item] = st.blocks.compactMap { b in
             guard b.kind == .highlight, let hid = b.highlightId, let h = st.highlights[hid] else { return nil }
+            // 2.1：改用别的版本且有该版页码时，按那个版本核对
+            if let c = editionChoice(for: h), let loc = c.location {
+                var alt = h
+                alt.location = loc
+                return CitationCheck.Item(highlight: alt, source: c.source)
+            }
             return CitationCheck.Item(highlight: h, source: source(for: h))
         }
-        let issues = CitationCheck.check(items)
+        var issues = CitationCheck.check(items)
+        // 2.1：选了别的版本出注，但这条没有该版页码（导出时仍按原出处）
+        for it in items {
+            if let c = editionChoice(for: it.highlight), c.location == nil, let hid = it.highlight.id {
+                issues.append(CitationCheck.Issue(kind: .editionPage, highlightId: hid, sourceId: c.source.id,
+                                                  message: "导出改用《\(c.source.title)》出注，这条还没有该版页码，暂按原出处引用。"))
+            }
+        }
         guard !issues.isEmpty else { return nil }
         var snippets: [Int64: String] = [:]
         for it in items {
@@ -230,7 +243,7 @@ extension LibraryStore {
     func fixCitationIssue(_ issue: CitationCheck.Issue) {
         citationCheck = nil
         if let hid = issue.highlightId, let h = try? db.highlights(ids: [hid]).first {
-            if issue.kind == .noSource || issue.kind == .noPage || issue.kind == .noChapter || issue.kind == .juanStyle {
+            if issue.kind != .sourceInfo {
                 edit(h)
                 return
             }
@@ -282,16 +295,33 @@ extension LibraryStore {
     func applyCitationPages() {
         guard var req = citationCheck else { return }
         var changes: [Int64: String] = [:]
+        // 2.1：缺“所选版本页码”的，填的是那个版本的页码
+        var editionChanges: [Int64: (sourceId: Int64, page: String)] = [:]
         for (id, raw) in req.pageDrafts {
-            if let loc = CitationCheck.addingPage(raw, to: req.locations[id]) { changes[id] = loc }
+            let kinds = req.issues.filter { $0.highlightId == id }
+            if kinds.contains(where: { $0.kind == .noPage }) {
+                if let loc = CitationCheck.addingPage(raw, to: req.locations[id]) { changes[id] = loc }
+            } else if let ed = kinds.first(where: { $0.kind == .editionPage })?.sourceId,
+                      let p = CitationCheck.pageText(raw) {
+                editionChanges[id] = (ed, p)
+            }
         }
-        guard !changes.isEmpty else { return }
+        guard !changes.isEmpty || !editionChanges.isEmpty else { return }
         let ids = Array(changes.keys)
-        undoable("补页码（\(ids.count) 条）", highlights: ids) {
-            perform {
-                try db.modifyHighlights(ids: ids) { h in
-                    if let id = h.id, let loc = changes[id] { h.location = loc }
+        if !ids.isEmpty {
+            undoable("补页码（\(ids.count) 条）", highlights: ids) {
+                perform {
+                    try db.modifyHighlights(ids: ids) { h in
+                        if let id = h.id, let loc = changes[id] { h.location = loc }
+                    }
                 }
+            }
+        }
+        for (hid, c) in editionChanges {
+            perform {
+                var pages = try db.editionPages(hid)
+                pages[c.sourceId] = c.page
+                try db.setEditionPages(hid, pages)
             }
         }
         refreshNotebookHighlights()
@@ -299,12 +329,79 @@ extension LibraryStore {
             again.id = req.id
             req = again
             citationCheck = req
-            infoMessage = "已补 \(ids.count) 条页码，还有 \(again.issues.count) 处需要留意。"
+            infoMessage = "已补 \(ids.count + editionChanges.count) 条页码，还有 \(again.issues.count) 处需要留意。"
         } else {
             let export = req.export
             citationCheck = nil
-            infoMessage = "已补 \(ids.count) 条页码，引文都齐了。"
+            infoMessage = "已补 \(ids.count + editionChanges.count) 条页码，引文都齐了。"
             if let export { DispatchQueue.main.async { self.pendingCitationExport = export } }
         }
+    }
+}
+
+// MARK: - 2.1：同一古籍的不同版本
+
+/// 每本笔记本记住各部古籍用哪个版本出注
+enum NotebookEditionChoice {
+    static func key(_ notebookId: Int64) -> String { "notebook.editions.\(notebookId)" }
+    static func load(_ notebookId: Int64) -> [String: Int64] {
+        guard let d = UserDefaults.standard.dictionary(forKey: key(notebookId)) else { return [:] }
+        return d.compactMapValues { ($0 as? NSNumber)?.int64Value }
+    }
+    static func save(_ map: [String: Int64], _ notebookId: Int64) {
+        UserDefaults.standard.set(map.mapValues { NSNumber(value: $0) }, forKey: key(notebookId))
+    }
+}
+
+extension LibraryStore {
+    /// 古籍的原典书名（去掉书名号、空白）；不是古籍为 nil
+    func classicKey(_ s: Source?) -> String? {
+        guard let s, s.isClassic, let t = s.classicTitle else { return nil }
+        let k = t.trimmingCharacters(in: CharacterSet(charactersIn: "《》 　\n"))
+        return k.isEmpty ? nil : k
+    }
+
+    /// 与这个出处同属一部古籍的其他出处（不含它自己）
+    func editions(for sourceId: Int64?) -> [Source] {
+        guard let sid = sourceId, let key = classicKey(sources.first { $0.id == sid }) else { return [] }
+        return sources.filter { $0.id != sid && classicKey($0) == key }
+    }
+
+    /// 笔记本里出现的古籍，以及每部可选的版本（至少两个版本才列出）
+    func notebookClassics() -> [(title: String, editions: [Source])] {
+        var order: [String] = []
+        for h in notebookState.highlights.values.sorted(by: { ($0.id ?? 0) < ($1.id ?? 0) }) {
+            if let k = classicKey(source(for: h)), !order.contains(k) { order.append(k) }
+        }
+        return order.compactMap { k in
+            let eds = sources.filter { classicKey($0) == k }
+            return eds.count >= 2 ? (k, eds) : nil
+        }
+    }
+
+    func setNotebookEdition(_ classic: String, _ sourceId: Int64?) {
+        let st = notebookState
+        st.exportEditions[classic] = sourceId
+        if let nid = st.notebookId { NotebookEditionChoice.save(st.exportEditions, nid) }
+    }
+
+    /// 导出这条摘录时改用的版本与位置；不需要换（没选版本、选的就是原出处）时为 nil；
+    /// 选了别的版本但这条没有该版页码时 location 为 nil
+    func editionChoice(for h: Highlight) -> (source: Source, location: String?)? {
+        let st = notebookState
+        guard let key = classicKey(source(for: h)), let eid = st.exportEditions[key], eid != h.sourceId,
+              let ed = sources.first(where: { $0.id == eid }), let hid = h.id else { return nil }
+        guard let page = st.editionPages[hid]?[eid] else { return (ed, nil) }
+        return (ed, ClassicCitation.location(h.location, withPage: page))
+    }
+
+    /// 笔记本导出用的出处文字（按所选版本）
+    func notebookCitation(for h: Highlight) -> String {
+        if let c = editionChoice(for: h), let loc = c.location {
+            var alt = h
+            alt.location = loc
+            return CitationFormatter.citation(for: alt, source: c.source, style: CitationSettings.style)
+        }
+        return CitationFormatter.citation(for: h, source: source(for: h), style: CitationSettings.style)
     }
 }

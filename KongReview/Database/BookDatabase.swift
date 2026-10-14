@@ -99,3 +99,47 @@ extension AppDatabase {
         try sourceChapters(sourceId).first { $0.name == chapter }?.highlights ?? []
     }
 }
+
+// MARK: - 2.1：篇目进度、版本页码
+
+extension AppDatabase {
+    /// 一本书各篇的进度（总条数、回顾过、做成记忆卡）
+    func chapterProgress(_ sourceId: Int64) throws -> [ChapterProgress] {
+        let groups = try sourceChapters(sourceId)
+        let ids = groups.flatMap { $0.highlights.compactMap(\.id) }
+        let carded = Set(try cards(highlightIds: ids).compactMap(\.highlightId))
+        return ChapterProgress.compute(groups, carded: carded)
+    }
+
+    /// 一条摘录在其他版本里的页码：版本（出处）id → 页码
+    func editionPages(_ highlightId: Int64) throws -> [Int64: String] {
+        try editionPages(highlightIds: [highlightId])[highlightId] ?? [:]
+    }
+
+    func editionPages(highlightIds ids: [Int64]) throws -> [Int64: [Int64: String]] {
+        guard !ids.isEmpty else { return [:] }
+        return try writer.read { db in
+            var out: [Int64: [Int64: String]] = [:]
+            let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            for r in try Row.fetchAll(db, sql: "SELECT highlightId, sourceId, page FROM highlight_edition_page WHERE highlightId IN (\(marks))",
+                                      arguments: StatementArguments(ids)) {
+                let h: Int64 = r["highlightId"], s: Int64 = r["sourceId"], p: String = r["page"]
+                out[h, default: [:]][s] = p
+            }
+            return out
+        }
+    }
+
+    /// 整体替换一条摘录的版本页码（空白的不存）
+    func setEditionPages(_ highlightId: Int64, _ pages: [Int64: String]) throws {
+        try writer.write { db in
+            try db.execute(sql: "DELETE FROM highlight_edition_page WHERE highlightId = ?", arguments: [highlightId])
+            for (sid, raw) in pages {
+                let p = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !p.isEmpty else { continue }
+                try db.execute(sql: "INSERT INTO highlight_edition_page (highlightId, sourceId, page) VALUES (?, ?, ?)",
+                               arguments: [highlightId, sid, p])
+            }
+        }
+    }
+}
