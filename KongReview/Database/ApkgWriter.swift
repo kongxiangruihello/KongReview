@@ -212,6 +212,7 @@ enum ApkgWriter {
                 .card.nightMode { color: #eee; background-color: #2c2c2c; }
                 .kr-label { font-size: 13px; color: #888; margin-top: 12px; }
                 details.kr-field { margin-top: 12px; } details.kr-field summary { color: #888; font-size: 14px; cursor: pointer; }
+                #answer ~ .kr-field + .kr-field { margin-top: 16px; padding-top: 12px; border-top: 1px dashed rgba(128,128,128,.4); }
                 .cloze { font-weight: bold; color: #2f6fe4; }
                 img { max-width: 100%; }
                 """,

@@ -64,6 +64,8 @@ struct CardWebView: NSViewRepresentable {
         pre { padding: 8px 10px; overflow-x: auto; }
         table { border-collapse: collapse; } td, th { border: 1px solid rgba(128,128,128,.35); padding: 4px 8px; }
         .kr-field + .kr-field { margin-top: 14px; }
+        /* 1.5：背面的各项内容（答案、各栏目、模板字段）之间用细横线隔开 */
+        .back > .kr-field + .kr-field { margin-top: 16px; padding-top: 14px; border-top: 1px dashed rgba(128,128,128,.4); }
         .kr-label { font-size: 13px; color: #8e8e93; margin-bottom: 2px; }
         details.kr-field > summary { font-size: 14px; color: #8e8e93; cursor: pointer; }
         details.kr-field[open] > summary { margin-bottom: 4px; }
@@ -686,6 +688,7 @@ struct CardEditorView: View {
         let secs = store.cardEditor?.card.sections ?? []
         ForEach(secs) { sec in
             let i = secs.firstIndex(where: { $0.id == sec.id }) ?? 0
+            Divider().padding(.top, 10)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     TextField("栏目名称", text: sectionBinding(sec.id, \.name, ""))
