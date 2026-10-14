@@ -297,6 +297,24 @@ public enum ClassicCitation {
         return "《\(book)》"
     }
 
+    /// 2.0：按篇分组用的篇名——位置里的第一个篇名；只有卷次时用卷次；都没有为 nil
+    public static func chapterKey(_ location: String?) -> String? {
+        let c = components(location)
+        return c.chapters.first ?? c.juan
+    }
+
+    /// 2.0：把摘录按篇分组（篇的先后按第一次出现的顺序；没有篇名的不在内）
+    public static func groupByChapter(_ highlights: [Highlight]) -> [(name: String, highlights: [Highlight])] {
+        var order: [String] = []
+        var groups: [String: [Highlight]] = [:]
+        for h in highlights {
+            guard let k = chapterKey(h.location) else { continue }
+            if groups[k] == nil { order.append(k) }
+            groups[k, default: []].append(h)
+        }
+        return order.map { ($0, groups[$0] ?? []) }
+    }
+
     /// 1.8：常用古籍（原典书名 → 习惯上标注的朝代与作者；经部、子部多不标作者，留空）
     public static let presets: [(title: String, author: String)] = [
         ("论语", ""), ("孟子", ""), ("大学", ""), ("中庸", ""), ("周易", ""), ("尚书", ""), ("诗经", ""),

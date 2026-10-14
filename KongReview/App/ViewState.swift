@@ -74,12 +74,31 @@ enum ReviewScope {
 /// 1.9：引文核对的结果（导出前检查）
 struct CitationCheckRequest: Identifiable {
     enum Export { case docx, pdf }
-    let id = UUID()
+    /// 重新核对后沿用原来的 id，面板不会关掉再弹出
+    var id = UUID()
     var issues: [CitationCheck.Issue]
     /// 摘录 id → 开头几个字（列表里显示）
     var snippets: [Int64: String]
     /// 从导出菜单进来时，核对完可“仍然导出”
     var export: Export?
+    /// 2.0：清单里直接补的页码（摘录 id → 输入的页码）
+    var pageDrafts: [Int64: String] = [:]
+    /// 摘录现在的位置（补页码时显示）
+    var locations: [Int64: String] = [:]
+    /// 有几条填了页码
+    var filledPages: Int { pageDrafts.values.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count }
+}
+
+/// 2.0：按篇回顾——“chap:12:学而”
+extension ReviewScope {
+    static let chapterPrefix = "chap:"
+    static func chapter(_ sourceId: Int64, _ name: String) -> String { chapterPrefix + String(sourceId) + ":" + name }
+    static func chapterScope(_ theme: String?) -> (id: Int64, chapter: String)? {
+        guard let t = theme, t.hasPrefix(chapterPrefix) else { return nil }
+        let parts = t.dropFirst(chapterPrefix.count).split(separator: ":", maxSplits: 1)
+        guard parts.count == 2, let id = Int64(parts[0]), !parts[1].isEmpty else { return nil }
+        return (id, String(parts[1]))
+    }
 }
 
 /// 1.7：出处书页“按页码范围”面板

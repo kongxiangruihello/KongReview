@@ -45,6 +45,12 @@ struct NotebookView: View {
         .sheet(item: Bindable(store).citationCheck) { req in
             CitationCheckSheet(request: req)
         }
+        // 2.0：在核对清单里补齐页码后，接着导出
+        .onChange(of: store.pendingCitationExport) {
+            guard let kind = store.pendingCitationExport else { return }
+            store.pendingCitationExport = nil
+            NotebookExport.run(kind, store: store)
+        }
         .onChange(of: store.revision) { store.refreshNotebookHighlights() }
         .onDisappear { store.flushNotebookSaves() }
         .toolbar {
@@ -622,8 +628,15 @@ struct CitationCheckSheet: View {
     @Environment(LibraryStore.self) private var store
     let request: CitationCheckRequest
 
+    /// 清单里的页码输入框直接写 store 里的请求（id 不变，面板不会重新弹出）
+    private func pageBinding(_ id: Int64) -> Binding<String> {
+        Binding(get: { store.citationCheck?.pageDrafts[id] ?? "" },
+                set: { store.citationCheck?.pageDrafts[id] = $0 })
+    }
+
     var body: some View {
         let issues = request.issues
+        let filled = store.citationCheck?.filledPages ?? 0
         let groups = CitationCheck.Kind.allCases.compactMap { k -> (CitationCheck.Kind, [CitationCheck.Issue])? in
             let list = issues.filter { $0.kind == k }
             return list.isEmpty ? nil : (k, list)
@@ -633,7 +646,7 @@ struct CitationCheckSheet: View {
                 Text("引文核对").font(.system(size: 22, weight: .semibold, design: .serif))
                 Text("\(issues.count) 处需要留意").font(.callout).foregroundStyle(ReviewPalette.hard)
             }
-            Text("导出前检查每条引文：有没有出处、页码，古籍体例的篇名，卷次写法是否统一，书籍的出版者与年份。点“修改”打开对应的摘录或出处，改完可在“导出”菜单里再核对一次。")
+            Text("导出前检查每条引文：有没有出处、页码，古籍体例的篇名，卷次写法是否统一，书籍的出版者与年份。缺页码的可以直接在右边的框里填（如 12 或 12-15，按 Tab 到下一条），填完点“保存页码”；其他问题点“修改”打开对应的摘录或出处。")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
@@ -651,6 +664,13 @@ struct CitationCheckSheet: View {
             }
             .frame(minHeight: 220, maxHeight: 420)
             HStack {
+                if filled > 0 {
+                    Button("保存页码（\(filled) 条）") { store.applyCitationPages() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                        .handCursor()
+                        .help("把填好的页码补进摘录的位置（如“学而第一 · 第3页”），然后重新核对；可 ⌘Z 撤销")
+                }
                 Spacer()
                 Button("关闭", role: .cancel) { store.citationCheck = nil }
                     .keyboardShortcut(.cancelAction)
@@ -660,7 +680,8 @@ struct CitationCheckSheet: View {
                         // 等清单收起再弹出保存面板
                         DispatchQueue.main.async { NotebookExport.run(kind, store: store) }
                     }
-                    .keyboardShortcut(.defaultAction)
+                    // 填了页码时回车 = 保存页码，免得一回车就导出、丢了刚填的页码
+                    .keyboardShortcut(filled > 0 ? nil : .defaultAction)
                     .handCursor()
                 }
             }
@@ -679,6 +700,12 @@ struct CitationCheckSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
+            if issue.kind == .noPage, let hid = issue.highlightId {
+                TextField("页码", text: pageBinding(hid))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 72)
+                    .help("填页码，如 12 或 12-15；保存时写成“第12页”接在原来的位置后面")
+            }
             Button(issue.highlightId != nil && issue.kind != .sourceInfo ? "修改摘录" : "修改出处") {
                 // 先收起清单，再打开摘录或出处的编辑面板（两个面板同时切换在 macOS 上可能打不开）
                 store.citationCheck = nil

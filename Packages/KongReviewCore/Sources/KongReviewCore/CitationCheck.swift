@@ -132,6 +132,28 @@ public enum CitationCheck {
     }
 }
 
+// MARK: - 补页码（2.0）
+
+extension CitationCheck {
+    /// 把输入的页码规范成“第 N 页”：纯数字或“12-15”写成“第12页”“第12—15页”；已带“页”或“p.”的照原样
+    public static func pageText(_ raw: String) -> String? {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        if t.contains("页") || t.lowercased().hasPrefix("p") { return t }
+        let parts = t.split(whereSeparator: { "-–—~～至".contains($0) }).map { $0.trimmingCharacters(in: .whitespaces) }
+        // 其他写法（如罗马数字页码 xii）也包成“第…页”，否则会被当成篇名
+        guard !parts.isEmpty, parts.count <= 2, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) else { return "第\(t)页" }
+        return parts.count == 1 ? "第\(parts[0])页" : "第\(parts[0])—\(parts[1])页"
+    }
+
+    /// 在原有位置后面补上页码：“学而第一”+“3”→“学而第一 · 第3页”
+    public static func addingPage(_ raw: String, to location: String?) -> String? {
+        guard let page = pageText(raw) else { return nil }
+        let loc = location?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return loc.isEmpty ? page : loc + " · " + page
+    }
+}
+
 // MARK: - 日课卡（1.9：每日提醒）
 
 public enum DailyCard {
@@ -174,3 +196,4 @@ public enum DailyCard {
         return lines.joined(separator: "\n")
     }
 }
+

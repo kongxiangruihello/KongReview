@@ -227,3 +227,43 @@ final class V19TieTests: XCTestCase {
         XCTAssertTrue(issues[0].message.contains("多数写作“卷七”"))
     }
 }
+
+final class V20CoreTests: XCTestCase {
+    func testChapterGrouping() {
+        let hs = [
+            Highlight(id: 1, sourceId: 1, text: "a", location: "学而第一 · 第1页"),
+            Highlight(id: 2, sourceId: 1, text: "b", location: "为政第二 · 第12页"),
+            Highlight(id: 3, sourceId: 1, text: "c", location: "学而篇 第3页"),
+            Highlight(id: 4, sourceId: 1, text: "d", location: "第40页"),
+            Highlight(id: 5, sourceId: 1, text: "e", location: "卷七 项羽本纪"),
+            Highlight(id: 6, sourceId: 1, text: "f", location: "卷八"),
+        ]
+        let g = ClassicCitation.groupByChapter(hs)
+        XCTAssertEqual(g.map(\.name), ["学而", "为政", "项羽本纪", "卷八"])
+        XCTAssertEqual(g[0].highlights.compactMap(\.id), [1, 3])
+        XCTAssertNil(ClassicCitation.chapterKey("第40页"))
+    }
+
+    func testAddingPage() {
+        XCTAssertEqual(CitationCheck.pageText("12"), "第12页")
+        XCTAssertEqual(CitationCheck.pageText("12-15"), "第12—15页")
+        XCTAssertEqual(CitationCheck.pageText("第3页"), "第3页")
+        XCTAssertEqual(CitationCheck.pageText("p. 7"), "p. 7")
+        XCTAssertNil(CitationCheck.pageText("  "))
+        XCTAssertEqual(CitationCheck.addingPage("3", to: "学而第一"), "学而第一 · 第3页")
+        XCTAssertEqual(CitationCheck.addingPage("3", to: nil), "第3页")
+        XCTAssertNil(CitationCheck.addingPage("", to: "x"))
+        // 补上之后核对通过
+        let s = Source(id: 1, title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980")
+        let h = Highlight(id: 1, sourceId: 1, text: "x", location: CitationCheck.addingPage("3", to: "学而第一"))
+        XCTAssertTrue(CitationCheck.check([.init(highlight: h, source: s)]).isEmpty)
+    }
+}
+
+
+final class V20PageTests: XCTestCase {
+    func testRomanPage() {
+        XCTAssertEqual(CitationCheck.pageText("xii"), "第xii页")
+        XCTAssertEqual(ClassicCitation.components(CitationCheck.addingPage("xii", to: "学而第一")).chapters, ["学而"])
+    }
+}

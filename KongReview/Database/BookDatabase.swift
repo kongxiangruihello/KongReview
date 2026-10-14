@@ -86,3 +86,16 @@ extension AppDatabase {
         }
     }
 }
+
+// MARK: - 2.0：按篇
+
+extension AppDatabase {
+    /// 一本书按篇分组（篇的顺序按页码先后）
+    func sourceChapters(_ sourceId: Int64) throws -> [(name: String, highlights: [Highlight])] {
+        ClassicCitation.groupByChapter(try sourceHighlightsByPage(sourceId))
+    }
+
+    func sourceChapterHighlights(_ sourceId: Int64, chapter: String) throws -> [Highlight] {
+        try sourceChapters(sourceId).first { $0.name == chapter }?.highlights ?? []
+    }
+}

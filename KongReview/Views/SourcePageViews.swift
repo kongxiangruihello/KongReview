@@ -57,6 +57,28 @@ struct SourcePageHeader: View {
                     .handCursor()
                     .disabled(stats.total == 0)
                     .help("在“今日回顾”里按页码顺序把这本书的摘录从头过一遍")
+                    // 2.0：按篇（摘录位置里有篇名或卷次时出现）
+                    let chapters = (try? store.db.sourceChapters(sourceId)) ?? []
+                    if !chapters.isEmpty {
+                        Menu {
+                            Text("共 \(chapters.count) 篇（按书中顺序）")
+                            ForEach(chapters, id: \.name) { ch in
+                                Menu("《\(ch.name)》\(ch.highlights.count) 条") {
+                                    Button("回顾这一篇") { store.reviewChapter(sourceId, ch.name) }
+                                    Button("做成记忆卡（牌组“\(store.chapterBookTitle(sourceId))::\(ch.name)”）") {
+                                        store.makeCardsForChapter(sourceId, ch.name)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("按篇", systemImage: "list.bullet.indent")
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.borderless)
+                        .handCursor()
+                        .fixedSize()
+                        .help("按摘录位置里的篇名（如“学而第一”）分篇：回顾一篇，或把一篇做成记忆卡")
+                    }
                     Button {
                         store.openPageRange(sourceId)
                     } label: {

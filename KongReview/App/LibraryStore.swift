@@ -144,6 +144,8 @@ final class LibraryStore {
     var pageRange: PageRangeDraft?
     /// 1.9：引文核对结果
     var citationCheck: CitationCheckRequest?
+    /// 2.0：补齐页码后要接着导出的格式（笔记本界面看到后执行）
+    var pendingCitationExport: CitationCheckRequest.Export?
     /// 生成分享图的摘录
     var shareImageHighlight: Highlight?
     /// 已存搜索

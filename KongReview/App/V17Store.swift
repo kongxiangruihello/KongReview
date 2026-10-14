@@ -105,6 +105,7 @@ extension LibraryStore {
     /// 出处被删除或合并后，指向它的“按书回顾”范围回到全部摘录
     func clearSourceReviewScope(_ ids: [Int64]) {
         if let sc = ReviewScope.sourceScope(review.theme), ids.contains(sc.id) { review.theme = nil }
+        if let sc = ReviewScope.chapterScope(review.theme), ids.contains(sc.id) { review.theme = nil }
     }
 
     func nextNotebookCard(_ id: Int64, now: Date = Date()) {
@@ -211,7 +212,9 @@ extension LibraryStore {
             let t = it.highlight.text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
             snippets[id] = t.count > 36 ? String(t.prefix(36)) + "…" : t
         }
-        return CitationCheckRequest(issues: issues, snippets: snippets, export: export)
+        var r = CitationCheckRequest(issues: issues, snippets: snippets, export: export)
+        for it in items { if let id = it.highlight.id { r.locations[id] = it.highlight.location ?? "" } }
+        return r
     }
 
     /// 菜单“引文核对…”：有问题弹出清单，没有问题给一句提示
@@ -234,6 +237,74 @@ extension LibraryStore {
         }
         if let sid = issue.sourceId, let s = sources.first(where: { $0.id == sid }) {
             editingSource = s
+        }
+    }
+}
+
+// MARK: - 2.0：按篇回顾、清单里补页码
+
+extension LibraryStore {
+    /// 按篇做卡、回顾时用的书名：古籍用原典书名
+    func chapterBookTitle(_ sourceId: Int64) -> String {
+        guard let s = sources.first(where: { $0.id == sourceId }) else { return "摘录" }
+        return s.classicTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? s.title
+    }
+
+    func reviewChapter(_ sourceId: Int64, _ chapter: String) {
+        let theme = ReviewScope.chapter(sourceId, chapter)
+        // 与 ReviewSessionRecord.key(theme:) 相同：每次都从头开始
+        UserDefaults.standard.removeObject(forKey: "review.session." + theme)
+        review.theme = theme
+        review.sessionToken += 1
+        selection = .review
+    }
+
+    /// 把一篇的摘录做成记忆卡，牌组“书名::篇名”
+    func makeCardsForChapter(_ sourceId: Int64, _ chapter: String) {
+        let deck = chapterBookTitle(sourceId) + "::" + chapter
+        perform {
+            let ids = try db.sourceChapterHighlights(sourceId, chapter: chapter).compactMap(\.id)
+            guard !ids.isEmpty else { infoMessage = "《\(chapter)》里没有摘录。"; return }
+            let r = try db.makeCardsReport(fromHighlights: ids, deck: deck, style: CitationSettings.style)
+            infoMessage = r.made > 0
+                ? "已把《\(chapter)》的 \(r.made) 条摘录做成记忆卡（牌组“\(deck)”）。" + (r.existing > 0 ? "\(r.existing) 条原来就有卡片。" : "")
+                : "《\(chapter)》的摘录都已经有记忆卡了。"
+        }
+    }
+
+    /// 回顾范围显示名：按篇
+    func chapterScopeLabel(_ theme: String?) -> String? {
+        guard let sc = ReviewScope.chapterScope(theme) else { return nil }
+        return "《\(chapterBookTitle(sc.id))·\(sc.chapter)》"
+    }
+
+    /// 核对清单里填好的页码一次写进摘录（可撤销），然后重新核对
+    func applyCitationPages() {
+        guard var req = citationCheck else { return }
+        var changes: [Int64: String] = [:]
+        for (id, raw) in req.pageDrafts {
+            if let loc = CitationCheck.addingPage(raw, to: req.locations[id]) { changes[id] = loc }
+        }
+        guard !changes.isEmpty else { return }
+        let ids = Array(changes.keys)
+        undoable("补页码（\(ids.count) 条）", highlights: ids) {
+            perform {
+                try db.modifyHighlights(ids: ids) { h in
+                    if let id = h.id, let loc = changes[id] { h.location = loc }
+                }
+            }
+        }
+        refreshNotebookHighlights()
+        if var again = notebookCitationCheck(export: req.export) {
+            again.id = req.id
+            req = again
+            citationCheck = req
+            infoMessage = "已补 \(ids.count) 条页码，还有 \(again.issues.count) 处需要留意。"
+        } else {
+            let export = req.export
+            citationCheck = nil
+            infoMessage = "已补 \(ids.count) 条页码，引文都齐了。"
+            if let export { DispatchQueue.main.async { self.pendingCitationExport = export } }
         }
     }
 }

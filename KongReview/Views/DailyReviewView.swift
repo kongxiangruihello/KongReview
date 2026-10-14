@@ -132,9 +132,9 @@ struct DailyReviewView: View {
                     }
                 }
             }
-            if let label = store.sourceScopeLabel(theme), let t = theme {
+            if let label = store.sourceScopeLabel(theme) ?? store.chapterScopeLabel(theme), let t = theme {
                 Divider()
-                Section("按书回顾（按页码顺序）") {
+                Section(ReviewScope.chapterScope(theme) != nil ? "按篇回顾（按页码顺序）" : "按书回顾（按页码顺序）") {
                     Button { store.review.theme = t } label: { Label(label, systemImage: "checkmark") }
                 }
             }
@@ -153,7 +153,7 @@ struct DailyReviewView: View {
                 Image(systemName: theme == nil ? "tray.full"
                       : (theme == ReviewScope.stale ? "clock.arrow.circlepath"
                          : (ReviewScope.notebookID(theme) != nil ? "text.book.closed"
-                            : (ReviewScope.sourceScope(theme) != nil ? "book" : "number"))))
+                            : (ReviewScope.sourceScope(theme) != nil || ReviewScope.chapterScope(theme) != nil ? "book" : "number"))))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(ReviewPalette.accent)
                 Text(scopeLabel)
@@ -188,7 +188,7 @@ struct DailyReviewView: View {
         if let nid = ReviewScope.notebookID(t) {
             return store.notebooks.first { $0.id == nid }.map { "《\($0.title)》" } ?? "专题笔记本"
         }
-        if let label = store.sourceScopeLabel(t) { return label }
+        if let label = store.sourceScopeLabel(t) ?? store.chapterScopeLabel(t) { return label }
         return t
     }
 
@@ -197,6 +197,7 @@ struct DailyReviewView: View {
         if t == ReviewScope.stale { return "今日回顾 · 久未回顾的摘录" }
         if ReviewScope.notebookID(t) != nil { return "专题回顾 · " + scopeLabel }
         if ReviewScope.sourceScope(t) != nil { return "按书回顾 · " + scopeLabel }
+        if ReviewScope.chapterScope(t) != nil { return "按篇回顾 · " + scopeLabel }
         return "主题回顾 · #\(t)"
     }
 
@@ -751,7 +752,10 @@ struct DailyReviewView: View {
             // 专题回顾：笔记本里的摘录有增删或换序时不沿用当天的进度
             // 1.7：按书回顾同理——书里的摘录（按页码）有变化时重新开始
             let bookScope = ReviewScope.sourceScope(state.theme)
+            // 2.0：按篇回顾同理
+            let chapterScope = ReviewScope.chapterScope(state.theme)
             let bookHighlights = try bookScope.map { try store.db.sourceHighlights($0.id, pages: $0.pages) }
+                ?? chapterScope.map { try store.db.sourceChapterHighlights($0.id, chapter: $0.chapter) }
             let notebookIDs = try ReviewScope.notebookID(state.theme).map { try store.db.notebookHighlights($0).compactMap(\.id) }
                 ?? bookHighlights?.compactMap(\.id)
             if !forceNew,

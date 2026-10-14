@@ -1321,3 +1321,48 @@ final class V19Tests: XCTestCase {
     }
   }
 }
+
+final class V20Tests: XCTestCase {
+  func testChaptersAndPageFill() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      let um = UndoManager()
+      store.undoManager = um
+      var s = Source(title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980", place: "北京")
+      s.classicTitle = "论语"
+      s = try db.save(s)
+      let a = try db.save(Highlight(sourceId: s.id, text: "学而时习之", location: "学而第一 · 第1页"))
+      let b = try db.save(Highlight(sourceId: s.id, text: "为政以德", location: "为政第二 · 第11页"))
+      let c = try db.save(Highlight(sourceId: s.id, text: "巧言令色", location: "学而第一"))   // 缺页码
+      store.reload()
+      let chs = try db.sourceChapters(s.id!)
+      XCTAssertEqual(chs.map(\.name), ["学而", "为政"])
+      XCTAssertEqual(Set(try db.sourceChapterHighlights(s.id!, chapter: "学而").compactMap(\.id)), [a.id!, c.id!])
+      store.makeCardsForChapter(s.id!, "学而")
+      XCTAssertEqual(try db.cards(deck: "论语::学而").count, 2)
+      store.reviewChapter(s.id!, "为政")
+      XCTAssertEqual(store.review.theme, "chap:\(s.id!):为政")
+      XCTAssertEqual(ReviewScope.chapterScope(store.review.theme)?.chapter, "为政")
+      XCTAssertEqual(store.chapterScopeLabel(store.review.theme), "《论语·为政》")
+      store.clearSourceReviewScope([s.id!])
+      XCTAssertNil(store.review.theme)
+
+      // 清单里补页码
+      let nid = try XCTUnwrap(store.createNotebook(title: "学而", with: [a.id!, c.id!, b.id!]))
+      store.reload()
+      store.loadNotebook(nid)
+      var req = try XCTUnwrap(store.notebookCitationCheck(export: .docx))
+      XCTAssertEqual(req.issues.map(\.kind), [.noPage])
+      XCTAssertEqual(req.locations[c.id!], "学而第一")
+      req.pageDrafts[c.id!] = "2"
+      store.citationCheck = req
+      XCTAssertEqual(store.citationCheck?.filledPages, 1)
+      store.applyCitationPages()
+      XCTAssertEqual(try db.highlights(ids: [c.id!]).first?.location, "学而第一 · 第2页")
+      XCTAssertNil(store.citationCheck)
+      um.undo()
+      XCTAssertEqual(try db.highlights(ids: [c.id!]).first?.location, "学而第一")
+    }
+  }
+}
