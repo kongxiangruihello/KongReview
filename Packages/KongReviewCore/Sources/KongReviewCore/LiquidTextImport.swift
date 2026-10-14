@@ -126,6 +126,10 @@ public enum LiquidTextImporter {
                 body = String(body[..<r.lowerBound])
             }
 
+            // 工作区批注末尾的“(Refers to a comment )”“(Refers to …)”不是出处，去掉（2026-10-14 实际导出）
+            if document == nil, let r = body.range(of: #"\n?\s*\(\s*Refers to[^)\n]*\)\s*$"#, options: [.regularExpression, .caseInsensitive]) {
+                body = String(body[..<r.lowerBound])
+            }
             var kind = Kind.excerpt
             var label = "Excerpt"
             if let (l, rest) = split(label: body) {

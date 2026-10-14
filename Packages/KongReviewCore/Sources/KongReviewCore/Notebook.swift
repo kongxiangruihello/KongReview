@@ -307,3 +307,20 @@ public enum NotebookExporter {
         return "{\\rtf1\\ansi\\ansicpg1252\\uc1\\deff0{\\fonttbl{\\f0\\fnil Songti SC;}}\n" + body.joined(separator: "\n") + "\n}"
     }
 }
+
+// MARK: - 读书笔记（1.6：出处书页导出）
+
+public enum ReadingNotes {
+    /// 一本书的读书笔记：书目一段，随后每条摘录按页码排列，位置写在引文后的括号里，按语跟在后面
+    public static func pieces(bibliography: String, highlights: [Highlight], includeNotes: Bool = true) -> [NotebookPiece] {
+        var out: [NotebookPiece] = []
+        if !bibliography.isEmpty { out.append(.init(.text("书目：" + bibliography))) }
+        for h in highlights {
+            out.append(.init(.quote(h.text, cite: h.location?.trimmingCharacters(in: .whitespaces) ?? "")))
+            if includeNotes, let n = h.note, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out.append(.init(.comment(n)))
+            }
+        }
+        return out
+    }
+}

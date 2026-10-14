@@ -26,7 +26,8 @@ struct HighlightListView: View {
             text: state.query, sourceId: filter.sourceId ?? x.sourceId, tag: filter.tag,
             favoritesOnly: filter.favoritesOnly || x.favoritesOnly, masteryOnly: filter.masteryOnly,
             unsortedOnly: filter.unsortedOnly, deletedOnly: filter.deletedOnly,
-            tags: x.tags, dateFrom: x.from, dateTo: x.to
+            tags: x.tags, dateFrom: x.from, dateTo: x.to,
+            orderByPage: filter.sourceId != nil && !filter.deletedOnly && state.sourceByPage
         )
     }
 
@@ -40,6 +41,11 @@ struct HighlightListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // 1.6：出处书页——书目信息、统计、排序、导出读书笔记
+            if let sid = filter.sourceId, !filter.deletedOnly {
+                SourcePageHeader(sourceId: sid)
+                Divider()
+            }
             if !filter.deletedOnly && (state.showFilters || !state.extra.isEmpty) {
                 ListFilterBar(base: filter)
                 Divider()

@@ -191,6 +191,10 @@ final class ListState {
     var showFilters = false
     /// 筛选条件属于哪个列表（切换列表时清空）
     var extraOwner = ""
+    /// 1.6：出处书页按页码排序（否则按录入时间，新的在前）
+    var sourceByPage: Bool = UserDefaults.standard.object(forKey: "list.sourceByPage") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sourceByPage, forKey: "list.sourceByPage") }
+    }
 
     static let pageSize = 200
     var hasMore: Bool { items.count < total }

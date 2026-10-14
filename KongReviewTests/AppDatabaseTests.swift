@@ -773,7 +773,7 @@ final class V12DatabaseTests: XCTestCase {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("v12-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     var config = Configuration()
-    config.prepareDatabase { db in db.add(function: AppDatabase.foldFunction) }
+    config.prepareDatabase { db in AppDatabase.registerFunctions(db) }
     return try AppDatabase(DatabasePool(path: dir.appendingPathComponent("a.sqlite").path, configuration: config))
   }
 
@@ -1097,5 +1097,41 @@ final class V15Tests: XCTestCase {
       XCTAssertEqual(pieces.count, 2)
       if case .comment(let c) = pieces[1].kind { XCTAssertTrue(c.contains("時習")) } else { XCTFail() }
     }
+  }
+}
+
+final class V16Tests: XCTestCase {
+  func testSearchSyntaxAndPageOrder() throws {
+    let db = try AppDatabase(DatabaseQueue())
+    let lunyu = try db.save(Source(title: "論語譯注", author: "楊伯峻"))
+    let mengzi = try db.save(Source(title: "孟子譯注", author: "楊伯峻"))
+    var a = Highlight(sourceId: lunyu.id, text: "學而時習之，不亦說乎", note: "按：習是溫習", location: "第 1 页", tags: ["儒家/孔子"])
+    a.isFavorite = true
+    a = try db.save(a)
+    let b = try db.save(Highlight(sourceId: lunyu.id, text: "溫故而知新，可以為師矣", location: "第 17 页", tags: ["儒家"]))
+    let c = try db.save(Highlight(sourceId: lunyu.id, text: "學而不思則罔", location: "p.18"))
+    let d = try db.save(Highlight(sourceId: mengzi.id, text: "學問之道無他，求其放心而已矣", location: "第 270 页"))
+    _ = try db.save(Highlight(sourceId: lunyu.id, text: "沒有頁碼的一條：學"))
+    func ids(_ q: String) throws -> Set<Int64> { Set(try db.highlights(HighlightQuery(text: q)).compactMap(\.id)) }
+    XCTAssertEqual(try ids("学而 出处:论语"), [a.id!, c.id!])
+    XCTAssertEqual(try ids("学 -不思 出处:论语 页:1-20"), [a.id!])
+    XCTAssertEqual(try ids("作者:杨伯峻 页:200-"), [d.id!])
+    XCTAssertEqual(try ids("#儒家"), [a.id!, b.id!], "父标签含子标签")
+    XCTAssertEqual(try ids("有按语"), [a.id!])
+    XCTAssertEqual(try ids("收藏 出处:论语"), [a.id!])
+    XCTAssertEqual(try ids("“温故而知新”"), [b.id!])
+    XCTAssertEqual(try db.count(HighlightQuery(text: "出处:论语")), 4)
+    // 书页：按页码排序，没有页码的在最后
+    let byPage = try db.sourceHighlightsByPage(lunyu.id!).map(\.text)
+    XCTAssertEqual(byPage.first, "學而時習之，不亦說乎")
+    XCTAssertEqual(byPage.last, "沒有頁碼的一條：學")
+    XCTAssertEqual(byPage[1], "溫故而知新，可以為師矣")
+    let st = try db.sourcePageStats(lunyu.id!)
+    XCTAssertEqual(st.total, 4); XCTAssertEqual(st.withPage, 3); XCTAssertEqual(st.firstPage, 1); XCTAssertEqual(st.lastPage, 18)
+    XCTAssertEqual(st.withNote, 1); XCTAssertEqual(st.favorites, 1)
+    let pieces = ReadingNotes.pieces(bibliography: "楊伯峻.論語譯注[M].", highlights: try db.sourceHighlightsByPage(lunyu.id!))
+    XCTAssertEqual(pieces.count, 1 + 4 + 1)
+    let md = NotebookExporter.markdown(title: "讀書筆記", pieces: pieces, options: .init(footnotes: false, toc: false))
+    XCTAssertTrue(md.contains("> 學而時習之，不亦說乎（第 1 页）"))
   }
 }

@@ -194,3 +194,71 @@ final class V15CoreTests: XCTestCase {
         XCTAssertEqual(m.createdAt, b.createdAt)
     }
 }
+
+final class V16CoreTests: XCTestCase {
+    func testParse() {
+        let p = SearchSyntax.parse("学而 “不亦说乎 有朋” -孟子 出处:论语 作者：杨伯峻 #儒家 标签:孔门 页:12-30 有按语 收藏")
+        XCTAssertEqual(p.terms, ["学而", "不亦说乎 有朋"])
+        XCTAssertEqual(p.excluded, ["孟子"])
+        XCTAssertEqual(p.sources, ["论语"])
+        XCTAssertEqual(p.authors, ["杨伯峻"])
+        XCTAssertEqual(p.tags, ["儒家", "孔门"])
+        XCTAssertEqual(p.pageFrom, 12); XCTAssertEqual(p.pageTo, 30)
+        XCTAssertTrue(p.hasNote); XCTAssertTrue(p.favorite); XCTAssertFalse(p.card)
+        XCTAssertEqual(SearchSyntax.parse("p:15").pageFrom, 15)
+        XCTAssertEqual(SearchSyntax.parse("页:100-").pageTo, nil)
+        XCTAssertEqual(SearchSyntax.parse("页:100-").pageFrom, 100)
+        XCTAssertEqual(SearchSyntax.parse("-\"整句 排除\"").excluded, ["整句 排除"])
+        // 普通文字里的冒号、连字符不当条件
+        XCTAssertEqual(SearchSyntax.parse("子曰:学而 2020-2021").terms, ["子曰:学而", "2020-2021"])
+        XCTAssertFalse(SearchSyntax.parse("学而").hasConditions)
+        XCTAssertEqual(SearchTerms.terms("学而 出处:论语 -孟子"), ["学而"])
+    }
+
+    func testFirstNumber() {
+        XCTAssertEqual(SearchSyntax.firstNumber("第 14 页"), 14)
+        XCTAssertEqual(SearchSyntax.firstNumber("p.120-121"), 120)
+        XCTAssertEqual(SearchSyntax.firstNumber("卷三"), nil)
+        XCTAssertEqual(SearchSyntax.firstNumber("第１２页"), 12)
+        XCTAssertNil(SearchSyntax.firstNumber(nil))
+    }
+}
+
+final class V16HTMLTests: XCTestCase {
+    func testNotebookHTML() throws {
+        let pieces: [NotebookPiece] = [
+            .init(.heading("一、學而")),
+            .init(.text("孔子論學，**重在時習**。下面兩條可以對讀：\n\n- 其一\n- 其二")),
+            .init(.quote("子曰：學而時習之，不亦說乎？有朋自遠方來，不亦樂乎？人不知而不慍，不亦君子乎？", cite: "楊伯峻：《論語譯注》，北京：中華書局，1980年，第1頁。")),
+            .init(.comment("“習”是溫習，也有實習之意。")),
+            .init(.text("過渡文字 <&>。")),
+            .init(.heading("二、為政")),
+            .init(.quote("溫故而知新，可以為師矣。", cite: "《論語·為政》。")),
+        ]
+        let html = NotebookHTML.page(title: "論語專題", pieces: pieces, options: .init(bibliography: ["[1] 楊伯峻.論語譯注[M].北京:中華書局,1980."]))
+        XCTAssertTrue(html.contains("<sup class=\"ref\">①</sup>"))
+        // 第二节重新编号
+        XCTAssertEqual(html.components(separatedBy: "<sup class=\"ref\">①</sup>").count - 1, 2)
+        XCTAssertTrue(html.contains("過渡文字 &lt;&amp;&gt;。"))
+        XCTAssertTrue(html.contains("class=\"toc1\">一、學而"))
+        if let out = ProcessInfo.processInfo.environment["KR_HTML_OUT"] { try html.write(toFile: out, atomically: true, encoding: .utf8) }
+    }
+}
+
+final class V16LiquidTextTests: XCTestCase {
+    /// 2026-10-14 实际导出：工作区批注单独列在最后，“(Refers to a comment )”不是出处
+    func testStandaloneComment() {
+        let parsed = LiquidTextImporter.parse([
+            .init(text: "Notes in ‘革命造反年代 (李逊) ’", indent: 0),
+            .init(text: "Excerpt:\t除了紅衛兵\n(革命造反年代 (李逊) , p.14)", indent: 1200),
+            .init(text: "Comment:\tdemo，demo\n(Refers to a comment )", indent: 1200),
+        ])
+        XCTAssertEqual(parsed.items.count, 2)
+        XCTAssertEqual(parsed.items[1].kind, .comment)
+        XCTAssertNil(parsed.items[1].document)
+        let r = LiquidTextImporter.result(parsed, fallbackTitle: "x")
+        XCTAssertEqual(r.sources.count, 1)
+        XCTAssertEqual(r.sources[0].highlights.last?.text, "demo，demo")
+        XCTAssertEqual(r.sources[0].highlights.last?.tags, ["批注"])
+    }
+}

@@ -69,6 +69,7 @@ struct NotebookView: View {
                 Menu {
                     Button("Word 文档（含脚注、目录、页码）…") { NotebookExport.exportDocx(store: store) }
                     Button("演示稿（PowerPoint / Keynote）…") { NotebookExport.exportPptx(store: store) }
+                    Button("PDF（讲义、打印）…") { NotebookExport.exportPDF(store: store) }
                     Button("Markdown（脚注 [^1]）…") { NotebookExport.exportMarkdown(store: store) }
                     Button("复制到剪贴板（粘到 Word、Pages，含脚注）") { NotebookExport.copyRTF(store: store) }
                     Divider()
@@ -492,6 +493,24 @@ enum NotebookExport {
         guard let url = savePanel(t + ".docx", type: UTType(filenameExtension: "docx") ?? .data) else { return }
         let files = NotebookDocx.files(title: t, pieces: store.notebookPieces(), options: options(store))
         writePackage(files, to: url, store: store, what: "Word")
+    }
+
+    /// 1.6：PDF（出处排成节末注；页眉、页码在生成后补画）
+    static func exportPDF(store: LibraryStore) {
+        store.flushNotebookSaves()
+        let t = title(store)
+        guard let url = savePanel(t + ".pdf", type: .pdf) else { return }
+        let html = NotebookHTML.page(title: t, pieces: store.notebookPieces(), options: options(store))
+        store.importProgress = "正在生成 PDF…"
+        PDFExporter.export(html: html, title: t, to: url) { error in
+            store.importProgress = nil
+            if let error {
+                store.report(error)
+            } else {
+                AppLog.write("导出专题笔记本为 PDF")
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
     }
 
     /// 1.4：演示稿

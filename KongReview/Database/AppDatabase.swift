@@ -63,11 +63,22 @@ final class AppDatabase {
     init(_ writer: any DatabaseWriter) throws {
         self.writer = writer
         // 1.2：繁简归一函数。索引触发器在写连接上调用它，所以必须在迁移之前注册。
-        try writer.writeWithoutTransaction { db in db.add(function: AppDatabase.foldFunction) }
+        try writer.writeWithoutTransaction { db in AppDatabase.registerFunctions(db) }
         try migrator.migrate(writer)
     }
 
     /// kr_fold(文本)：繁体转简体、全角转半角、英文转小写（见 ChineseFold），供繁简通搜的索引使用
+    /// 应用自定义的 SQL 函数（每个连接都要注册）
+    static func registerFunctions(_ db: Database) {
+        db.add(function: foldFunction)
+        db.add(function: pageFunction)
+    }
+
+    /// kr_page(位置)：位置文字里的第一个数字（页码），没有数字时为 NULL（1.6，书页排序与“页:”搜索用）
+    static let pageFunction = DatabaseFunction("kr_page", argumentCount: 1, pure: true) { values in
+        SearchSyntax.firstNumber(String.fromDatabaseValue(values[0]))
+    }
+
     static let foldFunction = DatabaseFunction("kr_fold", argumentCount: 1, pure: true) { values in
         guard let s = String.fromDatabaseValue(values[0]) else { return nil }
         return ChineseFold.fold(s)
@@ -86,7 +97,7 @@ final class AppDatabase {
         let url = dir.appendingPathComponent("kongreview.sqlite")
         var config = Configuration()
         config.foreignKeysEnabled = true
-        config.prepareDatabase { db in db.add(function: AppDatabase.foldFunction) }
+        config.prepareDatabase { db in AppDatabase.registerFunctions(db) }
 
         // 改名迁移：新库不存在、旧版 KongGlean 的库存在时，把旧库完整复制过来（旧文件原样保留）
         let legacy = support.appendingPathComponent("KongGlean/glean.sqlite")
@@ -755,31 +766,62 @@ struct HighlightQuery: Hashable {
     /// 添加日期范围（含首尾两天）
     var dateFrom: Date?
     var dateTo: Date?
+    /// 1.6：按页码排序（书页视图）；没有页码的排在最后，同页按录入先后
+    var orderByPage = false
+
+    var orderSQL: String {
+        if deletedOnly { return " ORDER BY highlight.deletedAt DESC" }
+        if orderByPage {
+            return " ORDER BY kr_page(highlight.location) IS NULL, kr_page(highlight.location), highlight.createdAt, highlight.id"
+        }
+        return " ORDER BY highlight.createdAt DESC"
+    }
 
     func sqlParts() -> (from: String, where: String, args: [(any DatabaseValueConvertible)?]) {
         var clauses: [String] = []
         var args: [(any DatabaseValueConvertible)?] = []
-        var from = "highlight"
+        let from = "highlight"
 
-        let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !q.isEmpty {
-            // 1.2：在繁简归一后的索引里找，“红卫兵”与“紅衛兵”互相能搜到
-            let fq = ChineseFold.fold(q)
-            if SearchQuery.usesFullText(fq) {
-                from = "highlight JOIN highlight_fold_ft ON highlight_fold_ft.rowid = highlight.id"
-                clauses.append("highlight_fold_ft MATCH ?")
-                args.append(SearchQuery.fts5Phrase(fq))
-            } else {
-                clauses.append("highlight.id IN (SELECT rowid FROM highlight_fold_ft WHERE body LIKE ? ESCAPE '\\')")
-                args.append(SearchQuery.likePattern(fq))
-            }
+        // 1.6：搜索语法（见 KongReviewCore/SearchSyntax.swift）：多个词同时出现、整句、-排除、出处:、作者:、标签:、页:、有按语…
+        let parsed = SearchSyntax.parse(text)
+        /// 某个词在繁简归一后的索引里出现（1.2 起“红卫兵”与“紅衛兵”互相能搜到）
+        func termClause(_ term: String, negate: Bool) {
+            let fq = ChineseFold.fold(term)
+            guard !fq.isEmpty else { return }
+            let inner = SearchQuery.usesFullText(fq)
+                ? "SELECT rowid FROM highlight_fold_ft WHERE highlight_fold_ft MATCH ?"
+                : "SELECT rowid FROM highlight_fold_ft WHERE body LIKE ? ESCAPE '\\'"
+            clauses.append("highlight.id \(negate ? "NOT IN" : "IN") (\(inner))")
+            args.append(SearchQuery.usesFullText(fq) ? SearchQuery.fts5Phrase(fq) : SearchQuery.likePattern(fq))
         }
+        for t in parsed.terms { termClause(t, negate: false) }
+        for t in parsed.excluded { termClause(t, negate: true) }
+        for s in parsed.sources {
+            clauses.append("highlight.sourceId IN (SELECT id FROM source WHERE kr_fold(title) LIKE ? ESCAPE '\\')")
+            args.append(SearchQuery.likePattern(ChineseFold.fold(s)))
+        }
+        for a in parsed.authors {
+            clauses.append("highlight.sourceId IN (SELECT id FROM source WHERE kr_fold(author) LIKE ? ESCAPE '\\')")
+            args.append(SearchQuery.likePattern(ChineseFold.fold(a)))
+        }
+        if let lo = parsed.pageFrom {
+            clauses.append("kr_page(highlight.location) >= ?")
+            args.append(lo)
+        }
+        if let hi = parsed.pageTo {
+            clauses.append("kr_page(highlight.location) <= ?")
+            args.append(hi)
+        }
+        if parsed.hasNote { clauses.append("trim(coalesce(highlight.note, '')) <> ''") }
+        if parsed.hasTranslation { clauses.append("trim(coalesce(highlight.translation, '')) <> ''") }
+        if parsed.favorite { clauses.append("highlight.isFavorite = 1") }
+        if parsed.card { clauses.append("highlight.id IN (SELECT highlightId FROM card WHERE highlightId IS NOT NULL AND deletedAt IS NULL)") }
         if let sourceId {
             clauses.append("highlight.sourceId = ?")
             args.append(sourceId)
         }
         // tags 以 JSON 数组存储，用 json_each 匹配；1.1 起父标签包含子标签（“儒家”也找出“儒家/孟子”）
-        for t in ([tag].compactMap { $0 } + tags) where !t.isEmpty {
+        for t in ([tag].compactMap { $0 } + tags + parsed.tags) where !t.isEmpty {
             clauses.append("EXISTS (SELECT 1 FROM json_each(highlight.tags) WHERE json_each.value = ? OR substr(json_each.value, 1, ?) = ?)")
             args.append(t)
             args.append(t.unicodeScalars.count + 1)
@@ -851,7 +893,7 @@ extension AppDatabase {
         try writer.read { db in
             let (from, whereSQL, args) = q.sqlParts()
             var sql = "SELECT highlight.* FROM \(from)\(whereSQL)"
-            sql += q.deletedOnly ? " ORDER BY highlight.deletedAt DESC" : " ORDER BY highlight.createdAt DESC"
+            sql += q.orderSQL
             sql += ", highlight.id DESC"
             var all = args
             if let limit {

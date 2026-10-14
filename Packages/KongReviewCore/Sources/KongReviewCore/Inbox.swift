@@ -105,10 +105,9 @@ public enum InboxPayload {
 
 public enum SearchTerms {
     /// 把查询拆成若干词（空格分隔，去掉 # 标签与引号）
+    /// 1.6 起按搜索语法拆（只取要找的词与整句，不含 出处:、-排除、标签 等条件）
     public static func terms(_ query: String) -> [String] {
-        query.split(whereSeparator: { $0 == " " || $0 == "　" })
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”'")) }
-            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+        SearchSyntax.parse(query).terms
     }
 
     /// 文本里每个词出现的位置（不区分大小写）
