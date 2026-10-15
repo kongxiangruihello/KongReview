@@ -144,6 +144,8 @@ final class LibraryStore {
     var pageRange: PageRangeDraft?
     /// 1.9：引文核对结果
     var citationCheck: CitationCheckRequest?
+    /// 2.2：从对照表导入版本页码
+    var editionImport: EditionImportDraft?
     /// 2.1：篇目进度面板
     var chapterProgressRequest: ChapterProgressRequest?
     /// 2.0：补齐页码后要接着导出的格式（笔记本界面看到后执行）

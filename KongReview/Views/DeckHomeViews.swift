@@ -112,6 +112,16 @@ struct DeckHomeView: View {
             .frame(maxWidth: .infinity)
         }
         .background(ReviewPalette.page)
+        // 2.2：每次回到牌组页、以及停留期间每分钟，按当前时间重算（学习中的卡几分钟后到期、跨日都会变）
+        .onAppear { store.refreshDerived() }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { break }
+                store.checkDayChange()
+                store.refreshDerived()
+            }
+        }
     }
 
     // MARK: 今日功课

@@ -405,3 +405,60 @@ extension LibraryStore {
         return CitationFormatter.citation(for: h, source: source(for: h), style: CitationSettings.style)
     }
 }
+
+// MARK: - 2.2：版本页码批量导入、统计页的古籍进度
+
+extension LibraryStore {
+    func openEditionImport(_ sourceId: Int64) {
+        editionImport = EditionImportDraft(sourceId: sourceId, editionId: editions(for: sourceId).first?.id)
+    }
+
+    /// 按当前对照表预览：这本书的摘录能对上几条
+    func editionImportPreview(_ d: EditionImportDraft) -> EditionPageImport.Result {
+        let hs = (try? db.sourceHighlightsByPage(d.sourceId)) ?? []
+        return EditionPageImport.match(hs, rows: d.rows)
+    }
+
+    func commitEditionImport() {
+        guard let d = editionImport, let eid = d.editionId else { return }
+        let r = editionImportPreview(d)
+        guard !r.matches.isEmpty else { return }
+        let name = sources.first { $0.id == eid }.map { "《\($0.title)》" } ?? "该版本"
+        perform {
+            let res = try db.applyEditionPages(r.matches, editionId: eid, overwrite: d.overwrite)
+            infoMessage = "已导入 \(res.written) 条摘录在\(name)里的页码"
+                + (res.skipped > 0 ? "，\(res.skipped) 条原来就有、未覆盖" : "")
+                + (r.unmatched.isEmpty ? "。" : "；\(r.unmatched.count) 条在对照表里找不到页码。")
+        }
+        editionImport = nil
+        refreshNotebookHighlights()
+    }
+
+    struct ClassicOverview: Identifiable {
+        var source: Source
+        var chapters: [ChapterProgress]
+        /// 最近一周回顾过的篇（按书中顺序）
+        var recent: [String]
+        var id: Int64 { source.id ?? 0 }
+        var total: Int { chapters.reduce(0) { $0 + $1.total } }
+        var reviewed: Int { chapters.reduce(0) { $0 + $1.reviewed } }
+        var finished: Int { chapters.filter { $0.total > 0 && $0.reviewed == $0.total }.count }
+    }
+
+    /// 统计页：设了古籍体例、位置里有篇名的出处，各篇进度与最近一周回顾了哪些篇（最近读的排前）
+    func classicOverview(now: Date = Date()) -> [ClassicOverview] {
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
+        let recentIds = (try? db.reviewedHighlightIds(since: weekAgo)) ?? []
+        var out: [ClassicOverview] = []
+        for s in sources where s.isClassic {
+            guard let sid = s.id, let groups = try? db.sourceChapters(sid), !groups.isEmpty else { continue }
+            let ids = groups.flatMap { $0.highlights.compactMap(\.id) }
+            let carded = Set(((try? db.cards(highlightIds: ids)) ?? []).compactMap(\.highlightId))
+            let recent = groups.filter { g in g.highlights.contains { $0.id.map(recentIds.contains) ?? false } }.map(\.name)
+            out.append(ClassicOverview(source: s, chapters: ChapterProgress.compute(groups, carded: carded), recent: recent))
+        }
+        return out.sorted { a, b in
+            a.recent.count != b.recent.count ? a.recent.count > b.recent.count : a.source.title < b.source.title
+        }
+    }
+}

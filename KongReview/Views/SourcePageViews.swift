@@ -82,6 +82,17 @@ struct SourcePageHeader: View {
                         .fixedSize()
                         .help("按摘录位置里的篇名（如“学而第一”）分篇：回顾一篇，或把一篇做成记忆卡")
                     }
+                    // 2.2：这部古籍还有别的版本时，可从对照表导入各条在那个版本里的页码
+                    if !store.editions(for: sourceId).isEmpty {
+                        Button {
+                            store.openEditionImport(sourceId)
+                        } label: {
+                            Label("导入版本页码…", systemImage: "tablecells")
+                        }
+                        .buttonStyle(.borderless)
+                        .handCursor()
+                        .help("从页码对照表（Excel、CSV，或在 Excel 里复制的几列）一次填好各条摘录在另一个版本里的页码")
+                    }
                     Button {
                         store.openPageRange(sourceId)
                     } label: {
@@ -119,6 +130,9 @@ struct SourcePageHeader: View {
         }
         .sheet(item: Bindable(store).chapterProgressRequest) { req in
             ChapterProgressSheet(sourceId: req.sourceId)
+        }
+        .sheet(item: Bindable(store).editionImport) { d in
+            EditionImportSheet(draft: d)
         }
     }
 
@@ -317,5 +331,138 @@ struct ChapterProgressSheet: View {
         }
         .padding(22)
         .frame(width: 620)
+    }
+}
+
+// MARK: - 2.2：从对照表导入版本页码
+
+enum EditionImportFile {
+    /// 读 .xlsx（第一张表）、.csv、.tsv、.txt；CSV 不是 UTF-8 时按 GB18030（中文 Windows 版 Excel 存的 CSV）读
+    static func read(_ url: URL) throws -> [[String]] {
+        if url.pathExtension.lowercased() == "xlsx" {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("kr-xlsx-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            p.arguments = ["-x", "-k", url.path, tmp.path]
+            try p.run()
+            p.waitUntilExit()
+            guard p.terminationStatus == 0 else { throw ImportFileError("解压失败：这个文件可能不是有效的 Excel（.xlsx）文件。") }
+            let sheet = tmp.appendingPathComponent("xl/worksheets/sheet1.xml")
+            guard let sheetData = try? Data(contentsOf: sheet) else {
+                throw ImportFileError("没找到第一张工作表（xl/worksheets/sheet1.xml）。")
+            }
+            let shared = try? Data(contentsOf: tmp.appendingPathComponent("xl/sharedStrings.xml"))
+            return EditionPageImport.cells(sheetXML: sheetData, sharedStringsXML: shared)
+        }
+        let data = try Data(contentsOf: url)
+        let gb = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: gb) ?? String(data: data, encoding: .utf16) else {
+            throw ImportFileError("无法读取文件编码（应为 UTF-8 或 GB18030）。")
+        }
+        return EditionPageImport.cells(fromText: text)
+    }
+}
+
+struct EditionImportSheet: View {
+    @Environment(LibraryStore.self) private var store
+    let draft: EditionImportDraft
+
+    var body: some View {
+        let source = store.sources.first { $0.id == draft.sourceId }
+        let eds = store.editions(for: draft.sourceId)
+        let rows = draft.rows
+        let hs = (try? store.db.sourceHighlightsByPage(draft.sourceId)) ?? []
+        let preview = EditionPageImport.match(hs, rows: rows)
+        let byId: [Int64: Highlight] = Dictionary(hs.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
+        VStack(alignment: .leading, spacing: 12) {
+            Text("导入版本页码").font(.system(size: 22, weight: .semibold, design: .serif))
+            Text("把《\(source?.title ?? "")》各条摘录在另一个版本里的页码一次填好。对照表每行写“原页码 → 该版页码”，可在前面加一列篇名（同一页码在不同篇时用来区分）；原页码可写范围，如 3-5。第一行是表头也没关系。")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Picker("对照的版本", selection: Bindable(draft).editionId) {
+                ForEach(eds) { e in Text(NotebookExport.editionName(e)).tag(e.id) }
+            }
+            HStack(spacing: 10) {
+                Button("选择文件（Excel / CSV）…") { chooseFile() }
+                    .handCursor()
+                Button("从剪贴板粘贴") { paste() }
+                    .handCursor()
+                    .help("在 Excel、Numbers 里选中两三列复制，再点这里")
+                Spacer()
+                if !draft.origin.isEmpty {
+                    Text("\(draft.origin)：读到 \(rows.count) 行对照").font(.callout).foregroundStyle(ReviewPalette.sub)
+                }
+            }
+            if let e = draft.error { Text(e).font(.callout).foregroundStyle(ReviewPalette.again) }
+            if !rows.isEmpty {
+                HStack(spacing: 18) {
+                    Label("能对上 \(preview.matches.count) 条", systemImage: "checkmark.circle").foregroundStyle(DeckColors.reviewColor)
+                    if !preview.unmatched.isEmpty {
+                        Label("对照表里没有 \(preview.unmatched.count) 条", systemImage: "questionmark.circle").foregroundStyle(ReviewPalette.hard)
+                    }
+                    if !preview.noPage.isEmpty {
+                        Label("没有页码 \(preview.noPage.count) 条", systemImage: "minus.circle").foregroundStyle(ReviewPalette.sub)
+                    }
+                }
+                .font(.callout)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(preview.matches.prefix(60).enumerated()), id: \.offset) { _, m in
+                            if let h = byId[m.highlightId] {
+                                HStack(spacing: 10) {
+                                    Text(h.location ?? "").font(.system(size: 11.5).monospacedDigit())
+                                        .foregroundStyle(ReviewPalette.sub).frame(width: 150, alignment: .leading).lineLimit(1)
+                                    Image(systemName: "arrow.right").font(.caption2).foregroundStyle(ReviewPalette.sub)
+                                    Text(m.page).font(.system(size: 12, weight: .medium).monospacedDigit()).frame(width: 60, alignment: .leading)
+                                    Text(h.text.replacingOccurrences(of: "\n", with: " "))
+                                        .font(.system(size: 12.5, design: .serif)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(minHeight: 120, maxHeight: 260)
+                Toggle("覆盖已经填过的该版页码", isOn: Bindable(draft).overwrite)
+                    .toggleStyle(.checkbox)
+            }
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) { store.editionImport = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("导入 \(preview.matches.count) 条") { store.commitEditionImport() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .handCursor()
+                    .disabled(preview.matches.isEmpty || draft.editionId == nil)
+            }
+        }
+        .padding(22)
+        .frame(width: 640)
+    }
+
+    private func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = ["xlsx", "csv", "tsv", "txt"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            draft.cells = try EditionImportFile.read(url)
+            draft.origin = url.lastPathComponent
+            draft.error = draft.rows.isEmpty ? "没有读到对照行：请确认有“原页码、该版页码”两列（可另加篇名列）。" : nil
+        } catch {
+            draft.error = error.localizedDescription
+        }
+    }
+
+    private func paste() {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+            draft.error = "剪贴板里没有文字。"
+            return
+        }
+        draft.cells = EditionPageImport.cells(fromText: text)
+        draft.origin = "剪贴板"
+        draft.error = draft.rows.isEmpty ? "剪贴板里没有读到对照行：请在表格里选中“原页码、该版页码”两列（可另加篇名列）再复制。" : nil
     }
 }

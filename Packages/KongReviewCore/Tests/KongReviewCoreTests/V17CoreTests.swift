@@ -289,3 +289,60 @@ final class V21CoreTests: XCTestCase {
         XCTAssertEqual(p[0].reviewedRatio, 0.5)
     }
 }
+
+final class V22CoreTests: XCTestCase {
+    func testCellsAndRows() {
+        let csv = "篇名,杨本页码,集释页码\n学而第一,1,3\n学而,\"3-5\",第12页\n为政,11,60\n,,\n"
+        let rows = EditionPageImport.rows(EditionPageImport.cells(fromText: csv))
+        XCTAssertEqual(rows, [
+            .init(chapter: "学而", original: 1...1, edition: "3"),
+            .init(chapter: "学而", original: 3...5, edition: "第12页"),
+            .init(chapter: "为政", original: 11...11, edition: "60"),
+        ])
+        let tsv = "1\t3\n2\t4"
+        XCTAssertEqual(EditionPageImport.rows(EditionPageImport.cells(fromText: tsv)).map(\.edition), ["3", "4"])
+    }
+
+    func testMatch() {
+        let rows: [EditionPageImport.Row] = [
+            .init(chapter: "学而", original: 3...3, edition: "12"),
+            .init(chapter: "为政", original: 3...3, edition: "50"),
+            .init(chapter: nil, original: 7...9, edition: "70"),
+        ]
+        let hs = [
+            Highlight(id: 1, text: "a", location: "学而第一 · 第3页"),
+            Highlight(id: 2, text: "b", location: "为政第二 第3页"),
+            Highlight(id: 3, text: "c", location: "第8页"),
+            Highlight(id: 4, text: "d", location: "第99页"),
+            Highlight(id: 5, text: "e", location: "学而"),
+        ]
+        let r = EditionPageImport.match(hs, rows: rows)
+        XCTAssertEqual(r.matches, [.init(highlightId: 1, page: "12"), .init(highlightId: 2, page: "50"), .init(highlightId: 3, page: "70")])
+        XCTAssertEqual(r.unmatched, [4])
+        XCTAssertEqual(r.noPage, [5])
+    }
+
+    func testXLSX() {
+        let shared = """
+        <?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>篇名</t></si><si><t>原页</t></si><si><t>学而</t></si><si><r><t>新</t></r><r><t>页</t></r></si></sst>
+        """.data(using: .utf8)!
+        let sheet = """
+        <?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+        <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>3</v></c></row>
+        <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>3</v></c><c r="C2"><v>12.0</v></c></row>
+        <row r="3"><c r="B3"><v>4</v></c><c r="C3" t="inlineStr"><is><t>13</t></is></c></row>
+        </sheetData></worksheet>
+        """.data(using: .utf8)!
+        let cells = EditionPageImport.cells(sheetXML: sheet, sharedStringsXML: shared)
+        XCTAssertEqual(cells, [["篇名", "原页", "新页"], ["学而", "3", "12"], ["", "4", "13"]])
+        XCTAssertEqual(EditionPageImport.rows(cells).count, 2)
+    }
+}
+
+final class V22ExtraColumnTests: XCTestCase {
+    func testExtraNoteColumn() {
+        let rows = EditionPageImport.rows(EditionPageImport.cells(fromText: "原页码,该版页码,备注\n3,15,\n4,16,见注\n"))
+        XCTAssertEqual(rows.map(\.edition), ["15", "16"])
+        XCTAssertEqual(rows.map(\.chapter), [nil, nil])
+    }
+}

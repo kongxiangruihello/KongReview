@@ -1431,3 +1431,87 @@ final class V21Tests: XCTestCase {
     }
   }
 }
+
+final class V22CountTests: XCTestCase {
+  func testImportedReviewCardsCountAsReview() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      // 从 Anki 导入的旧卡：复习状态、复习过 12 次，但这里没有任何回答记录
+      for i in 0..<3 {
+        var c = Card(deck: "D", front: "r\(i)", state: .review, interval: 5, due: Date().addingTimeInterval(-3600))
+        c.reps = 12
+        _ = try db.save(c)
+      }
+      for i in 0..<2 { _ = try db.save(Card(deck: "D", front: "n\(i)")) }
+      store.reload()
+      let before = try XCTUnwrap(store.deckSummaryCache.first)
+      XCTAssertEqual(before.counts.review, 3); XCTAssertEqual(before.counts.new, 2)
+      store.startStudy(deck: "D")
+      // 先出复习卡
+      store.answerCurrent(.good)
+      let done = try db.studiedToday(deck: "D")
+      XCTAssertEqual(done.new, 0); XCTAssertEqual(done.review, 1)
+      XCTAssertEqual(store.deckSummaryCache.first?.counts.review, 2)
+      XCTAssertEqual(store.deckSummaryCache.first?.counts.new, 2, "复习旧卡不占新卡名额")
+      // 旧记录（没有 cardState）：旧卡按复习次数判断
+      try db.writer.write { try $0.execute(sql: "UPDATE review_event SET cardState = NULL") }
+      XCTAssertEqual(try db.studiedToday(deck: "D").review, 1)
+      // 学两张新卡（第一张答“重来”进入学习步骤），算 2 张新卡
+      while let cur = store.study.current, cur.front.hasPrefix("r") { store.answerCurrent(.good) }
+      store.answerCurrent(.again)
+      store.answerCurrent(.good)
+      let d2 = try db.studiedToday(deck: "D")
+      XCTAssertEqual(d2.new, 2)
+      XCTAssertEqual(d2.review, 3)
+      try db.writer.write { try $0.execute(sql: "UPDATE review_event SET cardState = NULL") }
+      XCTAssertEqual(try db.studiedToday(deck: "D").new, 2, "旧记录的新卡：复习次数不超过今天的回答次数")
+      let ids = try db.cards(deck: "D").compactMap(\.id)
+      XCTAssertEqual(try db.studiedToday(cardIds: ids).new, 2)
+    }
+  }
+}
+
+final class V22StoreTests: XCTestCase {
+  func testEditionImportAndOverview() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      var yang = Source(title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980")
+      yang.classicTitle = "论语"
+      yang = try db.save(yang)
+      var cheng = Source(title: "论语集释", author: "程树德", publisher: "中华书局", year: "1990")
+      cheng.classicTitle = "论语"
+      cheng = try db.save(cheng)
+      let a = try db.save(Highlight(sourceId: yang.id, text: "a", location: "学而第一 · 第1页"))
+      let b = try db.save(Highlight(sourceId: yang.id, text: "b", location: "学而第一 · 第3页"))
+      let c = try db.save(Highlight(sourceId: yang.id, text: "c", location: "为政第二 · 第11页"))
+      store.reload()
+      try db.setEditionPages(b.id!, [cheng.id!: "旧"])
+      store.openEditionImport(yang.id!)
+      let d = try XCTUnwrap(store.editionImport)
+      XCTAssertEqual(d.editionId, cheng.id)
+      d.cells = EditionPageImport.cells(fromText: "篇名\t杨\t集释\n学而\t1\t3\n学而\t3\t12\n")
+      let p = store.editionImportPreview(d)
+      XCTAssertEqual(p.matches.count, 2); XCTAssertEqual(p.unmatched, [c.id!])
+      store.commitEditionImport()
+      XCTAssertNil(store.editionImport)
+      XCTAssertEqual(try db.editionPages(a.id!)[cheng.id!], "3")
+      XCTAssertEqual(try db.editionPages(b.id!)[cheng.id!], "旧", "默认不覆盖")
+      XCTAssertTrue(store.infoMessage?.contains("1 条原来就有") ?? false, store.infoMessage ?? "")
+      store.openEditionImport(yang.id!)
+      store.editionImport!.cells = EditionPageImport.cells(fromText: "3,12")
+      store.editionImport!.overwrite = true
+      store.commitEditionImport()
+      XCTAssertEqual(try db.editionPages(b.id!)[cheng.id!], "12")
+
+      // 统计页概览
+      store.logReview(.keep, highlightId: c.id)
+      let o = store.classicOverview()
+      XCTAssertEqual(o.count, 1)
+      XCTAssertEqual(o.first?.source.id, yang.id)
+      XCTAssertEqual(o.first?.recent, ["为政"])
+      XCTAssertEqual(o.first?.chapters.map(\.name), ["学而", "为政"])
+    }
+  }
+}

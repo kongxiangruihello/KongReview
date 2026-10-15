@@ -65,6 +65,8 @@ struct StatsView: View {
 
                 staleSection
 
+                ClassicProgressSection()
+
                 Text("统计从 0.7 版开始记录：每日回顾里“下一条 / 收藏 / 弃置 / 做成记忆卡”算回顾一条摘录；记忆卡每评一次分算一次。")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -73,6 +75,10 @@ struct StatsView: View {
             .frame(maxWidth: .infinity)
         }
         .background(ReviewPalette.page)
+        .onAppear { store.refreshDerived() }   // 2.2：打开统计页时按最新记录重算
+        .sheet(item: Bindable(store).chapterProgressRequest) { req in
+            ChapterProgressSheet(sourceId: req.sourceId)
+        }
         .navigationTitle("回顾统计")
         // 卡片统计只在打开本页、数据变化时重算（SQL 汇总，不读出全部卡片）
         .task(id: store.revision) { store.refreshCardInsights() }
@@ -250,5 +256,56 @@ struct CardInsightsSection: View {
         let lo = max(0, (values.min() ?? 70) - 5)
         let hi = min(100, (values.max() ?? 100) + 3)
         return lo...max(hi, lo + 10)
+    }
+}
+
+// MARK: - 2.2：古籍篇目进度
+
+/// 统计页：正在读的古籍各有几篇、回顾过几成、全篇过完几篇，最近一周回顾了哪些篇；点一部书打开它的篇目进度
+struct ClassicProgressSection: View {
+    @Environment(LibraryStore.self) private var store
+
+    var body: some View {
+        let _ = store.revision
+        let list = store.classicOverview()
+        if !list.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("古籍篇目进度").font(.headline)
+                ForEach(list) { o in
+                    let tint = DeckColors.color(for: store.chapterBookTitle(o.id))
+                    Button {
+                        store.chapterProgressRequest = ChapterProgressRequest(sourceId: o.id)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text("《\(o.source.title)》").font(.system(size: 15, weight: .semibold, design: .serif))
+                                    .foregroundStyle(ReviewPalette.ink)
+                                Text("\(o.chapters.count) 篇 · 全篇回顾过 \(o.finished) 篇 · 摘录回顾过 \(o.reviewed)/\(o.total)")
+                                    .font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(ReviewPalette.sub)
+                            }
+                            // 每篇一小段，回顾过的比例越高颜色越深
+                            HStack(spacing: 2) {
+                                ForEach(o.chapters) { c in
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(c.reviewed == 0 ? ReviewPalette.hair : tint.opacity(0.25 + 0.75 * c.reviewedRatio))
+                                        .frame(height: 8)
+                                        .help("《\(c.name)》\(c.summary)")
+                                }
+                            }
+                            Text(o.recent.isEmpty ? "最近一周没有回顾这部书。" : "最近一周回顾了：" + o.recent.prefix(12).joined(separator: "、") + (o.recent.count > 12 ? " 等 \(o.recent.count) 篇" : ""))
+                                .font(.system(size: 12)).foregroundStyle(o.recent.isEmpty ? ReviewPalette.sub : ReviewPalette.ink)
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(ReviewPalette.card))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(ReviewPalette.hair))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .handCursor()
+                }
+            }
+        }
     }
 }

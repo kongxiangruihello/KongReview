@@ -64,22 +64,39 @@ extension AppDatabase {
 
     /// 今天已经学过的新卡、复习卡数量（用于每日上限）；deck 为 nil 时统计全部牌组
     func studiedToday(deck: String? = nil, now: Date = Date()) throws -> (new: Int, review: Int) {
+        try studiedToday(filter: deck.map { (" AND e.cardId IN (SELECT id FROM card WHERE deck = ?)", [$0]) }, now: now)
+    }
+
+    /// 2.2：按卡片“今天第一次回答前的状态”分新卡、复习。
+    /// 有记录状态的（2.2 起）直接看状态；旧记录：今天之前没有回答记录、且复习次数不超过今天的回答次数才算新卡
+    /// ——以前只看“今天之前有没有记录”，从 Anki 导入的旧卡第一次在这里复习会被当成新卡，占掉新卡名额，复习名额却不减。
+    func studiedToday(filter: (sql: String, args: [DatabaseValueConvertible])?, now: Date) throws -> (new: Int, review: Int) {
         let start = Calendar.current.startOfDay(for: now)
         return try writer.read { db in
-            let deckFilter = deck == nil ? "" : " AND e.cardId IN (SELECT id FROM card WHERE deck = ?)"
-            var args: [DatabaseValueConvertible] = [start, start]
-            if let deck { args.append(deck) }
-            // 新卡：今天第一次回答的卡（今天之前没有日志）
-            let newCount = try Int.fetchOne(db, sql: """
-                SELECT COUNT(DISTINCT cardId) FROM review_event e
-                WHERE kind = 'card' AND at >= ?
-                  AND NOT EXISTS (SELECT 1 FROM review_event p WHERE p.cardId = e.cardId AND p.kind = 'card' AND p.at < ?)
-                """ + deckFilter, arguments: StatementArguments(args)) ?? 0
-            var args2: [DatabaseValueConvertible] = [start]
-            if let deck { args2.append(deck) }
-            let total = try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT cardId) FROM review_event e WHERE kind = 'card' AND at >= ?" + deckFilter,
-                                         arguments: StatementArguments(args2)) ?? 0
-            return (newCount, max(0, total - newCount))
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT e.cardId AS id, COUNT(*) AS n,
+                       (SELECT e2.cardState FROM review_event e2 WHERE e2.cardId = e.cardId AND e2.kind = 'card' AND e2.at >= ?
+                         ORDER BY e2.at, e2.id LIMIT 1) AS firstState,
+                       EXISTS (SELECT 1 FROM review_event p WHERE p.cardId = e.cardId AND p.kind = 'card' AND p.at < ?) AS prior,
+                       (SELECT reps FROM card c WHERE c.id = e.cardId) AS reps
+                FROM review_event e
+                WHERE e.kind = 'card' AND e.at >= ?
+                """ + (filter?.sql ?? "") + " GROUP BY e.cardId",
+                arguments: StatementArguments([start, start, start] + (filter?.args ?? [])))
+            var n = 0, r = 0
+            for row in rows {
+                let isNew: Bool
+                if let st: String = row["firstState"] {
+                    isNew = st == Card.State.new.rawValue
+                } else {
+                    let prior: Bool = row["prior"] ?? false
+                    let reps: Int = row["reps"] ?? 0
+                    let count: Int = row["n"] ?? 0
+                    isNew = !prior && reps <= count
+                }
+                if isNew { n += 1 } else { r += 1 }
+            }
+            return (n, r)
         }
     }
 
@@ -123,21 +140,8 @@ extension AppDatabase {
     /// 今天已学过的新卡、复习卡数量（限定在这些卡片内）
     func studiedToday(cardIds: [Int64], now: Date = Date()) throws -> (new: Int, review: Int) {
         guard !cardIds.isEmpty else { return (0, 0) }
-        let start = Calendar.current.startOfDay(for: now)
-        let set = Set(cardIds)
-        return try writer.read { db in
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT e.cardId AS id,
-                       NOT EXISTS (SELECT 1 FROM review_event p WHERE p.cardId = e.cardId AND p.kind = 'card' AND p.at < ?) AS first
-                FROM review_event e WHERE e.kind = 'card' AND e.at >= ? GROUP BY e.cardId
-                """, arguments: [start, start])
-            var n = 0, r = 0
-            for row in rows {
-                guard let id: Int64 = row["id"], set.contains(id) else { continue }
-                if (row["first"] as Bool?) == true { n += 1 } else { r += 1 }
-            }
-            return (n, r)
-        }
+        let marks = Array(repeating: "?", count: cardIds.count).joined(separator: ",")
+        return try studiedToday(filter: (" AND e.cardId IN (\(marks))", cardIds), now: now)
     }
 
     /// 把一组摘录做成记忆卡放进 deck；已有卡片的摘录（无论在哪个牌组）不重复制作。
@@ -157,6 +161,7 @@ extension AppDatabase {
             var c = scheduler.answer(card, a, now: now)
             try c.save(db)
             var e = ReviewEvent(kind: .card, cardId: c.id, answer: a.rawValue, at: now)
+            e.cardState = card.state.rawValue
             try e.insert(db)
             return c
         }

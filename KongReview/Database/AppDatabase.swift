@@ -380,6 +380,11 @@ final class AppDatabase {
             }
             try db.create(index: "edition_page_source", on: "highlight_edition_page", columns: ["sourceId"])
         }
+
+        // 2.2：记忆卡回答记录写上回答前的卡片状态（导入的旧卡第一次复习不再被算成新卡）
+        m.registerMigration("v13-event-card-state") { db in
+            try db.alter(table: "review_event") { t in t.add(column: "cardState", .text) }
+        }
         return m
     }
 }

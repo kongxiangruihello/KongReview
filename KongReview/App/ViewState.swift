@@ -89,6 +89,26 @@ struct CitationCheckRequest: Identifiable {
     var filledPages: Int { pageDrafts.values.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count }
 }
 
+/// 2.2：从对照表导入版本页码
+@MainActor
+@Observable
+final class EditionImportDraft: Identifiable {
+    nonisolated let id = UUID()
+    let sourceId: Int64
+    var editionId: Int64?
+    /// 读到的单元格
+    var cells: [[String]] = []
+    /// 表从哪里来（文件名或“剪贴板”）
+    var origin = ""
+    var overwrite = false
+    var error: String?
+    init(sourceId: Int64, editionId: Int64?) {
+        self.sourceId = sourceId
+        self.editionId = editionId
+    }
+    var rows: [EditionPageImport.Row] { EditionPageImport.rows(cells) }
+}
+
 /// 2.1：篇目进度面板
 struct ChapterProgressRequest: Identifiable {
     let id = UUID()

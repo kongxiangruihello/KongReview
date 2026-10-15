@@ -143,3 +143,33 @@ extension AppDatabase {
         }
     }
 }
+
+// MARK: - 2.2：版本页码批量导入、最近回顾
+
+extension AppDatabase {
+    /// 写入一批版本页码；overwrite 为 false 时已有该版页码的不动。返回 (写入, 跳过)
+    func applyEditionPages(_ matches: [EditionPageImport.Match], editionId: Int64, overwrite: Bool) throws -> (written: Int, skipped: Int) {
+        try writer.write { db in
+            var w = 0, s = 0
+            for m in matches {
+                let exists = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM highlight_edition_page WHERE highlightId = ? AND sourceId = ?)",
+                                               arguments: [m.highlightId, editionId]) ?? false
+                if exists && !overwrite { s += 1; continue }
+                try db.execute(sql: "INSERT OR REPLACE INTO highlight_edition_page (highlightId, sourceId, page) VALUES (?, ?, ?)",
+                               arguments: [m.highlightId, editionId, m.page])
+                w += 1
+            }
+            return (w, s)
+        }
+    }
+
+    /// 某时以来在每日回顾里看过的摘录
+    func reviewedHighlightIds(since: Date) throws -> Set<Int64> {
+        try writer.read { db in
+            Set(try Int64.fetchAll(db, sql: """
+                SELECT DISTINCT highlightId FROM review_event
+                WHERE highlightId IS NOT NULL AND kind NOT IN ('card', 'note') AND at >= ?
+                """, arguments: [since]))
+        }
+    }
+}

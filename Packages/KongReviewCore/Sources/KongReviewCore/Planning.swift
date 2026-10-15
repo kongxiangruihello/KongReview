@@ -42,6 +42,8 @@ public struct ReviewEvent: Codable, Hashable, Sendable {
     /// 记忆卡的回答（1–4）
     public var answer: Int?
     public var at: Date
+    /// 2.2：回答前卡片的状态（new / learning / review / relearning），用来区分今天学的是新卡还是复习；旧记录为 nil
+    public var cardState: String?
 
     public init(id: Int64? = nil, kind: Kind, highlightId: Int64? = nil, cardId: Int64? = nil, answer: Int? = nil, at: Date = Date()) {
         self.id = id
