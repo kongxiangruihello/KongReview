@@ -439,6 +439,11 @@ final class LibraryStore {
         var computedAt: Date
     }
     var cardInsights: CardInsights?
+    /// 2.3：今天、最近 7 天各牌组的学习统计（统计页）
+    var deckStudyToday: [DeckStudyStat] = []
+    var deckStudyWeek: [DeckStudyStat] = []
+    /// 统计页“按牌组”显示最近 7 天（否则今天）
+    var deckStudyShowWeek = false
 
     func refreshCardInsights(now: Date = Date()) {
         do {
@@ -449,6 +454,11 @@ final class LibraryStore {
             let retention = CardForecast.retention(try db.cardAnswers(since: since), now: now, weeks: 12)
             cardInsights = CardInsights(counts: counts, load: load, retention: retention,
                                         target: try db.targetRetention(), computedAt: now)
+            let today = Calendar.current.startOfDay(for: now)
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? now
+            let weekStart = Calendar.current.date(byAdding: .day, value: -6, to: today) ?? today
+            deckStudyToday = try db.deckStudyStats(start: today, end: tomorrow)
+            deckStudyWeek = try db.deckStudyStats(start: weekStart, end: tomorrow)
         } catch {
             report(error)
         }

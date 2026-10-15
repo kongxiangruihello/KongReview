@@ -1515,3 +1515,47 @@ final class V22StoreTests: XCTestCase {
     }
   }
 }
+
+final class V23Tests: XCTestCase {
+  func testDeckStudyStats() throws {
+    try MainActor.assumeIsolated {
+      let db = try AppDatabase(DatabaseQueue())
+      let store = LibraryStore(db: db)
+      for i in 0..<2 {
+        var c = Card(deck: "甲", front: "r\(i)", state: .review, interval: 5, due: Date().addingTimeInterval(-3600))
+        c.reps = 9
+        _ = try db.save(c)
+      }
+      _ = try db.save(Card(deck: "甲", front: "n0"))
+      _ = try db.save(Card(deck: "乙", front: "m0"))
+      store.reload()
+      store.startStudy(deck: "甲")
+      store.answerCurrent(.again)   // 复习卡 r0 重来
+      store.answerCurrent(.good)    // r1
+      while store.study.current != nil { store.answerCurrent(.good) }
+      store.startStudy(deck: "乙")
+      store.answerCurrent(.easy)
+      store.refreshCardInsights()
+      let a = try XCTUnwrap(store.deckStudyToday.first { $0.deck == "甲" })
+      let done = try db.studiedToday(deck: "甲")
+      XCTAssertEqual(a.newCards, done.new)
+      XCTAssertEqual(a.reviewCards, done.review)
+      XCTAssertEqual(a.newCards, 1); XCTAssertEqual(a.reviewCards, 2)
+      XCTAssertEqual(a.again, 1)
+      XCTAssertGreaterThanOrEqual(a.answers, 4)
+      let b = try XCTUnwrap(store.deckStudyToday.first { $0.deck == "乙" })
+      XCTAssertEqual(b.newCards, 1); XCTAssertEqual(b.answers, 1); XCTAssertEqual(b.accuracy, 1)
+      XCTAssertEqual(store.deckStudyWeek.reduce(0) { $0 + $1.answers }, store.deckStudyToday.reduce(0) { $0 + $1.answers })
+      // 昨天的记录不算今天，但算最近 7 天
+      let y = Date().addingTimeInterval(-86400)
+      try db.writer.write { db in
+        var e = ReviewEvent(kind: .card, cardId: 1, answer: 3, at: y)
+        e.cardState = "review"
+        try e.insert(db)
+      }
+      store.refreshCardInsights()
+      XCTAssertEqual(store.deckStudyWeek.first { $0.deck == "甲" }!.answers, a.answers + 1)
+      XCTAssertEqual(store.deckStudyToday.first { $0.deck == "甲" }!.answers, a.answers)
+    }
+  }
+}

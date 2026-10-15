@@ -45,6 +45,10 @@ struct StatsView: View {
                     .frame(height: 220)
                 }
 
+                if insights?.counts.total ?? 0 > 0 {
+                    DeckStudySection()
+                }
+
                 if let insights, insights.counts.total > 0 {
                     CardInsightsSection(insights: insights)
                 }
@@ -306,6 +310,98 @@ struct ClassicProgressSection: View {
                     .handCursor()
                 }
             }
+        }
+    }
+}
+
+// MARK: - 2.3：按牌组的学习统计
+
+/// 今天（或最近 7 天）各牌组：新卡学了几张 / 每日上限、复习几张 / 上限、评分几次、“重来”几次、答对率、还剩多少。
+/// 用来核对牌组页的数字：上限 − 已学 = 牌组页显示的“新卡”“待复习”（不超过实际到期的张数）。
+struct DeckStudySection: View {
+    @Environment(LibraryStore.self) private var store
+
+    var body: some View {
+        let week = store.deckStudyShowWeek
+        let stats = week ? store.deckStudyWeek : store.deckStudyToday
+        let summaries = store.deckSummaryCache
+        // 今天：学过的牌组 + 还有卡要学的牌组；最近 7 天：只列学过的
+        var names = stats.map(\.deck)
+        if !week {
+            for d in summaries where d.counts.total > 0 && !names.contains(d.name) { names.append(d.name) }
+        }
+        let byDeck = Dictionary(stats.map { ($0.deck, $0) }, uniquingKeysWith: { a, _ in a })
+        let total = stats.reduce(DeckStudyStat(deck: "合计")) { $0 + $1 }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("记忆卡：按牌组").font(.headline)
+                Spacer()
+                Picker("", selection: Bindable(store).deckStudyShowWeek) {
+                    Text("今天").tag(false)
+                    Text("最近 7 天").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            if names.isEmpty {
+                Text(week ? "最近 7 天没有复习记忆卡。" : "今天还没有复习记忆卡，也没有到期的卡。")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                Grid(alignment: .trailing, horizontalSpacing: 18, verticalSpacing: 7) {
+                    GridRow {
+                        Text("牌组").gridColumnAlignment(.leading)
+                        Text(week ? "新卡" : "新卡 / 上限")
+                        Text(week ? "复习" : "复习 / 上限")
+                        Text("评分")
+                        Text("重来")
+                        Text("答对率")
+                        if !week { Text("还剩") }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    ForEach(names, id: \.self) { name in
+                        let s = byDeck[name] ?? DeckStudyStat(deck: name)
+                        let o = store.options(for: name)
+                        let left = summaries.first { $0.name == name }?.counts
+                        GridRow {
+                            Text(name).lineLimit(1).truncationMode(.middle).frame(maxWidth: 220, alignment: .leading)
+                            Text(week ? "\(s.newCards)" : "\(s.newCards) / \(o.newPerDay ?? CardSettings.newPerDay)")
+                                .foregroundStyle(DeckColors.newColor)
+                            Text(week ? "\(s.reviewCards)" : "\(s.reviewCards) / \(o.reviewsPerDay ?? CardSettings.reviewsPerDay)")
+                                .foregroundStyle(DeckColors.reviewColor)
+                            Text("\(s.answers)")
+                            Text("\(s.again)").foregroundStyle(s.again > 0 ? DeckColors.seal : Color.secondary)
+                            Text(s.accuracy.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
+                            if !week {
+                                Text(left.map { "新 \($0.new) · 学 \($0.learning) · 复 \($0.review)" } ?? "—")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if names.count > 1 {
+                        Divider().gridCellUnsizedAxes(.horizontal)
+                        GridRow {
+                            Text("合计").bold()
+                            Text("\(total.newCards)")
+                            Text("\(total.reviewCards)")
+                            Text("\(total.answers)")
+                            Text("\(total.again)")
+                            Text(total.accuracy.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
+                            if !week { Text("") }
+                        }
+                        .font(.callout.weight(.semibold))
+                    }
+                }
+                .font(.callout.monospacedDigit())
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 10).fill(ReviewPalette.card))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(ReviewPalette.hair))
+            }
+            Text("新卡、复习按“张”算（同一张卡今天评几次分只算一张）：第一次评分前还是新卡的算新卡，其余算复习。“评分”是评分次数，学习步骤里一张卡会评好几次。牌组页显示的“新卡”“待复习”＝上限减去已学，且不超过实际到期的张数；“还剩”就是牌组页此刻的数字（新卡 · 学习中 · 待复习）。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

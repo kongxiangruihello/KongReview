@@ -85,15 +85,8 @@ extension AppDatabase {
                 arguments: StatementArguments([start, start, start] + (filter?.args ?? [])))
             var n = 0, r = 0
             for row in rows {
-                let isNew: Bool
-                if let st: String = row["firstState"] {
-                    isNew = st == Card.State.new.rawValue
-                } else {
-                    let prior: Bool = row["prior"] ?? false
-                    let reps: Int = row["reps"] ?? 0
-                    let count: Int = row["n"] ?? 0
-                    isNew = !prior && reps <= count
-                }
+                let isNew = Self.firstAnswerWasNew(state: row["firstState"], prior: row["prior"] ?? false,
+                                                   reps: row["reps"] ?? 0, answers: row["n"] ?? 0)
                 if isNew { n += 1 } else { r += 1 }
             }
             return (n, r)
@@ -777,5 +770,65 @@ extension AppDatabase {
             }
             return out
         }
+    }
+}
+
+// MARK: - 2.3：按牌组的学习统计（核对每日数字用）
+
+struct DeckStudyStat: Identifiable, Hashable {
+    var deck: String
+    /// 这段时间第一次学的新卡（张）
+    var newCards = 0
+    /// 复习的卡（张）
+    var reviewCards = 0
+    /// 评分次数（一张卡学习步骤里会评好几次）
+    var answers = 0
+    /// 其中“重来”的次数
+    var again = 0
+    var id: String { deck }
+    /// 答对率：非“重来”的评分占比
+    var accuracy: Double? { answers == 0 ? nil : Double(answers - again) / Double(answers) }
+
+    static func + (a: DeckStudyStat, b: DeckStudyStat) -> DeckStudyStat {
+        DeckStudyStat(deck: a.deck, newCards: a.newCards + b.newCards, reviewCards: a.reviewCards + b.reviewCards,
+                      answers: a.answers + b.answers, again: a.again + b.again)
+    }
+}
+
+extension AppDatabase {
+    /// [start, end) 之间各牌组学了几张新卡、几张复习、评了几次分、几次“重来”。
+    /// 新卡 / 复习的分法与每日上限所用的 studiedToday 相同。
+    func deckStudyStats(start: Date, end: Date) throws -> [DeckStudyStat] {
+        try writer.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT e.cardId AS id, coalesce(c.deck, '（已删除的卡）') AS deck, COUNT(*) AS n,
+                       SUM(CASE WHEN e.answer = 1 THEN 1 ELSE 0 END) AS again,
+                       (SELECT e2.cardState FROM review_event e2 WHERE e2.cardId = e.cardId AND e2.kind = 'card'
+                          AND e2.at >= ? AND e2.at < ? ORDER BY e2.at, e2.id LIMIT 1) AS firstState,
+                       EXISTS (SELECT 1 FROM review_event p WHERE p.cardId = e.cardId AND p.kind = 'card' AND p.at < ?) AS prior,
+                       c.reps AS reps
+                FROM review_event e LEFT JOIN card c ON c.id = e.cardId
+                WHERE e.kind = 'card' AND e.at >= ? AND e.at < ?
+                GROUP BY e.cardId
+                """, arguments: [start, end, start, start, end])
+            var map: [String: DeckStudyStat] = [:]
+            for r in rows {
+                let deck: String = r["deck"] ?? ""
+                let n: Int = r["n"] ?? 0
+                var s = map[deck] ?? DeckStudyStat(deck: deck)
+                let isNew = Self.firstAnswerWasNew(state: r["firstState"], prior: r["prior"] ?? false, reps: r["reps"] ?? 0, answers: n)
+                if isNew { s.newCards += 1 } else { s.reviewCards += 1 }
+                s.answers += n
+                s.again += r["again"] ?? 0
+                map[deck] = s
+            }
+            return map.values.sorted { $0.answers != $1.answers ? $0.answers > $1.answers : $0.deck < $1.deck }
+        }
+    }
+
+    /// 2.2 的分法：记了回答前状态的直接看状态；旧记录看“之前没有回答、复习次数不超过这段时间的回答次数”
+    static func firstAnswerWasNew(state: String?, prior: Bool, reps: Int, answers: Int) -> Bool {
+        if let state { return state == Card.State.new.rawValue }
+        return !prior && reps <= answers
     }
 }
