@@ -62,19 +62,42 @@ extension AppDatabase {
     /// 牌组内全部卡片（不含已删除）
     func cards(deck: String? = nil, query: String = "") throws -> [Card] {
         try writer.read { db in
-            var sql = "SELECT * FROM card WHERE deletedAt IS NULL"
-            var args: [(any DatabaseValueConvertible)?] = []
-            if let deck { sql += " AND deck = ?"; args.append(deck) }
-            let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !q.isEmpty {
-                // 1.2：繁简通搜；背面栏目也在搜索范围内
-                let p = SearchQuery.likePattern(ChineseFold.fold(q))
-                sql += " AND (kr_fold(front) LIKE ? ESCAPE '\\' OR kr_fold(back) LIKE ? ESCAPE '\\' OR kr_fold(coalesce(sections, '')) LIKE ? ESCAPE '\\')"
-                args += [p, p, p]
-            }
-            sql += " ORDER BY createdAt DESC, id DESC"
-            return try Card.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+            let (filter, args) = Self.cardFilter(deck: deck, query: query)
+            return try Card.fetchAll(db, sql: "SELECT * FROM card" + filter + " ORDER BY createdAt DESC, id DESC",
+                                     arguments: StatementArguments(args))
         }
+    }
+
+    /// 浏览列表的计数和当前页在同一读取快照内完成，不限制学习队列使用的全部卡片查询。
+    func cardPage(deck: String, query: String, limit: Int, offset: Int) async throws -> (items: [Card], total: Int) {
+        try await writer.read { db in
+            let (filter, args) = Self.cardFilter(deck: deck, query: query)
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM card" + filter,
+                                         arguments: StatementArguments(args)) ?? 0
+            let items = try Card.fetchAll(db,
+                sql: "SELECT * FROM card" + filter + " ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?",
+                arguments: StatementArguments(args + [max(1, limit), max(0, offset)]))
+            return (items, total)
+        }
+    }
+
+    private static func cardFilter(deck: String?, query: String) -> (String, [(any DatabaseValueConvertible)?]) {
+        var filter = " WHERE deletedAt IS NULL"
+        var args: [(any DatabaseValueConvertible)?] = []
+        if let deck { filter += " AND deck = ?"; args.append(deck) }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty {
+            let pattern = SearchQuery.likePattern(ChineseFold.fold(q))
+            // 标签按 JSON 值搜索，避免引号和反斜杠的 JSON 转义影响字面匹配。
+            filter += """
+                 AND (kr_fold(front) LIKE ? ESCAPE '\\'
+                   OR kr_fold(back) LIKE ? ESCAPE '\\'
+                   OR kr_fold(coalesce(sections, '')) LIKE ? ESCAPE '\\'
+                   OR EXISTS (SELECT 1 FROM json_each(card.tags) WHERE kr_fold(value) LIKE ? ESCAPE '\\'))
+                """
+            args += [pattern, pattern, pattern, pattern]
+        }
+        return (filter, args)
     }
 
     func cardCount() throws -> Int {
