@@ -74,6 +74,48 @@ final class EditorWebViewTests: XCTestCase {
         let value = try await view.evaluateJavaScript("krGetValue()") as? String
         XCTAssertEqual(value, original)
     }
+
+    func testCardEditorHeightGrowsAndShrinksIndependentlyOfViewport() async throws {
+        try requireDesktopSession()
+        let ready = expectation(description: "自动高度编辑器就绪")
+        let messages = EditorMessageRecorder(ready: ready)
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(messages, name: "krEditor")
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 560, height: 280), configuration: config)
+        defer {
+            view.stopLoading()
+            config.userContentController.removeScriptMessageHandler(forName: "krEditor")
+        }
+        let short = "简短问题"
+        view.loadHTMLString(EditorPage.page(text: short, mode: .card, autoHeight: true), baseURL: nil)
+        await fulfillment(of: [ready], timeout: 10)
+        guard messages.receivedReady else { return }
+
+        func contentHeight() async throws -> Double {
+            let result = try await view.evaluateJavaScript("document.body.getBoundingClientRect().height")
+            return try XCTUnwrap(result as? NSNumber).doubleValue
+        }
+        func replace(_ text: String) async throws {
+            let html = EditorPage.displayHTML(for: text, mode: .card).html
+            _ = try await view.evaluateJavaScript("krSetContent(\(EditorPage.jsonString(html)), false)")
+        }
+
+        let shortHeight = try await contentHeight()
+        XCTAssertLessThan(shortHeight, 160)
+        let long = (1...40).map { "第\($0)段：" + String(repeating: "记忆卡的编辑区域应当随着内容增减。", count: 5) }.joined(separator: "\n\n")
+        try await replace(long)
+        let longHeight = try await contentHeight()
+        XCTAssertGreaterThan(longHeight, 280)
+
+        // SwiftUI 会把网页视图拉高；删减内容仍应量出实际短内容高度。
+        view.setFrameSize(NSSize(width: 560, height: longHeight))
+        try await replace(short)
+        let shrunkHeight = try await contentHeight()
+        XCTAssertEqual(shrunkHeight, shortHeight, accuracy: 1)
+        XCTAssertLessThan(shrunkHeight, longHeight)
+        let finalValue = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertEqual(finalValue, short)
+    }
 }
 
 @MainActor

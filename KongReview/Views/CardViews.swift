@@ -807,23 +807,20 @@ struct CardEditorView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         ForEach(Array(c.fields.indices), id: \.self) { i in
                             Text(i < names.count ? names[i] : "字段\(i + 1)").font(.headline)
-                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: true, autoHeight: false, minHeight: 160,
+                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: true, autoHeight: true,
                                        slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel)
-                                .frame(height: 180)
                                 .richEditorFrame()
                         }
                     } else {
                         Text("正面").font(.headline)
                         RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: "问题、字词或章句",
-                                   autoHeight: false, minHeight: 180, focus: draft?.isNew == true, slot: "card-front",
+                                   autoHeight: true, focus: draft?.isNew == true, slot: "card-front",
                                    onSubmit: submit, onCancel: cancel)
-                            .frame(height: 220)
                             .richEditorFrame()
                         Text("背面").font(.headline).padding(.top, 6)
                         RichEditor(text: binding(\.card.back, ""), mode: .card, placeholder: "答案",
-                                   autoHeight: false, minHeight: 180, slot: "card-back",
+                                   autoHeight: true, slot: "card-back",
                                    onSubmit: submit, onCancel: cancel)
-                            .frame(height: 220)
                             .richEditorFrame()
                         sectionsEditor
                     }
@@ -898,9 +895,8 @@ struct CardEditorView: View {
                         .buttonStyle(.borderless).help("删除这个栏目")
                 }
                 RichEditor(text: sectionBinding(sec.id, \.text, ""), mode: .card, placeholder: "栏目内容",
-                           toolbar: true, autoHeight: false, minHeight: 130, slot: "card-section-" + sec.id,
+                           toolbar: true, autoHeight: true, slot: "card-section-" + sec.id,
                            onSubmit: submit, onCancel: cancel)
-                    .frame(height: 160)
                     .richEditorFrame()
             }
             .padding(.top, 8)

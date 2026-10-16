@@ -7,8 +7,8 @@ import KongReviewCore
 /// 所见即所得的 Markdown 编辑器：直接显示粗体、标题、列表、引用、图片，看不到 ** # 这些符号；
 /// 快捷键与行首 Markdown 自动转换见 EditorPage；粘贴时保留格式。保存的仍是 Markdown（记忆卡必要时为 HTML）。
 ///
-/// - autoHeight 为 true 时高度随内容增长（放在 ScrollView 里用，如回顾卡片上的就地编辑）；
-///   为 false 时由外面给定高度，内容多了在编辑器里滚动（如编辑面板）。
+/// - autoHeight 为 true 时高度随内容增减（放在 ScrollView 里用，如记忆卡编辑面板）；
+///   为 false 时由外面给定高度，内容多了在编辑器里滚动（如摘录编辑面板）。
 /// - onSubmit：⌘↩；onCancel：Esc。
 struct RichEditor: View {
     @Binding var text: String
