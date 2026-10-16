@@ -1,8 +1,58 @@
 import SwiftUI
 import WebKit
+import Observation
 import KongReviewCore
 
 // MARK: - 网页存档页（列表 / 阅读器）
+
+@MainActor
+@Observable
+final class ArticleListState {
+    static let pageSize = 200
+    var query = "" {
+        didSet {
+            guard query != oldValue else { return }
+            page = 1
+            pageInput = "1"
+            total = 0
+            items = []
+            highlightCounts = [:]
+            loadID = UUID()
+            isLoading = true
+        }
+    }
+    var items: [Article] = []
+    var highlightCounts: [Int64: Int] = [:]
+    var total = 0
+    var page = 1
+    var pageInput = "1"
+    var isLoading = true
+    var loadID = UUID()
+    var pageCount: Int { max(1, (total + Self.pageSize - 1) / Self.pageSize) }
+
+    func goToPage(_ requested: Int) {
+        let target = min(max(1, requested), pageCount)
+        pageInput = String(target)
+        guard target != page else { return }
+        page = target
+        items = []
+        highlightCounts = [:]
+        loadID = UUID()
+        isLoading = true
+    }
+
+    /// 搜索、翻页或更新后，早先的请求不能把列表换回旧内容。
+    @discardableResult
+    func apply(_ result: ArticlePage, requestID: UUID, query requestedQuery: String, page requestedPage: Int) -> Bool {
+        guard loadID == requestID, query == requestedQuery, page == requestedPage else { return false }
+        total = result.total
+        items = result.items
+        highlightCounts = result.highlightCounts
+        page = result.page
+        pageInput = String(result.page)
+        return true
+    }
+}
 
 struct ArticlesView: View {
     @Environment(LibraryStore.self) private var store
@@ -18,23 +68,32 @@ struct ArticlesView: View {
 
 struct ArticleListView: View {
     @Environment(LibraryStore.self) private var store
+    private var state: ArticleListState { store.articleList }
+
+    private struct LoadKey: Hashable {
+        var query: String
+        var page: Int
+        var revision: Int
+    }
 
     var body: some View {
-        let _ = store.revision
-        let articles = (try? store.db.articles(query: store.list.query)) ?? []
-        let counts = (try? store.db.articleHighlightCounts()) ?? [:]
-        Group {
-            if articles.isEmpty {
-                ContentUnavailableView {
-                    Label(store.list.query.isEmpty ? "还没有存档的网页" : "没有找到", systemImage: "globe")
-                } description: {
-                    Text("点右上角“存档网页”，粘贴网址即可。也可以在浏览器里用“整页存档”书签一键发送（见 设置 → 摘录）。")
-                } actions: {
-                    Button("存档网页…") { store.showAddArticle() }
+        VStack(spacing: 0) {
+            if state.items.isEmpty {
+                if state.isLoading {
+                    ProgressView("正在载入网页存档…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView {
+                        Label(state.query.isEmpty ? "还没有存档的网页" : "没有找到", systemImage: "globe")
+                    } description: {
+                        Text("点右上角“存档网页”，粘贴网址即可。也可以在浏览器里用“整页存档”书签一键发送（见 设置 → 摘录）。")
+                    } actions: {
+                        Button("存档网页…") { store.showAddArticle() }
+                    }
                 }
             } else {
-                List(articles) { a in
-                    ArticleRow(article: a, highlightCount: a.id.flatMap { counts[$0] } ?? 0)
+                List(state.items) { a in
+                    ArticleRow(article: a, highlightCount: a.id.flatMap { state.highlightCounts[$0] } ?? 0)
                         .contentShape(Rectangle())
                         .onTapGesture { store.open(a) }
                         .contextMenu {
@@ -48,10 +107,15 @@ struct ArticleListView: View {
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
             }
+            Divider()
+            pageControls
         }
         .navigationTitle("网页存档")
-        .navigationSubtitle("\(articles.count) 篇")
-        .searchable(text: Bindable(store.list).query, prompt: "搜索标题、网站、作者")
+        .navigationSubtitle("共 \(state.total) 篇")
+        .searchable(text: Bindable(state).query, prompt: "搜索标题、网站、作者")
+        .task(id: LoadKey(query: state.query, page: state.page, revision: store.revision)) {
+            await load()
+        }
         .toolbar {
             ToolbarItem {
                 Button {
@@ -61,6 +125,64 @@ struct ArticleListView: View {
                 }
                 .help("存档网页（⌘L）")
             }
+        }
+    }
+
+    private var pageControls: some View {
+        HStack(spacing: 10) {
+            Text(pageRangeLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button { state.goToPage(state.page - 1) } label: {
+                Label("上一页", systemImage: "chevron.left")
+            }
+            .disabled(state.page <= 1 || state.isLoading)
+            Text("第 \(state.page) / \(state.pageCount) 页").monospacedDigit()
+            Button { state.goToPage(state.page + 1) } label: {
+                Label("下一页", systemImage: "chevron.right")
+            }
+            .disabled(state.page >= state.pageCount || state.isLoading)
+            TextField("页码", text: Bindable(state).pageInput)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 52)
+                .multilineTextAlignment(.center)
+                .onSubmit(jumpToPage)
+                .accessibilityLabel("跳转到页码")
+            Button("跳转", action: jumpToPage).disabled(state.isLoading)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var pageRangeLabel: String {
+        guard state.total > 0 else { return "共 0 篇 · 每页 \(ArticleListState.pageSize) 篇" }
+        let first = (state.page - 1) * ArticleListState.pageSize + 1
+        let last = min(state.page * ArticleListState.pageSize, state.total)
+        return "第 \(first)–\(last) 篇，共 \(state.total) 篇"
+    }
+
+    private func jumpToPage() {
+        state.goToPage(Int(state.pageInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? state.page)
+    }
+
+    @MainActor
+    private func load() async {
+        let requestedQuery = state.query
+        let requestedPage = state.page
+        let requestedRevision = store.revision
+        let requestID = UUID()
+        state.loadID = requestID
+        state.isLoading = true
+        defer { if state.loadID == requestID { state.isLoading = false } }
+        do {
+            let result = try await store.db.articlePage(query: requestedQuery, page: requestedPage,
+                                                       pageSize: ArticleListState.pageSize)
+            guard !Task.isCancelled, store.revision == requestedRevision else { return }
+            state.apply(result, requestID: requestID, query: requestedQuery, page: requestedPage)
+        } catch {
+            if !Task.isCancelled, state.loadID == requestID { store.report(error) }
         }
     }
 }

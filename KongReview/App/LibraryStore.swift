@@ -100,6 +100,8 @@ final class LibraryStore {
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
     let review = ReviewState()
     let list = ListState()
+    let articleList = ArticleListState()
+    let sourceManager = SourceManagerState()
     let study = StudyState()
 
     /// 侧边栏“出处”分组是否展开（默认折叠，记住上次状态）

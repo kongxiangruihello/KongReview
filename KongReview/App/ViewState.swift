@@ -317,9 +317,9 @@ final class ListState {
     var items: [Highlight] = []
     /// 符合当前筛选条件的总数
     var total = 0
-    /// 已加载的条数上限（分页：每次多加载 pageSize 条）
+    /// 出处、标签等列表逐步加载时的条数上限，每次增加 pageSize 条。
     var limit = ListState.pageSize
-    /// 全部摘录与未归类的明确分页（从 1 开始）。
+    /// 全部摘录、未归类、收藏与最近删除的明确分页（从 1 开始）。
     var page = 1
     var pageInput = "1"
     var isLoading = false

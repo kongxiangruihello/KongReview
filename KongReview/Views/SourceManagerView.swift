@@ -3,7 +3,7 @@ import Observation
 import KongReviewCore
 
 /// 出处管理表格的一行
-struct SourceRow: Identifiable, Hashable {
+struct SourceRow: Identifiable, Hashable, Sendable {
     let id: Int64
     let source: Source
     let count: Int
@@ -18,39 +18,90 @@ struct SourceRow: Identifiable, Hashable {
 @Observable
 final class SourceManagerState {
     static let shared = SourceManagerState()
+    static let pageSize = 200
     var selection: Set<Int64> = []
     var filter = ""
     var onlyDuplicates = false
     var sortOrder: [KeyPathComparator<SourceRow>] = [KeyPathComparator(\.count, order: .reverse)]
+    var items: [SourceRow] = []
+    var total = 0
+    var page = 1
+    var pageInput = "1"
+    var isLoading = false
+    var duplicateIDs: Set<Int64> = []
+    var duplicateCount = 0
+    var loadID = UUID()
+    var loadedCriteria: SourcePageCriteria?
+    var pageCount: Int { max(1, (total + Self.pageSize - 1) / Self.pageSize) }
+
+    func goToPage(_ requested: Int) {
+        let target = min(max(1, requested), pageCount)
+        pageInput = String(target)
+        guard target != page else { return }
+        loadID = UUID()
+        selection = []
+        items = []
+        isLoading = true
+        page = target
+    }
+}
+
+struct SourcePageCriteria: Hashable {
+    var query: String
+    var onlyDuplicates: Bool
+    var sorts: [SourcePageSort]
+}
+
+private struct SourcePageRequest: Hashable {
+    var criteria: SourcePageCriteria
+    var page: Int
+    var revision: Int
 }
 
 struct SourceManagerView: View {
     @Environment(LibraryStore.self) private var store
-    private var ui: SourceManagerState { SourceManagerState.shared }
+    private var ui: SourceManagerState { store.sourceManager }
+    private var request: SourcePageRequest {
+        SourcePageRequest(criteria: SourcePageCriteria(
+            query: ui.filter.trimmingCharacters(in: .whitespacesAndNewlines),
+            onlyDuplicates: ui.onlyDuplicates, sorts: ui.sortOrder.compactMap(SourcePageSort.init)),
+                          page: ui.page, revision: store.revision)
+    }
+    private var selected: [Int64] { visibleIDs(Array(ui.selection)) }
 
     var body: some View {
-        let _ = store.revision
-        let all = ((try? store.db.sourcesWithCounts()) ?? []).compactMap { pair in
-            pair.source.id.map { SourceRow(id: $0, source: pair.source, count: pair.count) }
+        VStack(spacing: 0) {
+            sourceTable
+            Divider()
+            pageControls
         }
-        let dupIDs = Set(SourceDedup.duplicateGroups(all.map(\.source)).flatMap { $0 })
-        let q = ui.filter.trimmingCharacters(in: .whitespaces)
-        var rows = all.filter { r in
-            (q.isEmpty || r.title.localizedCaseInsensitiveContains(q) || r.author.localizedCaseInsensitiveContains(q))
-                && (!ui.onlyDuplicates || dupIDs.contains(r.id))
+        .navigationTitle("出处管理")
+        .navigationSubtitle("\(ui.total) 个出处" + (ui.duplicateCount == 0 ? "" : " · 疑似重复 \(ui.duplicateCount) 个") + (selected.isEmpty ? "" : " · 已选 \(selected.count) 个"))
+        .searchable(text: Bindable(ui).filter, prompt: "搜索书名、作者")
+        .task(id: request) { await loadPage(request) }
+        .toolbar {
+            ToolbarItem {
+                Toggle(isOn: Bindable(ui).onlyDuplicates) {
+                    Label("只看疑似重复", systemImage: "square.on.square")
+                }
+                .help("书名去掉空格、标点和括注后相同的出处")
+            }
+            ToolbarItem {
+                Menu {
+                    menu(selected)
+                } label: {
+                    Label("操作", systemImage: "ellipsis.circle")
+                }
+                .disabled(selected.isEmpty || ui.isLoading)
+            }
         }
-        if ui.onlyDuplicates {
-            // 疑似重复的按归一化书名排在一起
-            rows.sort { SourceDedup.key($0.title) == SourceDedup.key($1.title) ? $0.count > $1.count : SourceDedup.key($0.title) < SourceDedup.key($1.title) }
-        } else {
-            rows.sort(using: ui.sortOrder)
-        }
-        let selected = Array(ui.selection)
+    }
 
-        return Table(rows, selection: Bindable(ui).selection, sortOrder: Bindable(ui).sortOrder) {
+    private var sourceTable: some View {
+        Table(ui.items, selection: Bindable(ui).selection, sortOrder: Bindable(ui).sortOrder) {
             TableColumn("书名 / 篇名", value: \.title) { r in
                 HStack(spacing: 4) {
-                    if dupIDs.contains(r.id) {
+                    if ui.duplicateIDs.contains(r.id) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                             .help("可能与其他出处重复")
                     }
@@ -70,52 +121,133 @@ struct SourceManagerView: View {
             .width(100)
         }
         .contextMenu(forSelectionType: Int64.self) { ids in
-            menu(Array(ids))
+            menu(visibleIDs(Array(ids)))
         } primaryAction: { ids in
-            if let id = ids.first { store.selection = .source(id) }
+            if !ui.isLoading, let id = visibleIDs(Array(ids)).first { store.selection = .source(id) }
         }
-        .navigationTitle("出处管理")
-        .navigationSubtitle("\(rows.count) 个出处" + (dupIDs.isEmpty ? "" : " · 疑似重复 \(dupIDs.count) 个") + (selected.isEmpty ? "" : " · 已选 \(selected.count) 个"))
-        .searchable(text: Bindable(ui).filter, prompt: "搜索书名、作者")
-        .toolbar {
-            ToolbarItem {
-                Toggle(isOn: Bindable(ui).onlyDuplicates) {
-                    Label("只看疑似重复", systemImage: "square.on.square")
-                }
-                .help("书名去掉空格、标点和括注后相同的出处")
+    }
+
+    private var pageControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                pageStatus
+                Spacer()
+                pageNavigation
+                pageJump
             }
-            ToolbarItem {
-                Menu {
-                    menu(selected)
-                } label: {
-                    Label("操作", systemImage: "ellipsis.circle")
-                }
-                .disabled(selected.isEmpty)
+            VStack(alignment: .leading, spacing: 8) {
+                pageStatus
+                HStack(spacing: 12) { pageNavigation; Spacer(); pageJump }
             }
         }
+        .controlSize(.small)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var pageStatus: some View {
+        HStack(spacing: 8) {
+            if ui.isLoading { ProgressView().controlSize(.small) }
+            Text(ui.total == 0 ? "共 0 个 · 每页 \(SourceManagerState.pageSize) 个" :
+                "第 \((ui.page - 1) * SourceManagerState.pageSize + 1)–\(min(ui.page * SourceManagerState.pageSize, ui.total)) 个，共 \(ui.total) 个")
+                .font(.caption).foregroundStyle(.secondary).fixedSize()
+        }
+    }
+
+    private var pageNavigation: some View {
+        HStack(spacing: 8) {
+            Button { ui.goToPage(ui.page - 1) } label: { Label("上一页", systemImage: "chevron.left") }
+                .disabled(ui.page <= 1 || ui.isLoading)
+            Text("第 \(ui.page) / \(ui.pageCount) 页").monospacedDigit().fixedSize()
+            Button { ui.goToPage(ui.page + 1) } label: { Label("下一页", systemImage: "chevron.right") }
+                .disabled(ui.page >= ui.pageCount || ui.isLoading)
+        }
+    }
+
+    private var pageJump: some View {
+        HStack(spacing: 6) {
+            TextField("页码", text: Bindable(ui).pageInput)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.center)
+                .frame(width: 52)
+                .accessibilityLabel("跳转到出处页码")
+                .onSubmit(jumpToPage)
+            Button("跳转", action: jumpToPage)
+        }
+        .disabled(ui.isLoading)
+    }
+
+    private func jumpToPage() {
+        ui.goToPage(Int(ui.pageInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? ui.page)
+    }
+
+    @MainActor
+    private func loadPage(_ key: SourcePageRequest) async {
+        guard !Task.isCancelled, request == key else { return }
+        let requestID = UUID()
+        ui.loadID = requestID
+        if ui.loadedCriteria != key.criteria {
+            ui.loadedCriteria = key.criteria
+            ui.selection = []
+            ui.items = []
+            ui.total = 0
+            ui.duplicateIDs = []
+            ui.duplicateCount = 0
+            ui.pageInput = "1"
+            if ui.page != 1 {
+                ui.page = 1
+                return
+            }
+        }
+        ui.isLoading = true
+        defer { if ui.loadID == requestID { ui.isLoading = false } }
+        do {
+            let result = try await store.db.sourcePage(query: key.criteria.query,
+                onlyDuplicates: key.criteria.onlyDuplicates, sorts: key.criteria.sorts,
+                page: key.page, pageSize: SourceManagerState.pageSize)
+            guard !Task.isCancelled, ui.loadID == requestID, request == key else { return }
+            ui.total = result.total
+            if ui.page != result.page { ui.selection = [] }
+            ui.page = result.page
+            ui.pageInput = String(result.page)
+            ui.items = result.items
+            ui.duplicateIDs = result.duplicateIDs
+            ui.duplicateCount = result.duplicateCount
+            ui.selection.formIntersection(result.items.map(\.id))
+        } catch {
+            if !Task.isCancelled, ui.loadID == requestID, request == key { store.report(error) }
+        }
+    }
+
+    private func visibleIDs(_ ids: [Int64]) -> [Int64] {
+        let visible = Set(ui.items.map(\.id))
+        return ids.filter { visible.contains($0) }
     }
 
     @ViewBuilder
     private func menu(_ ids: [Int64]) -> some View {
-        if ids.count == 1, let s = store.sources.first(where: { $0.id == ids[0] }) {
-            Button("查看摘录") { store.selection = .source(ids[0]) }
-            Button("编辑出处…") { store.editingSource = s }
-        }
-        if ids.count >= 2 {
-            Button("合并这 \(ids.count) 个出处…") { store.requestMerge(ids) }
-        }
-        Button(ids.count == 1 ? "生成参考文献条目…" : "生成参考文献表（\(ids.count) 种）…") {
-            store.showBibliography(sourceIDs: ids, title: "出处管理")
-        }
-        Menu("类型改为") {
-            ForEach(SourceKind.allCases, id: \.self) { k in
-                Button(k.label) { store.setKind(k, for: ids) }
+        Group {
+            if ids.count == 1, let s = ui.items.first(where: { $0.id == ids[0] })?.source {
+                Button("查看摘录") { store.selection = .source(ids[0]) }
+                Button("编辑出处…") { store.editingSource = s }
+            }
+            if ids.count >= 2 {
+                Button("合并这 \(ids.count) 个出处…") { store.requestMerge(ids) }
+            }
+            Button(ids.count == 1 ? "生成参考文献条目…" : "生成参考文献表（\(ids.count) 种）…") {
+                store.showBibliography(sourceIDs: ids, title: "出处管理")
+            }
+            Menu("类型改为") {
+                ForEach(SourceKind.allCases, id: \.self) { k in
+                    Button(k.label) { store.setKind(k, for: ids) }
+                }
+            }
+            Divider()
+            Button("删除出处（保留摘录）…", role: .destructive) {
+                store.sourcesPendingDeletion = ui.items.filter { ids.contains($0.id) }.map(\.source)
             }
         }
-        Divider()
-        Button("删除出处（保留摘录）…", role: .destructive) {
-            store.sourcesPendingDeletion = store.sources.filter { ids.contains($0.id ?? -1) }
-        }
+        .disabled(ids.isEmpty || ui.isLoading)
     }
 }
 

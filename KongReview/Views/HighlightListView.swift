@@ -9,6 +9,12 @@ struct HighlightFilter: Hashable {
     var masteryOnly = false
     var unsortedOnly = false
     var deletedOnly = false
+
+    /// 这些全库列表每次只载入一页；出处、标签等列表保留原来的逐步加载。
+    var usesPagination: Bool {
+        unsortedOnly || favoritesOnly || deletedOnly
+            || (sourceId == nil && tag == nil && !masteryOnly)
+    }
 }
 
 struct HighlightListView: View {
@@ -33,11 +39,8 @@ struct HighlightListView: View {
 
     private var terms: [String] { SearchTerms.terms(state.query) }
 
-    /// 全库和未归类使用真正的分页，列表始终只渲染一页，长库也能直接跳到最后一页。
-    private var usesPages: Bool {
-        filter.unsortedOnly || (filter.sourceId == nil && filter.tag == nil && !filter.favoritesOnly
-            && !filter.masteryOnly && !filter.deletedOnly)
-    }
+    /// 分页列表始终只渲染一页，长库也能直接跳到最后一页。
+    private var usesPages: Bool { filter.usesPagination }
 
     private struct LoadKey: Hashable {
         var title: String
@@ -147,7 +150,7 @@ struct HighlightListView: View {
             await load()
         }
         .confirmationDialog(
-            "彻底删除“最近删除”里的 \(state.total) 条摘录？",
+            "彻底删除“最近删除”里的全部 \(store.trashCount) 条摘录？",
             isPresented: Binding(
                 get: { store.confirmingEmptyTrash },
                 set: { store.confirmingEmptyTrash = $0 }
@@ -157,7 +160,7 @@ struct HighlightListView: View {
             Button("彻底删除", role: .destructive) { store.emptyTrash() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("此操作无法撤销（每日自动备份中仍保留删除前的数据）。")
+            Text("会清空全部最近删除，包括其他页和搜索未显示的摘录。此操作无法撤销（每日自动备份中仍保留删除前的数据）。")
         }
         .toolbar {
             if !filter.deletedOnly {
@@ -199,8 +202,8 @@ struct HighlightListView: View {
                     } label: {
                         Label("清空", systemImage: "trash.slash")
                     }
-                    .help("立即彻底删除这里的全部摘录（无法恢复）")
-                    .disabled(state.items.isEmpty)
+                    .help("彻底删除最近删除中的全部摘录，包括其他页和搜索未显示的内容（无法恢复）")
+                    .disabled(store.trashCount == 0)
                 } else {
                     Button {
                         store.newHighlight(in: filter.sourceId)
@@ -265,6 +268,10 @@ struct HighlightListView: View {
         let target = min(max(1, page), state.pageCount)
         state.pageInput = String(target)
         guard target != state.page else { return }
+        // 切页立即作废旧请求，避免新任务启动前旧页结果回填。
+        state.loadID = UUID()
+        state.items = []
+        state.isLoading = true
         state.selection = []
         state.page = target
     }
@@ -276,6 +283,7 @@ struct HighlightListView: View {
     @MainActor
     private func load() async {
         let requestedQuery = query
+        let requestedRevision = store.revision
         let requestID = UUID()
         state.loadID = requestID
         do {
@@ -301,9 +309,13 @@ struct HighlightListView: View {
             defer { if state.loadID == requestID { state.isLoading = false } }
             let result = try await store.db.highlightPage(requestedQuery, limit: requestedLimit,
                                                          offset: usesPages ? (requestedPage - 1) * ListState.pageSize : 0)
-            guard !Task.isCancelled, state.loadID == requestID else { return }
+            guard !Task.isCancelled, state.loadID == requestID,
+                  state.page == requestedPage, query == requestedQuery,
+                  store.revision == requestedRevision else { return }
             state.total = result.total
             if usesPages && requestedPage > state.pageCount {
+                state.selection = []
+                state.items = []
                 state.page = state.pageCount
                 state.pageInput = String(state.page)
                 return
