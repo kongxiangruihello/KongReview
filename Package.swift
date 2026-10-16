@@ -24,5 +24,11 @@ let package = Package(
             path: "KongReview",
             exclude: ["Resources"]
         ),
+        .testTarget(
+            name: "KongReviewTests",
+            dependencies: ["KongReview", .product(name: "GRDB", package: "GRDB.swift"),
+                           .product(name: "KongReviewCore", package: "KongReviewCore")],
+            path: "KongReviewTests"
+        ),
     ]
 )

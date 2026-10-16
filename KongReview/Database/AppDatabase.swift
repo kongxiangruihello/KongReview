@@ -773,7 +773,7 @@ extension AppDatabase {
 // MARK: - 查询条件
 
 /// 摘录列表的筛选条件（列表、计数、导出共用）
-struct HighlightQuery: Hashable {
+struct HighlightQuery: Hashable, Sendable {
     var text: String = ""
     var sourceId: Int64?
     var tag: String?
@@ -929,6 +929,39 @@ extension AppDatabase {
         try writer.read { db in
             let (from, whereSQL, args) = q.sqlParts()
             return try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(from)\(whereSQL)", arguments: StatementArguments(args)) ?? 0
+        }
+    }
+
+    /// 计数和当前页在同一个读取快照内完成；查询排在数据库队列上，不阻塞界面。
+    func highlightPage(_ q: HighlightQuery, limit: Int, offset: Int) async throws -> (items: [Highlight], total: Int) {
+        try await writer.read { db in
+            let (from, whereSQL, args) = q.sqlParts()
+            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(from)\(whereSQL)",
+                                         arguments: StatementArguments(args)) ?? 0
+            let sql = "SELECT highlight.* FROM \(from)\(whereSQL)" + q.orderSQL + ", highlight.id DESC LIMIT ? OFFSET ?"
+            let items = try Highlight.fetchAll(db, sql: sql,
+                arguments: StatementArguments(args + [max(1, limit), max(0, offset)]))
+            return (items, total)
+        }
+    }
+
+    func highlight(id: Int64) throws -> Highlight? {
+        try writer.read { db in try Highlight.fetchOne(db, key: id) }
+    }
+
+    func dailyReviewCandidateCount() throws -> Int {
+        try writer.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM highlight h LEFT JOIN source s ON s.id = h.sourceId
+                WHERE h.deletedAt IS NULL AND h.isDiscarded = 0 AND coalesce(s.reviewWeight, 1) > 0
+                """) ?? 0
+        }
+    }
+
+    func existingHighlightCount(ids: [Int64]) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+        return try writer.read { db in
+            try Highlight.filter(keys: ids).filter(Column("deletedAt") == nil).fetchCount(db)
         }
     }
 

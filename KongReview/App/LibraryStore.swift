@@ -4,6 +4,7 @@ import KongReviewCore
 
 /// 侧边栏导航
 enum SidebarItem: Hashable {
+    case home
     case review
     case all
     case favorites
@@ -56,7 +57,7 @@ final class LibraryStore {
     var trashCount = 0
     var articleCount = 0
 
-    var selection: SidebarItem? = .review
+    var selection: SidebarItem? = .home
     /// 正在编辑/新建的摘录草稿；非空时弹出编辑面板
     var editorDraft: HighlightDraft?
     var editingSource: Source?
@@ -369,13 +370,13 @@ final class LibraryStore {
         mergeRequest = MergeRequest(sources: chosen, target: target)
     }
 
-    func commitMerge() {
+    func commitMerge(backupDirectory: URL? = nil) {
         guard let m = mergeRequest else { return }
         let ids = m.sources.compactMap(\.source.id)
         let before = try? db.snapshot(sourceIds: ids)
         defer { if let before { registerUndo("合并出处", before, reviewPosition: nil) } }
         do {
-            try BackupService.backupNow(db: db)
+            try BackupService.backupNow(db: db, directory: backupDirectory)
         } catch {
             report(error)
             return
@@ -671,7 +672,13 @@ final class LibraryStore {
     }
 
     func saveCard(_ card: Card) {
-        perform { _ = try db.save(card) }
+        do {
+            if let duplicate = try db.duplicateCard(for: card) {
+                errorMessage = "已有相同正反面内容的记忆卡（牌组：\(duplicate.deck)），请修改内容后再保存。"
+                return
+            }
+            perform { _ = try db.save(card) }
+        } catch { report(error) }
     }
 
     func editCard(_ card: Card) {
@@ -708,6 +715,10 @@ final class LibraryStore {
         }
         guard !d.card.front.isEmpty else { return }
         do {
+            if let duplicate = try db.duplicateCard(for: d.card) {
+                cardEditor?.error = "已有相同正反面内容的记忆卡（牌组：\(duplicate.deck)），请修改内容后再保存。"
+                return
+            }
             let saved = try db.save(d.card)
             study.lastDeck = saved.deck
             if study.current?.id == saved.id { study.current = saved }
@@ -1031,9 +1042,13 @@ final class LibraryStore {
         let rec = ReviewSessionRecordStore.load()
         let highlights: Int
         if let rec, rec.day == ReminderPlan.dayKey(Date()) {
-            highlights = max(0, rec.total - rec.position)
+            let ids = rec.regularIds + rec.masteryIds
+            let remaining = Array(ids.dropFirst(min(ids.count, max(0, rec.position))))
+            highlights = (try? db.existingHighlightCount(ids: remaining)) ?? remaining.count
         } else {
-            highlights = reviewedToday ? 0 : (UserDefaults.standard.object(forKey: "review.dailyCount") as? Int ?? 10)
+            // 复习过记忆卡不代表摘录已经看完；尚未生成今日队列时按实际库存估算。
+            let daily = max(0, UserDefaults.standard.object(forKey: SettingsKeys.dailyCount) as? Int ?? 10)
+            highlights = min(daily, (try? db.dailyReviewCandidateCount()) ?? 0)
         }
         return (highlights, dueCardCount())
     }
@@ -1092,9 +1107,24 @@ final class LibraryStore {
     }
 
     func edit(_ highlight: Highlight) {
-        var d = HighlightDraft(highlight: highlight, tagsText: TagParser.format(highlight.tags))
-        if let id = highlight.id { d.editionPages = (try? db.editionPages(id)) ?? [:] }
-        editorDraft = d
+        do {
+            // 列表行可能来自旧缓存；打开时按 id 取完整正文，保留最近删除中的编辑能力。
+            let full: Highlight
+            if let id = highlight.id {
+                guard let found = try db.highlight(id: id) else {
+                    errorMessage = "这条摘录已不存在，请刷新列表后重试。"
+                    return
+                }
+                full = found
+            } else {
+                full = highlight
+            }
+            var d = HighlightDraft(highlight: full, tagsText: TagParser.format(full.tags))
+            if let id = full.id { d.editionPages = try db.editionPages(id) }
+            editorDraft = d
+        } catch {
+            report(error)
+        }
     }
 
     /// kongreview://add 链接：先放进编辑面板，让用户补页码、标签后再保存

@@ -62,22 +62,80 @@ public enum AnkiPackage {
         return out
     }
 
-    /// 笔记内容里引用到的媒体文件名（<img src>、[sound:]）
-    public static func mediaReferences(in html: String) -> Set<String> {
+    /// Markdown、HTML、Anki 音频与 kr-media 地址里引用到的媒体文件名。
+    public static func mediaReferences(in text: String) -> Set<String> {
         var out = Set<String>()
-        let patterns = [#"(?i)\bsrc\s*=\s*"([^"]+)""#, #"(?i)\bsrc\s*=\s*'([^']+)'"#, #"\[sound:([^\]]+)\]"#]
-        for pattern in patterns {
-            guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
-            let ns = html as NSString
-            for m in re.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
-                let name = ns.substring(with: m.range(at: 1))
-                    .replacingOccurrences(of: "&amp;", with: "&")
-                    .replacingOccurrences(of: "&quot;", with: "\"")
-                out.insert(name)
-                if let decoded = name.removingPercentEncoding { out.insert(decoded) }
+        let ns = text as NSString
+        for reference in mediaReferenceRanges(in: text) {
+            let name = unescapeMediaName(ns.substring(with: reference.range))
+            out.insert(name)
+            if let decoded = name.removingPercentEncoding { out.insert(decoded) }
+            if name.hasPrefix("kr-media://media/") {
+                let local = String(name.dropFirst("kr-media://media/".count))
+                out.insert(local)
+                if let decoded = local.removingPercentEncoding { out.insert(decoded) }
             }
         }
         return out
+    }
+
+    /// 只改写媒体引用，不替换正文里恰好同名的文字；一次处理映射，避免 a → b、b → c 的连锁替换。
+    public static func replacingMediaReferences(in text: String, names: [String: String]) -> String {
+        guard !names.isEmpty else { return text }
+        let ns = text as NSString
+        let result = NSMutableString(string: text)
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "?#%")
+        for reference in mediaReferenceRanges(in: text).sorted(by: { $0.range.location > $1.range.location }) {
+            let raw = unescapeMediaName(ns.substring(with: reference.range))
+            let isLocalURL = raw.hasPrefix("kr-media://media/")
+            let local = isLocalURL ? String(raw.dropFirst("kr-media://media/".count)) : raw
+            let name = local.removingPercentEncoding ?? local
+            guard let replacement = names[name] ?? names[local], replacement != name else { continue }
+            var value = replacement
+            if isLocalURL || reference.kind == .markdown || local != name {
+                value = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+            }
+            if isLocalURL { value = "kr-media://media/" + value }
+            if reference.kind == .html {
+                value = value.replacingOccurrences(of: "&", with: "&amp;")
+                    .replacingOccurrences(of: "\"", with: "&quot;")
+                    .replacingOccurrences(of: "'", with: "&#39;")
+            }
+            result.replaceCharacters(in: reference.range, with: value)
+        }
+        return result as String
+    }
+
+    private enum MediaReferenceKind { case html, sound, markdown, localURL }
+
+    private static let mediaReferencePatterns: [(NSRegularExpression, MediaReferenceKind)] = [
+        (#"(?i)\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'=<>`]+))"#, .html),
+        (#"(?i)\[sound:([^\]]+)\]"#, .sound),
+        (#"!?\[[^\]\r\n]*\]\(\s*(?:<([^>\r\n]+)>|([^\s)]+))"#, .markdown),
+        (#"(kr-media://media/[^)\s\"'<>]+)"#, .localURL),
+    ].compactMap { pattern, kind in
+        (try? NSRegularExpression(pattern: pattern)).map { ($0, kind) }
+    }
+
+    private static func mediaReferenceRanges(in text: String) -> [(range: NSRange, kind: MediaReferenceKind)] {
+        let full = NSRange(location: 0, length: (text as NSString).length)
+        var references: [(range: NSRange, kind: MediaReferenceKind)] = []
+        for (regex, kind) in mediaReferencePatterns {
+            for match in regex.matches(in: text, range: full) {
+                for group in 1..<match.numberOfRanges {
+                    let range = match.range(at: group)
+                    guard range.location != NSNotFound,
+                          !references.contains(where: { NSIntersectionRange($0.range, range).length > 0 }) else { continue }
+                    references.append((range, kind))
+                }
+            }
+        }
+        return references
+    }
+
+    private static func unescapeMediaName(_ name: String) -> String {
+        Markdown.decodeEntities(name)
     }
 
     /// 新格式 decks.kind（protobuf）：Normal 牌组 { config_id = 1 } 在字段 1 里

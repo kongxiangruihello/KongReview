@@ -627,6 +627,13 @@ final class V10UndoTests: XCTestCase {
     let db = try AppDatabase(DatabaseQueue())
     let store = LibraryStore(db: db)
     let um = UndoManager()
+    // 一个测试方法内模拟多次独立用户事件，不能让 RunLoop 把所有操作并成一组。
+    um.groupsByEvent = false
+    func action(_ work: () -> Void) {
+      um.beginUndoGrouping()
+      work()
+      um.endUndoGrouping()
+    }
     store.undoManager = um
     let a = try db.save(Source(title: "甲"))
     let b = try db.save(Source(title: "乙"))
@@ -635,7 +642,7 @@ final class V10UndoTests: XCTestCase {
     store.reload()
 
     // 删除摘录 → 撤销 → 重做
-    store.delete(h1)
+    action { store.delete(h1) }
     XCTAssertEqual(try db.count(HighlightQuery()), 1)
     um.undo()
     XCTAssertEqual(try db.count(HighlightQuery()), 2)
@@ -644,8 +651,11 @@ final class V10UndoTests: XCTestCase {
     um.undo()
 
     // 合并出处 → 撤销：出处与摘录归属都回来
+    let backups = FileManager.default.temporaryDirectory.appendingPathComponent("undo-backups-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: backups) }
     store.mergeRequest = MergeRequest(sources: [.init(source: a, count: 1), .init(source: b, count: 1)], target: a.id!)
-    store.commitMerge()
+    action { store.commitMerge(backupDirectory: backups) }
     XCTAssertEqual(try db.allSources().count, 1)
     um.undo()
     XCTAssertEqual(try db.allSources().count, 2)
@@ -654,13 +664,13 @@ final class V10UndoTests: XCTestCase {
     // 删除记忆卡 → 撤销
     XCTAssertEqual(try db.makeCards(fromHighlights: [h1.id!]), 1)
     let cid = try XCTUnwrap(db.cards().first?.id)
-    store.deleteCards([cid])
+    action { store.deleteCards([cid]) }
     XCTAssertEqual(try db.cardCount(), 0)
     um.undo()
     XCTAssertEqual(try db.cardCount(), 1)
 
     // 批量弃置 → 撤销
-    store.batch(.discard(true), ids: [h1.id!, h2.id!])
+    action { store.batch(.discard(true), ids: [h1.id!, h2.id!]) }
     XCTAssertEqual(try db.count(HighlightQuery()), 0)
     um.undo()
     XCTAssertEqual(try db.count(HighlightQuery()), 2)

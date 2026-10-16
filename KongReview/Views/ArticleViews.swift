@@ -187,8 +187,9 @@ struct ReaderWebView: NSViewRepresentable {
         c.article = article
         c.marks = marks
         ReaderBridge.shared.webView = wv
-        if c.loadedArticleID != article.id {
+        if c.loadedArticleID != article.id || c.loadedContentHTML != article.contentHTML {
             c.loadedArticleID = article.id
+            c.loadedContentHTML = article.contentHTML
             c.isLoaded = false
             c.appliedMarks = nil
             wv.loadHTMLString(ReaderPage.html(for: article), baseURL: URL(string: article.url))
@@ -208,6 +209,7 @@ struct ReaderWebView: NSViewRepresentable {
         var marks: [ReaderPage.Mark] = []
         var appliedMarks: [ReaderPage.Mark]?
         var loadedArticleID: Int64?
+        var loadedContentHTML: String?
         var isLoaded = false
 
         func applyMarks(_ wv: WKWebView) {

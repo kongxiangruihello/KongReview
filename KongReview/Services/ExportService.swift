@@ -134,11 +134,12 @@ enum ExportService {
         panel.prompt = "导出到此文件夹"
         guard panel.runModal() == .OK, let dir = panel.url else { return }
         do {
-            for source in store.sources {
+            let names = MarkdownExporter.fileNames(for: store.sources, reservedNames: ["未归类.md"])
+            for (source, name) in zip(store.sources, names) {
                 let hs = try store.db.highlights(sourceId: source.id)
                 guard !hs.isEmpty else { continue }
                 let md = MarkdownExporter.export(source: source, highlights: hs.reversed(), style: CitationSettings.style)
-                try md.write(to: dir.appendingPathComponent(MarkdownExporter.fileName(for: source)),
+                try md.write(to: dir.appendingPathComponent(name),
                              atomically: true, encoding: .utf8)
             }
             let unsorted = try store.db.highlights(unsortedOnly: true)

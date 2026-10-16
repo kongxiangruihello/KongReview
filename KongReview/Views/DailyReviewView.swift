@@ -239,9 +239,10 @@ struct DailyReviewView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("按语").font(.caption).foregroundStyle(.secondary)
                 RichEditor(text: Binding(get: { state.noteDraft ?? "" }, set: { state.noteDraft = $0 }),
-                           font: .note, placeholder: "写下按语…", autoHeight: true, minHeight: 90, focus: true,
+                           font: .note, placeholder: "写下按语…", autoHeight: false, minHeight: 160, focus: true,
                            slot: "review-note-draft",
                            onSubmit: { saveNote(for: card) }, onCancel: { state.noteDraft = nil })
+                    .frame(height: 180)
                     .richEditorFrame()
                 HStack {
                     Spacer()
@@ -698,18 +699,21 @@ struct DailyReviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("原文").font(.caption).foregroundStyle(ReviewPalette.sub)
             RichEditor(text: Binding(get: { state.inlineDraft?.text ?? "" }, set: { state.inlineDraft?.text = $0 }),
-                       font: .highlight, placeholder: "摘录原文", autoHeight: true, minHeight: 120, focus: true,
+                       font: .highlight, placeholder: "摘录原文", autoHeight: false, minHeight: 220, focus: true,
                        slot: "inline-text", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                .frame(height: 260)
                 .richEditorFrame()
             Text("译文 / 白话").font(.caption).foregroundStyle(ReviewPalette.sub).padding(.top, 6)
             RichEditor(text: Binding(get: { state.inlineDraft?.translation ?? "" }, set: { state.inlineDraft?.translation = $0 }),
-                       placeholder: "（可选）", toolbar: false, autoHeight: true, minHeight: 50,
+                       placeholder: "（可选）", toolbar: true, autoHeight: false, minHeight: 130,
                        slot: "inline-translation", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                .frame(height: 150)
                 .richEditorFrame()
             Text("按语").font(.caption).foregroundStyle(ReviewPalette.sub).padding(.top, 6)
             RichEditor(text: Binding(get: { state.inlineDraft?.note ?? "" }, set: { state.inlineDraft?.note = $0 }),
-                       font: .note, placeholder: "（可选）", autoHeight: true, minHeight: 60,
+                       font: .note, placeholder: "（可选）", autoHeight: false, minHeight: 130,
                        slot: "inline-note", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                .frame(height: 150)
                 .richEditorFrame()
             HStack {
                 Button("在编辑面板中打开（出处、位置、标签）…") {
@@ -766,7 +770,8 @@ struct DailyReviewView: View {
                 let found = try store.db.highlights(ids: ids)
                 let byID = Dictionary(found.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
                 state.cards = ids.compactMap { byID[$0] }.map { ReviewCard(highlight: $0, isMastery: false) }
-                state.position = min(saved.position, state.cards.count)
+                // 已看前缀里有摘录被删除时，进度随存活条目重新映射，不能跳过下一条。
+                state.position = saved.resumePosition(existingIDs: Set(byID.keys))
                 state.day = today
                 return
             }
@@ -867,6 +872,11 @@ struct ReviewSessionRecord: Codable {
     var regularIds: [Int64]
     var masteryIds: [Int64]
     var position: Int
+
+    func resumePosition(existingIDs: Set<Int64>) -> Int {
+        let ids = regularIds + masteryIds
+        return ids.prefix(min(ids.count, max(0, position))).filter { existingIDs.contains($0) }.count
+    }
 
     static func key(theme: String?) -> String {
         "review.session." + (theme ?? "_all")

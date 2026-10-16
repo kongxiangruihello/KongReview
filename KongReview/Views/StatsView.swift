@@ -5,6 +5,8 @@ import KongReviewCore
 /// 回顾统计：连续天数、最近 30 天每天回顾的摘录与记忆卡、记忆卡正确率、库存数字
 struct StatsView: View {
     @Environment(LibraryStore.self) private var store
+    /// 首页沿用全部统计，在同一个滚动区域末尾显示今天的入口。
+    var showsHomeActions = false
 
     private struct Bar: Identifiable {
         var day: Date
@@ -19,6 +21,9 @@ struct StatsView: View {
         let s = store.stats
         let insights = store.cardInsights
         let cards = insights?.counts ?? CardStateCounts()
+        let classified = store.highlightCounts.values.reduce(0, +)
+        let highlights = store.staleSummary.total
+        let unsorted = max(0, highlights - classified)
         let bars = s.lastDays.flatMap { d -> [Bar] in
             let date = Self.parse(d.key)
             return [Bar(day: date, kind: "摘录", count: d.highlights), Bar(day: date, kind: "记忆卡", count: d.cards)]
@@ -56,12 +61,14 @@ struct StatsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("库存").font(.headline)
                     Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
-                        GridRow { Text("摘录"); Text("\(store.highlightCounts.values.reduce(0, +)) 条（已归类）") }
+                        GridRow { Text("摘录"); Text("共 \(highlights) 条（已归类 \(classified)，未归类 \(unsorted)）") }
                         GridRow { Text("出处"); Text("\(store.sources.count) 个") }
                         GridRow { Text("网页存档"); Text("\(store.articleCount) 篇") }
+                        GridRow { Text("专题笔记本"); Text("\(store.notebooks.count) 本") }
+                        GridRow { Text("标签"); Text("\(store.tags.count) 个") }
                         GridRow {
                             Text("记忆卡")
-                            Text("\(cards.total) 张：新卡 \(cards.new)，学习中 \(cards.learning)，复习中 \(cards.review)，已暂停 \(cards.suspended)")
+                            Text("\(store.cardCount) 张" + (insights == nil ? "" : "：新卡 \(cards.new)，学习中 \(cards.learning)，复习中 \(cards.review)，已暂停 \(cards.suspended)"))
                         }
                     }
                     .monospacedDigit()
@@ -73,6 +80,10 @@ struct StatsView: View {
 
                 Text("统计从 0.7 版开始记录：每日回顾里“下一条 / 收藏 / 弃置 / 做成记忆卡”算回顾一条摘录；记忆卡每评一次分算一次。")
                     .font(.caption).foregroundStyle(.secondary)
+
+                if showsHomeActions {
+                    HomeActionsView()
+                }
             }
             .padding(24)
             .frame(maxWidth: 860, alignment: .leading)
@@ -83,7 +94,7 @@ struct StatsView: View {
         .sheet(item: Bindable(store).chapterProgressRequest) { req in
             ChapterProgressSheet(sourceId: req.sourceId)
         }
-        .navigationTitle("回顾统计")
+        .navigationTitle(showsHomeActions ? "首页" : "回顾统计")
         // 卡片统计只在打开本页、数据变化时重算（SQL 汇总，不读出全部卡片）
         .task(id: store.revision) { store.refreshCardInsights() }
     }
