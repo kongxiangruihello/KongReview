@@ -33,10 +33,18 @@ struct HighlightListView: View {
 
     private var terms: [String] { SearchTerms.terms(state.query) }
 
+    /// 全库和未归类使用真正的分页，列表始终只渲染一页，长库也能直接跳到最后一页。
+    private var usesPages: Bool {
+        filter.unsortedOnly || (filter.sourceId == nil && filter.tag == nil && !filter.favoritesOnly
+            && !filter.masteryOnly && !filter.deletedOnly)
+    }
+
     private struct LoadKey: Hashable {
+        var title: String
         var query: HighlightQuery
         var revision: Int
         var limit: Int
+        var page: Int
     }
 
     var body: some View {
@@ -54,6 +62,11 @@ struct HighlightListView: View {
         }
         .task(id: title) {
             // 换了列表：已存搜索带入它的条件，其他列表清空上一个列表的组合筛选
+            if state.extraOwner != title {
+                state.page = 1
+                state.pageInput = "1"
+                state.selection = []
+            }
             if let saved {
                 state.query = saved.text
                 state.extra = saved.filter
@@ -77,14 +90,19 @@ struct HighlightListView: View {
 
     @ViewBuilder
     private var listContent: some View {
-        Group {
+        VStack(spacing: 0) {
             if state.items.isEmpty {
-                ContentUnavailableView {
-                    Label(state.query.isEmpty ? "还没有摘录" : "没有找到", systemImage: "text.quote")
-                } description: {
-                    Text(filter.deletedOnly
-                         ? "删除的摘录会在这里保留 30 天，可随时恢复。"
-                         : (state.query.isEmpty ? "按 ⌘N 新建一条摘录，或在任意应用中按 \(HotKeyPreset.current.label) 快速录入。" : "换个关键词试试。两个字以内的查询使用模糊匹配。"))
+                if state.isLoading {
+                    ProgressView("正在载入摘录…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView {
+                        Label(state.query.isEmpty ? "还没有摘录" : "没有找到", systemImage: "text.quote")
+                    } description: {
+                        Text(filter.deletedOnly
+                             ? "删除的摘录会在这里保留 30 天，可随时恢复。"
+                             : (state.query.isEmpty ? "按 ⌘N 新建一条摘录，或在任意应用中按 \(HotKeyPreset.current.label) 快速录入。" : "换个关键词试试。两个字以内的查询使用模糊匹配。"))
+                    }
                 }
             } else {
                 List(selection: Bindable(store.list).selection) {
@@ -92,10 +110,10 @@ struct HighlightListView: View {
                         HighlightRow(highlight: h, source: store.source(for: h), terms: terms)
                             .tag(h.id ?? -1)
                             .onAppear {
-                                if h.id == state.items.last?.id, state.hasMore { state.limit += ListState.pageSize }
+                                if !usesPages, h.id == state.items.last?.id, state.hasMore { state.limit += ListState.pageSize }
                             }
                     }
-                    if state.hasMore {
+                    if !usesPages && state.hasMore {
                         HStack {
                             Spacer()
                             Button("加载更多（已显示 \(state.items.count) / \(state.total)）") {
@@ -117,12 +135,16 @@ struct HighlightListView: View {
                     }
                 }
             }
+            if usesPages {
+                Divider()
+                pageControls
+            }
         }
         .navigationTitle(title)
         .navigationSubtitle(state.selection.isEmpty ? "共 \(state.total) 条" : "共 \(state.total) 条 · 已选 \(state.selection.count) 条")
         .searchable(text: Bindable(store.list).query, prompt: "搜索原文、译文、按语")
-        .task(id: LoadKey(query: query, revision: store.revision, limit: state.limit)) {
-            load()
+        .task(id: LoadKey(title: title, query: query, revision: store.revision, limit: state.limit, page: state.page)) {
+            await load()
         }
         .confirmationDialog(
             "彻底删除“最近删除”里的 \(state.total) 条摘录？",
@@ -199,31 +221,107 @@ struct HighlightListView: View {
         }
     }
 
-    private func load() {
+    private var pageControls: some View {
+        HStack(spacing: 12) {
+            if state.isLoading {
+                ProgressView().controlSize(.small)
+            }
+            Text(pageRangeLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button { goToPage(state.page - 1) } label: {
+                Label("上一页", systemImage: "chevron.left")
+            }
+            .disabled(state.page <= 1 || state.isLoading)
+            Text("第 \(state.page) / \(state.pageCount) 页")
+                .monospacedDigit()
+            Button { goToPage(state.page + 1) } label: {
+                Label("下一页", systemImage: "chevron.right")
+            }
+            .disabled(state.page >= state.pageCount || state.isLoading)
+            TextField("页码", text: Bindable(store.list).pageInput)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 52)
+                .multilineTextAlignment(.center)
+                .onSubmit(jumpToPage)
+                .accessibilityLabel("跳转到页码")
+            Button("跳转", action: jumpToPage)
+                .disabled(state.isLoading)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var pageRangeLabel: String {
+        guard state.total > 0 else { return "共 0 条 · 每页 \(ListState.pageSize) 条" }
+        let first = (state.page - 1) * ListState.pageSize + 1
+        let last = min(state.page * ListState.pageSize, state.total)
+        return "第 \(first)–\(last) 条，共 \(state.total) 条"
+    }
+
+    private func goToPage(_ page: Int) {
+        let target = min(max(1, page), state.pageCount)
+        state.pageInput = String(target)
+        guard target != state.page else { return }
+        state.selection = []
+        state.page = target
+    }
+
+    private func jumpToPage() {
+        goToPage(Int(state.pageInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? state.page)
+    }
+
+    @MainActor
+    private func load() async {
+        let requestedQuery = query
+        let requestID = UUID()
+        state.loadID = requestID
         do {
-            if state.lastQuery != query {
+            if state.lastQuery != requestedQuery {
                 // 换了筛选条件：回到第一页，清空选择
-                state.lastQuery = query
+                state.lastQuery = requestedQuery
                 state.selection = []
-                if state.limit != ListState.pageSize {
+                state.items = []
+                if usesPages {
+                    state.pageInput = "1"
+                    if state.page != 1 {
+                        state.page = 1
+                        return
+                    }
+                } else if state.limit != ListState.pageSize {
                     state.limit = ListState.pageSize
                     return   // limit 变化会再次触发 load
                 }
             }
-            state.total = try store.db.count(query)
+            let requestedPage = state.page
+            let requestedLimit = usesPages ? ListState.pageSize : state.limit
+            state.isLoading = true
+            defer { if state.loadID == requestID { state.isLoading = false } }
+            let result = try await store.db.highlightPage(requestedQuery, limit: requestedLimit,
+                                                         offset: usesPages ? (requestedPage - 1) * ListState.pageSize : 0)
+            guard !Task.isCancelled, state.loadID == requestID else { return }
+            state.total = result.total
+            if usesPages && requestedPage > state.pageCount {
+                state.page = state.pageCount
+                state.pageInput = String(state.page)
+                return
+            }
             // 1.7：待选中的摘录可能超出当前分页：先放宽分页（limit 变化会再次触发 load）
-            if state.pendingSelection != nil, state.limit < state.total {
+            if !usesPages, state.pendingSelection != nil, state.limit < state.total {
                 state.limit = state.total
                 return
             }
-            state.items = try store.db.highlights(query, limit: state.limit)
+            state.items = result.items
+            if usesPages { state.pageInput = String(requestedPage) }
             if let pending = state.pendingSelection {
                 state.selection = pending
                 state.pendingSelection = nil
             }
             state.selection = state.selection.filter { id in state.items.contains { $0.id == id } }
         } catch {
-            store.report(error)
+            if !Task.isCancelled, state.loadID == requestID { store.report(error) }
         }
     }
 
@@ -293,15 +391,15 @@ struct HighlightRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(RichText.marked(highlight.text, terms: terms))
+            Text(RichText.marked(preview(highlight.text, limit: 1600), terms: terms))
                 .font(.system(.body, design: .serif))
                 .lineLimit(6)
                 .textSelection(.enabled)
             if let t = highlight.translation {
-                Text(RichText.marked("译：" + t, terms: terms)).font(.callout).foregroundStyle(.secondary).lineLimit(3)
+                Text(RichText.marked("译：" + preview(t, limit: 600), terms: terms)).font(.callout).foregroundStyle(.secondary).lineLimit(3)
             }
             if let n = highlight.note {
-                Text(RichText.marked("按：" + n, terms: terms)).font(.callout).foregroundStyle(.blue).lineLimit(3)
+                Text(RichText.marked("按：" + preview(n, limit: 600), terms: terms)).font(.callout).foregroundStyle(.blue).lineLimit(3)
             }
             HStack(spacing: 8) {
                 let cite = CitationFormatter.citation(for: highlight, source: source, style: CitationSettings.style)
@@ -319,6 +417,12 @@ struct HighlightRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// lineLimit 只限制绘制，不限制 Markdown 解析；列表只解析预览，编辑时仍使用完整原文。
+    private func preview(_ text: String, limit: Int) -> String {
+        let prefix = text.prefix(limit)
+        return prefix.endIndex == text.endIndex ? text : String(prefix) + "…"
     }
 }
 

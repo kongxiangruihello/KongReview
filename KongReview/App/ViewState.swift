@@ -193,6 +193,7 @@ struct CardDraft: Identifiable {
     let id = UUID()
     var card: Card
     var tagsText: String = ""
+    var error: String?
     var isNew: Bool { card.id == nil }
 }
 
@@ -292,6 +293,12 @@ final class ListState {
     var total = 0
     /// 已加载的条数上限（分页：每次多加载 pageSize 条）
     var limit = ListState.pageSize
+    /// 全部摘录与未归类的明确分页（从 1 开始）。
+    var page = 1
+    var pageInput = "1"
+    var isLoading = false
+    var loadID = UUID()
+    var pageCount: Int { max(1, (total + Self.pageSize - 1) / Self.pageSize) }
     /// 多选的摘录 id
     var selection: Set<Int64> = []
     /// 1.7：列表按新条件载入后再选中的摘录（出处书页“按页码…→在列表中选中”）

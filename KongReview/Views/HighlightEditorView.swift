@@ -20,13 +20,14 @@ struct HighlightEditorView: View {
             Form {
                 Section {
                     RichEditor(text: draftBinding.highlight.text, font: .highlight, placeholder: "摘录原文",
-                               autoHeight: true, minHeight: 150, focus: draft.isNew, slot: "hl-text",
+                               minHeight: 150, focus: draft.isNew, slot: "hl-text",
                                onSubmit: submit, onCancel: cancel)
+                        .frame(height: 280)
                         .richEditorFrame()
                 } header: {
                     Text("原文")
                 } footer: {
-                    Text("所见即所得：⌘B 粗体、⌘I 斜体、⌘K 链接、⌘1/⌘2 标题、⇧⌘8 列表、⇧⌘. 引用；也可直接敲 Markdown（行首“# ”“- ”“> ”，或 **粗体**）。从网页、Word 粘贴时保留粗体、标题、列表等格式。")
+                    Text("长文在编辑区内滚动，格式工具栏保持可见。⌘B 粗体、⌘I 斜体、⌘K 链接、⌘1/⌘2 标题、⇧⌘8 列表、⇧⌘. 引用；也可直接敲 Markdown。从网页、Word 粘贴时保留格式。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -77,15 +78,17 @@ struct HighlightEditorView: View {
 
                 Section("译文 / 白话（可选）") {
                     RichEditor(text: optional(draftBinding.highlight.translation), placeholder: "译文或白话",
-                               toolbar: false, autoHeight: true, minHeight: 60, slot: "hl-translation",
+                               minHeight: 60, slot: "hl-translation",
                                onSubmit: submit, onCancel: cancel)
+                        .frame(height: 120)
                         .richEditorFrame()
                 }
 
                 Section("按语（可选）") {
                     RichEditor(text: optional(draftBinding.highlight.note), font: .note, placeholder: "按语",
-                               autoHeight: true, minHeight: 70, slot: "hl-note",
+                               minHeight: 70, slot: "hl-note",
                                onSubmit: submit, onCancel: cancel)
+                        .frame(height: 150)
                         .richEditorFrame()
                 }
 
@@ -105,6 +108,7 @@ struct HighlightEditorView: View {
                 }
             }
             .formStyle(.grouped)
+            .id(store.editorDraft?.id)
 
             HStack {
                 if !draft.isNew {

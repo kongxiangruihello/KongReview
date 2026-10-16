@@ -46,6 +46,32 @@ public enum MarkdownExporter {
         return (cleaned.isEmpty ? "untitled" : cleaned) + ".md"
     }
 
+    /// 一批出处的唯一文件名：同名、非法字符替换后同名，以及 macOS 大小写碰撞均保留。
+    /// 碰撞时优先用稳定的出处 id；与“未归类”等保留文件也不能重名。
+    public static func fileNames(for sources: [Source], reservedNames: Set<String> = []) -> [String] {
+        func key(_ name: String) -> String {
+            name.precomposedStringWithCanonicalMapping.lowercased()
+        }
+        let names = sources.map { fileName(for: $0) }
+        let counts = Dictionary(names.map { (key($0), 1) }, uniquingKeysWith: +)
+        let reserved = Set(reservedNames.map(key))
+        var used = reserved
+        return sources.enumerated().map { index, source in
+            let original = names[index]
+            let stem = String(original.dropLast(3))
+            let needsSuffix = (counts[key(original)] ?? 0) > 1 || reserved.contains(key(original))
+            let base = needsSuffix ? stem + "-" + (source.id.map(String.init) ?? String(index + 1)) : stem
+            var candidate = base + ".md"
+            var suffix = 2
+            while used.contains(key(candidate)) {
+                candidate = base + "-\(suffix).md"
+                suffix += 1
+            }
+            used.insert(key(candidate))
+            return candidate
+        }
+    }
+
     static func yamlEscape(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }

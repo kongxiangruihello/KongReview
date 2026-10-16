@@ -139,7 +139,9 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch store.selection {
-        case .review, .none:
+        case .home, .none:
+            HomeView()
+        case .review:
             DailyReviewView()
         case .all:
             HighlightListView(title: "全部摘录", filter: .init())
@@ -186,6 +188,7 @@ struct SidebarView: View {
         @Bindable var store = store
         List(selection: $store.selection) {
             Section {
+                Label("首页", systemImage: "house").tag(SidebarItem.home)
                 Label("今日回顾", systemImage: "sun.max").tag(SidebarItem.review)
                 Label("全部摘录", systemImage: "text.quote").tag(SidebarItem.all)
                 Label("收藏", systemImage: "star").tag(SidebarItem.favorites)
@@ -338,6 +341,9 @@ struct SidebarView: View {
         // 1.1：侧边栏收紧——字号比正文小一号、行高更矮，计数用小号灰字
         .font(.system(size: 12.5))
         .environment(\.defaultMinListRowHeight, 22)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            SidebarBrandView()
+        }
         .toolbar {
             ToolbarItem {
                 Button {

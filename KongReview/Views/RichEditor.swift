@@ -87,6 +87,7 @@ struct RichEditorRep: NSViewRepresentable {
         config.userContentController.add(WeakScriptHandler(c), name: "krEditor")
         LocalSchemeHandler.register(on: config, store: store)
         let wv = EditorWebView(frame: .zero, configuration: config)
+        c.webView = wv
         wv.passScroll = autoHeight
         // 1.8：同一个位置上次留下的高度（可能是另一张卡的长内容）不沿用，等网页量好再定
         if autoHeight {
@@ -127,6 +128,7 @@ struct RichEditorRep: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: RichEditorRep?
+        weak var webView: WKWebView?
         var lastValue = ""
         var ready = false
         var wantsFocus = false
@@ -136,6 +138,12 @@ struct RichEditorRep: NSViewRepresentable {
         var gotHeight = false
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            editorReady(in: webView)
+        }
+
+        /// 编辑器脚本完成初始化就可以同步原文；didFinish 可能还在等远程图片。
+        private func editorReady(in webView: WKWebView) {
+            guard !ready else { return }
             ready = true
             if let js = pending { webView.evaluateJavaScript(js, completionHandler: nil); pending = nil }
             if wantsFocus {
@@ -156,7 +164,10 @@ struct RichEditorRep: NSViewRepresentable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any], let type = body["type"] as? String, let p = parent else { return }
             switch type {
+            case "ready":
+                if let webView { editorReady(in: webView) }
             case "change":
+                guard ready else { return }
                 guard let v = body["value"] as? String else { return }
                 lastValue = v
                 if p.text != v { p.text = v }

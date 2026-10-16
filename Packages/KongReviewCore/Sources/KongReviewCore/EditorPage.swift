@@ -112,7 +112,7 @@ public enum EditorPage {
         return "<!doctype html><html><head><meta charset=\"utf-8\"><style>"
             + css.replacingOccurrences(of: "/*FONT*/", with: fontCSS)
             + (autoHeight ? "html, body { overflow: hidden; }" : "")
-            + "</style></head><body>"
+            + "</style></head><body" + (autoHeight ? "" : " class=\"bounded\"") + ">"
             + toolbarHTML(toolbar)
             + "<div id=\"ed\" contenteditable=\"true\" spellcheck=\"false\"></div>"
             + "<div id=\"linkbox\" hidden><input id=\"linkurl\" placeholder=\"链接地址（https://…），回车确定，Esc 取消\"></div>"
@@ -159,6 +159,10 @@ public enum EditorPage {
     }
     html, body { margin: 0; padding: 0; background: transparent; }
     body { color: var(--text); -webkit-font-smoothing: antialiased; }
+    html:has(body.bounded), body.bounded { height: 100%; overflow: hidden; }
+    body.bounded { display: flex; flex-direction: column; }
+    body.bounded #tb { flex: 0 0 auto; }
+    body.bounded #ed { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
     #tb { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
           padding: 4px 6px; background: var(--bar); border-bottom: 1px solid var(--hair);
           -webkit-backdrop-filter: blur(8px); font: 12px -apple-system, "PingFang SC", sans-serif; }
@@ -168,7 +172,7 @@ public enum EditorPage {
     #tb button.on { background: var(--btn); color: var(--accent); }
     #tb .mono { font: 11px ui-monospace, Menlo, monospace; }
     #tb .sep { width: 1px; height: 14px; background: var(--hair); margin: 0 4px; }
-    #ed { /*FONT*/ outline: none; padding: 8px 10px 10px; min-height: 1.7em; word-wrap: break-word; caret-color: var(--accent); }
+    #ed { /*FONT*/ position: relative; outline: none; padding: 8px 10px 10px; min-height: 1.7em; word-wrap: break-word; caret-color: var(--accent); }
     #ed.empty::before { content: attr(data-placeholder); color: var(--sub); position: absolute; pointer-events: none; }
     #ed p { margin: 0 0 .55em; } #ed p:last-child { margin-bottom: 0; }
     #ed h1 { font-size: 1.55em; margin: .3em 0 .35em; } #ed h2 { font-size: 1.3em; margin: .3em 0 .35em; }
@@ -815,6 +819,8 @@ public enum EditorPage {
       window.krCommand = command;
 
       window.krSetContent(window.__krInitial || '', originalHTML);
+      // 正文与接口就绪即通知应用，不必等待正文里的远程图片下载完毕。
+      post({ type: 'ready' });
     })();
     """#
 }

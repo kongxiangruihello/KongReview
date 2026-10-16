@@ -34,6 +34,31 @@ extension AppDatabase {
         try writer.read { db in try Card.fetchOne(db, key: id) }
     }
 
+    /// 正反面相同即为重复，跨牌组检查；编辑原卡以及已删除的卡片不参与比较。
+    func duplicateCard(for card: Card) throws -> Card? {
+        func normalized(_ value: String) -> String {
+            value.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
+        }
+        func sectionContents(_ card: Card) -> [String] {
+            (card.sections ?? []).filter { !normalized($0.name).isEmpty || !normalized($0.text).isEmpty }
+                .flatMap { [normalized($0.name), normalized($0.text)] }
+        }
+        let front = normalized(card.front), back = normalized(card.back)
+        let sections = sectionContents(card)
+        return try writer.read { db in
+            let rows = try Row.fetchCursor(db, sql: "SELECT id, front, back FROM card WHERE deletedAt IS NULL ORDER BY id")
+            while let row = try rows.next() {
+                let id: Int64 = row["id"]
+                if id != card.id, normalized(row["front"]) == front, normalized(row["back"]) == back {
+                    if let existing = try Card.fetchOne(db, key: id), sectionContents(existing) == sections {
+                        return existing
+                    }
+                }
+            }
+            return nil
+        }
+    }
+
     /// 牌组内全部卡片（不含已删除）
     func cards(deck: String? = nil, query: String = "") throws -> [Card] {
         try writer.read { db in
@@ -187,7 +212,16 @@ extension AppDatabase {
     }
 
     func renameDeck(_ old: String, to new: String) throws {
-        try writer.write { db in try db.execute(sql: "UPDATE card SET deck = ? WHERE deck = ?", arguments: [new, old]) }
+        guard old != new else { return }
+        try writer.write { db in
+            try db.execute(sql: "UPDATE card SET deck = ? WHERE deck = ?", arguments: [new, old])
+            // 合并进已有牌组时沿用目标设置；普通改名则完整迁移原设置。
+            if try DeckOptions.fetchOne(db, key: new) == nil, var options = try DeckOptions.fetchOne(db, key: old) {
+                options.deck = new
+                try options.insert(db)
+            }
+            try db.execute(sql: "DELETE FROM deck_options WHERE deck = ?", arguments: [old])
+        }
     }
 
     // MARK: 媒体
@@ -219,9 +253,39 @@ extension AppDatabase {
             var decks = Set<String>()
             var fsrsDecks = Set<String>()
 
+            // 先解析本包的媒体名：内容一致复用，内容不同保留原文件并给新文件稳定的新名字。
+            var renamedMedia: [String: String] = [:]
+            for original in media.keys.sorted() {
+                guard let data = media[original] else { continue }
+                var name = original
+                if let stored = try Data.fetchOne(db, sql: "SELECT data FROM card_media WHERE name = ?", arguments: [name]), stored != data {
+                    let file = original as NSString
+                    let ext = file.pathExtension
+                    let stem = ext.isEmpty ? original : file.deletingPathExtension
+                    let suffix = ext.isEmpty ? "" : "." + ext
+                    let base = stem + "-" + SHA1.hex(data)
+                    name = base + suffix
+                    var number = 1
+                    while let existing = try Data.fetchOne(db, sql: "SELECT data FROM card_media WHERE name = ?", arguments: [name]), existing != data {
+                        name = base + "-\(number)" + suffix
+                        number += 1
+                    }
+                }
+                if name != original { renamedMedia[original] = name }
+                try db.execute(sql: "INSERT OR IGNORE INTO card_media (name, data) VALUES (?, ?)", arguments: [name, data])
+                r.media += db.changesCount
+            }
+            let importedNotes = notes.map { note -> AnkiNote in
+                var note = note
+                note.front = AnkiPackage.replacingMediaReferences(in: note.front, names: renamedMedia)
+                note.back = AnkiPackage.replacingMediaReferences(in: note.back, names: renamedMedia)
+                note.fields = note.fields.map { AnkiPackage.replacingMediaReferences(in: $0, names: renamedMedia) }
+                return note
+            }
+
             // 笔记类型模板：已有的不覆盖（保留用户改过的设置）
             var seenTypes = Set<String>()
-            for n in notes {
+            for n in importedNotes {
                 guard let type = n.noteType, !n.fieldNames.isEmpty, seenTypes.insert(type).inserted else { continue }
                 if try NoteTemplate.fetchOne(db, key: type) == nil {
                     try NoteTemplate.defaultTemplate(name: type, fieldNames: n.fieldNames, isCloze: n.isCloze).insert(db)
@@ -230,14 +294,14 @@ extension AppDatabase {
             }
             // 牌组选项：沿用 Anki 的每日上限、算法与期望保留率（已设置过的牌组不覆盖）
             var seenDecks = Set<String>()
-            for n in notes {
+            for n in importedNotes {
                 guard var o = n.deckOptions, seenDecks.insert(n.deck).inserted else { continue }
                 o.deck = n.deck
                 if try DeckOptions.fetchOne(db, key: n.deck) == nil { try o.insert(db) }
                 if o.algorithm == .fsrs { fsrsDecks.insert(n.deck) }
             }
 
-            for n in notes {
+            for n in importedNotes {
                 var card: Card
                 if let g = n.guid, !g.isEmpty, let existing = try Card.filter(Column("ankiGuid") == g).fetchOne(db) {
                     r.duplicates += 1
@@ -275,10 +339,6 @@ extension AppDatabase {
                         r.revlog += db.changesCount
                     }
                 }
-            }
-            for (name, data) in media {
-                try db.execute(sql: "INSERT OR REPLACE INTO card_media (name, data) VALUES (?, ?)", arguments: [name, data])
-                r.media += 1
             }
             r.decks = decks.sorted()
             r.fsrsDecks = fsrsDecks.sorted()
@@ -401,14 +461,16 @@ extension AppDatabase {
         let before = fileSize()
         let removed: Int = try writer.write { db in
             var used = Set<String>()
-            for r in try Row.fetchAll(db, sql: "SELECT front, back, fields FROM card WHERE deletedAt IS NULL") {
-                for key in ["front", "back", "fields"] {
-                    if let s: String = r[key] { used.formUnion(AnkiPackage.mediaReferences(in: s)) }
-                }
+            // 按模型解码字段和栏目，避免 JSON 中的转义引号妨碍 HTML 引用解析。
+            for card in try Card.filter(Column("deletedAt") == nil).fetchAll(db) {
+                let content = [card.front, card.back] + card.fields + (card.sections ?? []).map(\.text)
+                for text in content { used.formUnion(AnkiPackage.mediaReferences(in: text)) }
             }
-            // 摘录正文里的图片（如 LiquidText 导入的图片摘录）也算在用
-            for text in try String.fetchAll(db, sql: "SELECT text FROM highlight WHERE text LIKE '%kr-media://%'") {
-                used.formUnion(AnkiPackage.krMediaReferences(in: text))
+            // 最近删除中的摘录仍可恢复，因此也保留它们的媒体。
+            for highlight in try Highlight.fetchAll(db) {
+                for text in [highlight.text, highlight.note ?? "", highlight.translation ?? ""] {
+                    used.formUnion(AnkiPackage.mediaReferences(in: text))
+                }
             }
             var n = 0
             for name in try String.fetchAll(db, sql: "SELECT name FROM card_media") where !used.contains(name) {
