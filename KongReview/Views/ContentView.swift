@@ -186,10 +186,23 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var store = store
-        List(selection: $store.selection) {
+        List(selection: Binding(
+            get: { store.selection },
+            set: { destination in
+                if destination == .review { store.openTodayReview() }
+                else { store.selection = destination }
+            }
+        )) {
             Section {
                 Label("首页", systemImage: "house").tag(SidebarItem.home)
-                Label("今日回顾", systemImage: "sun.max").tag(SidebarItem.review)
+                // 已选中时再点，也要从主题范围回到全库今日队列。
+                Button { store.openTodayReview() } label: {
+                    Label("今日回顾", systemImage: "sun.max")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .tag(SidebarItem.review)
                 Label("全部摘录", systemImage: "text.quote").tag(SidebarItem.all)
                 Label("收藏", systemImage: "star").tag(SidebarItem.favorites)
                 HStack {

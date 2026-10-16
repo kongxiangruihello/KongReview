@@ -24,7 +24,9 @@ struct DailyReviewView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            if state.cards.isEmpty {
+            if state.cards.isEmpty && state.theme == nil && store.todayReviewIsComplete {
+                finished
+            } else if state.cards.isEmpty {
                 ContentUnavailableView(
                     "暂无可回顾的摘录",
                     systemImage: "sun.max",
@@ -258,111 +260,35 @@ struct DailyReviewView: View {
         }
     }
 
-    /// 回顾完成：页面中部的一张总结卡——日期、三项大数字、近 7 天、今日一句、下一步
+    /// 与首页共用截图中的日课卡；回顾结束后保留从头再看、再抽一组等操作。
     private var finished: some View {
-        let _ = store.revision
-        let s = store.stats
         let due = store.dueCardCount()
-        let week = Array(s.lastDays.suffix(7))
-        let peak = max(1, week.map(\.total).max() ?? 1)
-        let quote = todaysQuote()
         return ScrollView {
-            VStack(spacing: 0) {
-                Text(Self.longDate(Date()))
-                    .font(.system(size: 12.5))
-                    .tracking(1)
-                    .foregroundStyle(ReviewPalette.sub)
-                Text("今日回顾完成")
-                    .font(.system(size: 30, weight: .semibold, design: .serif))
-                    .foregroundStyle(ReviewPalette.ink)
-                    .padding(.top, 10)
-                    .padding(.bottom, 26)
-
-                // 三项大数字
-                HStack(spacing: 0) {
-                    bigStat("\(s.today.highlights)", unit: "条", label: s.today.cards > 0 ? "今日回顾 · 记忆卡 \(s.today.cards) 次" : "今日回顾摘录")
-                    Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                    bigStat("\(s.currentStreak)", unit: "天", label: "连续回顾 · 最长 \(s.longestStreak) 天")
-                    Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                    bigStat("\(due)", unit: "张", label: due > 0 ? "记忆卡待学" : "记忆卡今天学完了", accent: due > 0)
+            DailyReviewSummaryCard(title: "今日回顾完成", quoteOverride: state.theme == nil ? nil : todaysQuote()) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { finishedActions(due: due) }
+                    VStack(spacing: 12) { finishedActions(due: due) }
                 }
-                .frame(height: 104)
-                .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
-                .overlay(alignment: .bottom) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
-
-                // 近 7 天
-                HStack(alignment: .bottom, spacing: 14) {
-                    ForEach(Array(week.enumerated()), id: \.offset) { i, d in
-                        let isToday = i == week.count - 1
-                        VStack(spacing: 6) {
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(isToday ? ReviewPalette.accent : ReviewPalette.accentSoft)
-                                .frame(width: 16, height: max(6, 52 * CGFloat(d.total) / CGFloat(peak)))
-                            Text(isToday ? "今天" : Self.weekday(d.key))
-                                .font(.system(size: 11))
-                                .foregroundStyle(isToday ? ReviewPalette.ink : ReviewPalette.sub)
-                        }
-                        .help("\(d.key)：摘录 \(d.highlights) 条，记忆卡 \(d.cards) 次")
-                    }
-                }
-                .frame(height: 82, alignment: .bottom)
-                .padding(.top, 22)
-
-                // 今日一句
-                if let q = quote {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("“\(q.text)”")
-                            .font(.system(size: 16, design: .serif))
-                            .lineSpacing(6)
-                            .foregroundStyle(ReviewPalette.ink.opacity(0.88))
-                            .lineLimit(4)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("今日一句" + (q.source.isEmpty ? "" : " · " + q.source))
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(ReviewPalette.sub)
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(ReviewPalette.soft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.top, 24)
-                }
-
-                // 下一步
-                HStack(spacing: 8) {
-                    PillButton(icon: "chevron.left", title: "上一条", key: "←", style: .ghost) { go(-1) }
-                        .keyboardShortcut(.leftArrow, modifiers: [])
-                    if due > 0 {
-                        PillButton(icon: "brain", title: "去学习记忆卡 · \(due)", style: .primary) { store.selection = .cards }
-                    }
-                    PillButton(title: "从头再看") { state.position = 0; persist() }
-                    PillButton(title: "再抽一组", style: due > 0 ? .normal : .primary) { loadSession(forceNew: true) }
-                }
-                .padding(.top, 26)
             }
-            .padding(.horizontal, 48)
-            .padding(.top, 40)
-            .padding(.bottom, 34)
-            .frame(width: 640)
-            .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ReviewPalette.hair))
-            .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.08), radius: 20, y: 10)
+            .padding(.horizontal, 24)
             .padding(.vertical, 48)
             .frame(maxWidth: .infinity)
         }
     }
 
-    private func bigStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(number)
-                    .font(.system(size: 40, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
-                Text(unit).font(.system(size: 15, weight: .medium)).foregroundStyle(ReviewPalette.sub)
-            }
-            Text(label).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+    @ViewBuilder
+    private func finishedActions(due: Int) -> some View {
+        if !state.cards.isEmpty {
+            PillButton(icon: "chevron.left", title: "上一条", key: "←", style: .ghost) { go(-1) }
+                .keyboardShortcut(.leftArrow, modifiers: [])
         }
-        .frame(maxWidth: .infinity)
+        if due > 0 {
+            PillButton(icon: "brain", title: "去学习记忆卡 · \(due)", style: .primary) { store.startSuggestedStudy() }
+        }
+        if !state.cards.isEmpty {
+            PillButton(title: "从头再看") { state.position = 0; persist() }
+        }
+        PillButton(title: "再抽一组", style: due > 0 ? .normal : .primary) { loadSession(forceNew: true) }
     }
 
     /// 今日一句：今天这组里收藏的那条；没有收藏就按日期固定取一条（同一天总是同一句）
@@ -376,20 +302,6 @@ struct DailyReviewView: View {
         let src = store.source(for: pick.highlight)
         let source = [src?.author ?? "", src.map { "《\($0.title)》" } ?? ""].filter { !$0.isEmpty }.joined()
         return (text, source)
-    }
-
-    static func longDate(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "M月d日 · EEEE"
-        return f.string(from: d)
-    }
-
-    static func weekday(_ key: String) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        guard let d = f.date(from: key) else { return "" }
-        return ["日", "一", "二", "三", "四", "五", "六"][Calendar.current.component(.weekday, from: d) - 1]
     }
 
     /// 写按语时返回 nil，让单键快捷键失效

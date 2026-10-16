@@ -652,6 +652,35 @@ final class LibraryStore {
         onReviewedToday?()
     }
 
+    /// “今日回顾”入口始终打开全库的当天队列，沿用已存进度和完成状态。
+    func openTodayReview() {
+        checkDayChange()
+        review.theme = nil
+        review.noteDraft = nil
+        review.inlineDraft = nil
+        review.sessionToken += 1
+        selection = .review
+    }
+
+    /// 首页与完成卡共用：继续有待学卡片的最近牌组，否则进入待学最多的牌组。
+    func startSuggestedStudy() {
+        checkDayChange()
+        refreshDerived()
+        let due = deckSummaryCache.filter { $0.counts.total > 0 }
+        let suggested = study.lastDeck.flatMap { last in due.first { $0.name == last } }
+            ?? due.max { $0.counts.total < $1.counts.total }
+        if let suggested {
+            startStudy(deck: suggested.name)
+        } else {
+            study.deck = nil
+            study.browsingDeck = nil
+            study.notebookId = nil
+            study.current = nil
+            study.finished = false
+        }
+        selection = .cards
+    }
+
     // MARK: 记忆卡
 
     /// 单条摘录做成记忆卡（牌组“摘录”）；不弹提示，界面上的脑形图标会变色
@@ -1051,6 +1080,36 @@ final class LibraryStore {
             highlights = min(daily, (try? db.dailyReviewCandidateCount()) ?? 0)
         }
         return (highlights, dueCardCount())
+    }
+
+    var todayReviewIsComplete: Bool {
+        guard let record = ReviewSessionRecordStore.load(), record.day == ReminderPlan.dayKey(Date()),
+              record.total > 0 else { return false }
+        return todayCounts().highlights == 0
+    }
+
+    /// 首页和完成页显示同一句；读取当日全库队列，不创建或改写回顾进度。
+    func dailyReviewQuote() -> (text: String, source: String)? {
+        let day = ReminderPlan.dayKey(Date())
+        let seed = day.unicodeScalars.reduce(0) { ($0 * 31 + Int($1.value)) % 1_000_000_007 }
+        var highlights: [Highlight] = []
+        if let record = ReviewSessionRecordStore.load(), record.day == day {
+            highlights = (try? db.highlights(ids: record.regularIds + record.masteryIds)) ?? []
+        }
+        let pick: Highlight?
+        if !highlights.isEmpty {
+            pick = highlights.first { $0.isFavorite } ?? highlights[seed % highlights.count]
+        } else {
+            pick = try? db.dailyQuoteCandidate(seed: seed)
+        }
+        guard let highlight = pick else { return nil }
+        let plain = Markdown.plainText(fromHTML: Markdown.richHTML(highlight.text))
+            .replacingOccurrences(of: "\n", with: " ")
+        let text = plain.count > 120 ? String(plain.prefix(118)) + "…" : plain
+        let source = self.source(for: highlight)
+        let label = [source?.author ?? "", source.map { "《\($0.title)》" } ?? ""]
+            .filter { !$0.isEmpty }.joined()
+        return (text, label)
     }
 
     func confirmCardImport() {

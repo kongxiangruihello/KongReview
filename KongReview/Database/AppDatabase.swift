@@ -958,6 +958,19 @@ extension AppDatabase {
         }
     }
 
+    func dailyQuoteCandidate(seed: Int) throws -> Highlight? {
+        try writer.read { db in
+            let from = """
+                FROM highlight h LEFT JOIN source s ON s.id = h.sourceId
+                WHERE h.deletedAt IS NULL AND h.isDiscarded = 0 AND coalesce(s.reviewWeight, 1) > 0
+                """
+            let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) " + from) ?? 0
+            guard count > 0 else { return nil }
+            return try Highlight.fetchOne(db, sql: "SELECT h.* " + from + " ORDER BY h.id LIMIT 1 OFFSET ?",
+                                          arguments: [max(0, seed) % count])
+        }
+    }
+
     func existingHighlightCount(ids: [Int64]) throws -> Int {
         guard !ids.isEmpty else { return 0 }
         return try writer.read { db in
