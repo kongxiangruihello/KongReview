@@ -8,48 +8,94 @@ import KongReviewCore
 @MainActor
 @Observable
 final class ArticleListState {
+    /// 保留旧接口供既有调用使用；实际每页数量来自当前列表设置。
     static let pageSize = 200
+    private struct Snapshot: Codable { var query: String; var page: Int; var pageSize: Int; var sort: ArticleSort; var anchorID: Int64? }
+    private let persistence: ListPositionPersistence
+    private var restoringSnapshot = false
     var query = "" {
         didSet {
             guard query != oldValue else { return }
-            page = 1
-            pageInput = "1"
-            total = 0
-            items = []
-            highlightCounts = [:]
-            loadID = UUID()
-            isLoading = true
+            resetCriteria()
         }
     }
+    var selectedPageSize = 200 {
+        didSet {
+            guard selectedPageSize != oldValue else { return }
+            let normalized = ListPositionPersistence.normalizedPageSize(selectedPageSize)
+            if normalized != selectedPageSize { selectedPageSize = normalized }
+            resetCriteria()
+        }
+    }
+    var sort: ArticleSort = .savedNewest { didSet { if sort != oldValue { resetCriteria() } } }
     var items: [Article] = []
     var highlightCounts: [Int64: Int] = [:]
     var total = 0
     var page = 1
     var pageInput = "1"
+    var anchorID: Int64?
     var isLoading = true
     var loadID = UUID()
-    var pageCount: Int { max(1, (total + Self.pageSize - 1) / Self.pageSize) }
+    var pageCount: Int { max(1, (total + selectedPageSize - 1) / selectedPageSize) }
+
+    init(persistence: ListPositionPersistence? = nil) {
+        self.persistence = persistence ?? ListPositionPersistence()
+        restoringSnapshot = true
+        if let saved = self.persistence.load(Snapshot.self, for: "articles") {
+            query = saved.query
+            selectedPageSize = ListPositionPersistence.normalizedPageSize(saved.pageSize)
+            sort = saved.sort
+            page = max(1, saved.page)
+            pageInput = String(page)
+            anchorID = saved.anchorID
+        }
+        restoringSnapshot = false
+    }
+
+    private func resetCriteria() {
+        guard !restoringSnapshot else { return }
+        page = 1; pageInput = "1"; total = 0; items = []; highlightCounts = [:]
+        anchorID = nil
+        loadID = UUID(); isLoading = true
+        persist()
+    }
+
+    private func persist() {
+        persistence.save(Snapshot(query: query, page: page, pageSize: selectedPageSize, sort: sort, anchorID: anchorID), for: "articles")
+    }
+
+    func rememberArticle(_ id: Int64?) {
+        guard let id, items.contains(where: { $0.id == id }) else { return }
+        anchorID = id
+        persist()
+    }
 
     func goToPage(_ requested: Int) {
         let target = min(max(1, requested), pageCount)
         pageInput = String(target)
         guard target != page else { return }
+        anchorID = nil
         page = target
         items = []
         highlightCounts = [:]
         loadID = UUID()
         isLoading = true
+        persist()
     }
 
     /// 搜索、翻页或更新后，早先的请求不能把列表换回旧内容。
     @discardableResult
-    func apply(_ result: ArticlePage, requestID: UUID, query requestedQuery: String, page requestedPage: Int) -> Bool {
-        guard loadID == requestID, query == requestedQuery, page == requestedPage else { return false }
+    func apply(_ result: ArticlePage, requestID: UUID, query requestedQuery: String, page requestedPage: Int,
+               pageSize requestedPageSize: Int? = nil, sort requestedSort: ArticleSort? = nil) -> Bool {
+        guard loadID == requestID, query == requestedQuery, page == requestedPage,
+              requestedPageSize == nil || selectedPageSize == requestedPageSize,
+              requestedSort == nil || sort == requestedSort else { return false }
         total = result.total
         items = result.items
         highlightCounts = result.highlightCounts
         page = result.page
         pageInput = String(result.page)
+        persist()
         return true
     }
 }
@@ -73,6 +119,8 @@ struct ArticleListView: View {
     private struct LoadKey: Hashable {
         var query: String
         var page: Int
+        var pageSize: Int
+        var sort: ArticleSort
         var revision: Int
     }
 
@@ -92,8 +140,10 @@ struct ArticleListView: View {
                     }
                 }
             } else {
+                ScrollViewReader { proxy in
                 List(state.items) { a in
                     ArticleRow(article: a, highlightCount: a.id.flatMap { state.highlightCounts[$0] } ?? 0)
+                        .id(a.id ?? -1)
                         .contentShape(Rectangle())
                         .onTapGesture { store.open(a) }
                         .contextMenu {
@@ -106,6 +156,9 @@ struct ArticleListView: View {
                         }
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
+                .onAppear { restoreArticleAnchor(proxy) }
+                .onChange(of: state.items.map(\.id)) { _, _ in restoreArticleAnchor(proxy) }
+                }
             }
             Divider()
             pageControls
@@ -113,10 +166,16 @@ struct ArticleListView: View {
         .navigationTitle("网页存档")
         .navigationSubtitle("共 \(state.total) 篇")
         .searchable(text: Bindable(state).query, prompt: "搜索标题、网站、作者")
-        .task(id: LoadKey(query: state.query, page: state.page, revision: store.revision)) {
+        .task(id: LoadKey(query: state.query, page: state.page, pageSize: state.selectedPageSize, sort: state.sort, revision: store.revision)) {
             await load()
         }
         .toolbar {
+            ToolbarItem {
+                Picker("排序", selection: Bindable(state).sort) {
+                    ForEach(ArticleSort.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .frame(width: 120)
+            }
             ToolbarItem {
                 Button {
                     store.showAddArticle()
@@ -128,8 +187,18 @@ struct ArticleListView: View {
         }
     }
 
+    private func restoreArticleAnchor(_ proxy: ScrollViewProxy) {
+        if let anchor = state.anchorID, state.items.contains(where: { $0.id == anchor }) {
+            DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .center) }
+        }
+    }
+
     private var pageControls: some View {
         HStack(spacing: 10) {
+            Picker("每页", selection: Bindable(state).selectedPageSize) {
+                ForEach(ListPositionPersistence.pageSizes, id: \.self) { Text("\($0) 篇").tag($0) }
+            }
+            .frame(width: 110)
             Text(pageRangeLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -157,9 +226,9 @@ struct ArticleListView: View {
     }
 
     private var pageRangeLabel: String {
-        guard state.total > 0 else { return "共 0 篇 · 每页 \(ArticleListState.pageSize) 篇" }
-        let first = (state.page - 1) * ArticleListState.pageSize + 1
-        let last = min(state.page * ArticleListState.pageSize, state.total)
+        guard state.total > 0 else { return "共 0 篇" }
+        let first = (state.page - 1) * state.selectedPageSize + 1
+        let last = min(state.page * state.selectedPageSize, state.total)
         return "第 \(first)–\(last) 篇，共 \(state.total) 篇"
     }
 
@@ -171,6 +240,8 @@ struct ArticleListView: View {
     private func load() async {
         let requestedQuery = state.query
         let requestedPage = state.page
+        let requestedPageSize = state.selectedPageSize
+        let requestedSort = state.sort
         let requestedRevision = store.revision
         let requestID = UUID()
         state.loadID = requestID
@@ -178,9 +249,10 @@ struct ArticleListView: View {
         defer { if state.loadID == requestID { state.isLoading = false } }
         do {
             let result = try await store.db.articlePage(query: requestedQuery, page: requestedPage,
-                                                       pageSize: ArticleListState.pageSize)
+                                                       pageSize: requestedPageSize, sort: requestedSort)
             guard !Task.isCancelled, store.revision == requestedRevision else { return }
-            state.apply(result, requestID: requestID, query: requestedQuery, page: requestedPage)
+            state.apply(result, requestID: requestID, query: requestedQuery, page: requestedPage,
+                        pageSize: requestedPageSize, sort: requestedSort)
         } catch {
             if !Task.isCancelled, state.loadID == requestID { store.report(error) }
         }
@@ -223,13 +295,38 @@ struct ArticleRow: View {
 
 struct ArticleReaderView: View {
     @Environment(LibraryStore.self) private var store
+    @FocusState private var findFocused: Bool
     let article: Article
+    private var reading: ArticleReadingState { store.articleReading }
 
     var body: some View {
         let _ = store.revision
         let marks = ((try? store.db.highlights(sourceId: article.sourceId)) ?? [])
             .compactMap { h in h.id.map { ReaderPage.Mark(id: $0, text: h.text) } }
-        ReaderWebView(article: article, marks: marks, store: store)
+        VStack(spacing: 0) {
+            if reading.showsFind {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("在正文中查找", text: Bindable(reading).query)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($findFocused)
+                        .onSubmit { reading.move(1) }
+                        .onExitCommand { reading.closeFind() }
+                    Text(reading.query.isEmpty ? "" : reading.matchCount == 0 ? "无匹配" : "\(reading.currentMatch) / \(reading.matchCount)")
+                        .font(.caption).monospacedDigit().frame(minWidth: 60)
+                    Button { reading.move(-1) } label: { Image(systemName: "chevron.up") }
+                        .help("上一处").disabled(reading.matchCount == 0)
+                    Button { reading.move(1) } label: { Image(systemName: "chevron.down") }
+                        .help("下一处").disabled(reading.matchCount == 0)
+                    Button { reading.closeFind() } label: { Image(systemName: "xmark") }
+                        .help("关闭查找")
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                Divider()
+            }
+            ReaderWebView(article: article, marks: marks, store: store,
+                          findQuery: reading.query, findRevision: reading.searchRevision)
+        }
             .navigationTitle(article.title)
             .navigationSubtitle(marks.isEmpty ? "选中文字后按 H 摘录" : "已摘录 \(marks.count) 条 · 选中文字后按 H 摘录")
             .toolbar {
@@ -242,6 +339,12 @@ struct ArticleReaderView: View {
                     .keyboardShortcut("[", modifiers: .command)
                 }
                 ToolbarItemGroup {
+                    Button {
+                        reading.showsFind = true
+                        findFocused = true
+                    } label: { Label("文内查找", systemImage: "magnifyingglass") }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .help("在正文中查找（⌘F）")
                     Button {
                         ReaderBridge.shared.sendSelection()
                     } label: {
@@ -288,6 +391,8 @@ struct ReaderWebView: NSViewRepresentable {
     let article: Article
     let marks: [ReaderPage.Mark]
     let store: LibraryStore
+    let findQuery: String
+    let findRevision: Int
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -305,22 +410,30 @@ struct ReaderWebView: NSViewRepresentable {
 
     func updateNSView(_ wv: WKWebView, context: Context) {
         let c = context.coordinator
+        let needsLoad = c.loadedArticleID != article.id || c.loadedContentHTML != article.contentHTML
+        if needsLoad, c.isLoaded { c.capturePosition(wv) }
         c.store = store
         c.article = article
         c.marks = marks
         ReaderBridge.shared.webView = wv
-        if c.loadedArticleID != article.id || c.loadedContentHTML != article.contentHTML {
+        if needsLoad {
             c.loadedArticleID = article.id
             c.loadedContentHTML = article.contentHTML
             c.isLoaded = false
             c.appliedMarks = nil
-            wv.loadHTMLString(ReaderPage.html(for: article), baseURL: URL(string: article.url))
-        } else if c.isLoaded, c.appliedMarks != marks {
-            c.applyMarks(wv)
+            c.session = UUID().uuidString
+            c.appliedQuery = nil
+            c.appliedSearchRevision = -1
+            c.navigation = wv.loadHTMLString(ReaderPage.html(for: article), baseURL: URL(string: article.url))
+        } else if c.isLoaded {
+            if c.appliedMarks != marks { c.applyMarks(wv) }
+            c.applyFind(wv)
         }
     }
 
     static func dismantleNSView(_ wv: WKWebView, coordinator: Coordinator) {
+        coordinator.capturePosition(wv)
+        wv.evaluateJavaScript("window.kgReader && window.kgReader.dispose();", completionHandler: nil)
         wv.configuration.userContentController.removeScriptMessageHandler(forName: "kg")
     }
 
@@ -333,15 +446,50 @@ struct ReaderWebView: NSViewRepresentable {
         var loadedArticleID: Int64?
         var loadedContentHTML: String?
         var isLoaded = false
+        var navigation: WKNavigation?
+        var session = UUID().uuidString
+        var appliedQuery: String?
+        var appliedSearchRevision = -1
 
         func applyMarks(_ wv: WKWebView) {
             appliedMarks = marks
-            wv.evaluateJavaScript(ReaderPage.applyScript(marks), completionHandler: nil)
+            wv.evaluateJavaScript(ReaderPage.applyScript(marks) + "window.kgReader && window.kgReader.refresh();", completionHandler: nil)
+        }
+
+        func applyFind(_ wv: WKWebView) {
+            guard let reading = store?.articleReading else { return }
+            guard appliedQuery != reading.query || appliedSearchRevision != reading.searchRevision else { return }
+            let direction = appliedQuery == reading.query ? reading.moveDirection : 0
+            appliedQuery = reading.query
+            appliedSearchRevision = reading.searchRevision
+            wv.evaluateJavaScript(ArticleReaderScript.find(reading.query, direction: direction), completionHandler: nil)
+        }
+
+        func capturePosition(_ wv: WKWebView) {
+            guard let reading = store?.articleReading, let id = article?.id else { return }
+            let capturedSession = session
+            wv.evaluateJavaScript("window.kgReader ? {session:window.kgReader.session,position:window.kgReader.snapshot()} : null") { result, _ in
+                guard let envelope = result as? [String: Any], envelope["session"] as? String == capturedSession,
+                      let value = envelope["position"] as? [String: Any], let position = Self.position(value) else { return }
+                MainActor.assumeIsolated { reading.save(position, for: id) }
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard let expected = self.navigation, navigation === expected else { return }
             isLoaded = true
             applyMarks(webView)
+            let installedSession = session
+            let position = store?.articleReading.position(for: article?.id)
+            webView.evaluateJavaScript(ArticleReaderScript.install(position: position, session: session)) { [weak self, weak webView] _, error in
+                guard error == nil, let self, let webView else { return }
+                MainActor.assumeIsolated {
+                    guard self.isLoaded, self.session == installedSession else { return }
+                    self.appliedQuery = nil
+                    self.appliedSearchRevision = -1
+                    self.applyFind(webView)
+                }
+            }
         }
 
         /// 正文里的链接用默认浏览器打开，阅读器本身不跳走
@@ -357,11 +505,22 @@ struct ReaderWebView: NSViewRepresentable {
             guard let body = message.body as? [String: Any], let type = body["type"] as? String,
                   let store, let article else { return }
             switch type {
+            case "readerPosition":
+                guard body["session"] as? String == session,
+                      let value = body["position"] as? [String: Any], let position = Self.position(value) else { return }
+                store.articleReading.save(position, for: article.id)
+            case "readerFind":
+                guard body["session"] as? String == session,
+                      body["query"] as? String == store.articleReading.query else { return }
+                store.articleReading.matchCount = max(0, (body["total"] as? NSNumber)?.intValue ?? 0)
+                store.articleReading.currentMatch = max(0, (body["current"] as? NSNumber)?.intValue ?? 0)
             case "highlight":
+                guard isLoaded else { return }
                 if let text = body["text"] as? String {
                     store.addHighlight(from: article, text: text)
                 }
             case "open":
+                guard isLoaded else { return }
                 if let id = (body["id"] as? NSNumber)?.int64Value,
                    let h = try? store.db.highlights(ids: [id]).first {
                     store.edit(h)
@@ -369,6 +528,12 @@ struct ReaderWebView: NSViewRepresentable {
             default:
                 break
             }
+        }
+
+        private static func position(_ body: [String: Any]) -> ArticleReadingPosition? {
+            guard let ratio = (body["ratio"] as? NSNumber)?.doubleValue, ratio.isFinite else { return nil }
+            return ArticleReadingPosition(ratio: ratio, anchor: body["anchor"] as? String ?? "",
+                                          anchorOffset: (body["anchorOffset"] as? NSNumber)?.doubleValue ?? 0)
         }
     }
 }

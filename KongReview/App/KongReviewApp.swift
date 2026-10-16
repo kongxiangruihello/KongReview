@@ -22,7 +22,12 @@ struct KongReviewApp: App {
             // 数据库打不开时不要静默丢数据：直接终止并给出原因
             fatalError("无法打开 KongReview 数据库：\(error)")
         }
-        let store = LibraryStore(db: db)
+        var draftStorage: EditorDraftPersistence?
+        var draftError: String?
+        do { draftStorage = try EditorDraftPersistence(directory: EditorDraftPersistence.defaultDirectory()) }
+        catch { draftError = "编辑草稿恢复暂不可用：" + error.localizedDescription }
+        let store = LibraryStore(db: db, draftPersistence: draftStorage, positionDefaults: .standard)
+        store.draftSaveError = draftError
         self.store = store
         QuickCaptureController.shared.store = store
     }

@@ -27,12 +27,15 @@ struct RichEditor: View {
     var onTab: ((Bool) -> Void)? = nil
     /// 1.3：外部控制焦点、全选
     var handle: RichEditorHandle? = nil
+    var formatting: CardFormattingState? = nil
+    var fieldName: String = ""
     @Environment(LibraryStore.self) private var store
 
     var body: some View {
         let rep = RichEditorRep(text: $text, mode: mode, font: font, placeholder: placeholder, toolbar: toolbar,
                                 autoHeight: autoHeight, focus: focus, slot: "rich-editor-" + slot,
-                                onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle, store: store)
+                                onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle,
+                                formatting: formatting, fieldName: fieldName, store: store)
         if autoHeight {
             rep.frame(height: max(minHeight, WebHeights.shared.values["rich-editor-" + slot] ?? minHeight))
         } else {
@@ -76,6 +79,8 @@ struct RichEditorRep: NSViewRepresentable {
     let onCancel: (() -> Void)?
     let onTab: ((Bool) -> Void)?
     let handle: RichEditorHandle?
+    let formatting: CardFormattingState?
+    let fieldName: String
     let store: LibraryStore
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -85,9 +90,14 @@ struct RichEditorRep: NSViewRepresentable {
         c.parent = self
         let config = WKWebViewConfiguration()
         config.userContentController.add(WeakScriptHandler(c), name: "krEditor")
+        if formatting != nil {
+            config.userContentController.addUserScript(WKUserScript(source: CardFormattingScript.source,
+                injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
         LocalSchemeHandler.register(on: config, store: store)
         let wv = EditorWebView(frame: .zero, configuration: config)
         c.webView = wv
+        formatting?.attach(slot: slot, name: fieldName, webView: wv)
         wv.passScroll = autoHeight
         // 1.8：同一个位置上次留下的高度（可能是另一张卡的长内容）不沿用，等网页量好再定
         if autoHeight {
@@ -111,6 +121,7 @@ struct RichEditorRep: NSViewRepresentable {
     func updateNSView(_ wv: EditorWebView, context: Context) {
         let c = context.coordinator
         c.parent = self
+        formatting?.attach(slot: slot, name: fieldName, webView: wv)
         // 外部换了内容（如打开另一条摘录）：整体替换编辑区；自己刚发出的改动不重复载入
         if text != c.lastValue {
             c.lastValue = text
@@ -122,6 +133,7 @@ struct RichEditorRep: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ wv: EditorWebView, coordinator: Coordinator) {
+        if let parent = coordinator.parent { parent.formatting?.detach(slot: parent.slot, webView: wv) }
         wv.configuration.userContentController.removeScriptMessageHandler(forName: "krEditor")
     }
 
@@ -148,6 +160,7 @@ struct RichEditorRep: NSViewRepresentable {
             if let js = pending { webView.evaluateJavaScript(js, completionHandler: nil); pending = nil }
             if wantsFocus {
                 wantsFocus = false
+                if let parent { parent.formatting?.activate(parent.slot) }
                 webView.window?.makeFirstResponder(webView)
                 webView.evaluateJavaScript(pendingSelectAll ? "krSelectAll();" : "krFocus();", completionHandler: nil)
                 pendingSelectAll = false
@@ -164,6 +177,13 @@ struct RichEditorRep: NSViewRepresentable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any], let type = body["type"] as? String, let p = parent else { return }
             switch type {
+            case "focus":
+                p.formatting?.activate(p.slot)
+            case "external-link":
+                p.formatting?.activate(p.slot)
+                p.formatting?.linkURL = ""
+                p.formatting?.linkError = nil
+                p.formatting?.showsLink = true
             case "ready":
                 if let webView { editorReady(in: webView) }
             case "change":

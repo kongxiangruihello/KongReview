@@ -16,7 +16,7 @@ struct ContentView: View {
             detail
         }
         .sheet(item: $store.editorDraft) { _ in
-            HighlightEditorView()
+            HighlightEditorView().modifier(EditorDraftCloseConfirmation(kind: .highlight))
         }
         .sheet(item: $store.editingSource) { _ in
             SourceEditorView()
@@ -85,12 +85,13 @@ struct ContentView: View {
             CardImportPreviewView()
         }
         .sheet(item: $store.cardEditor) { _ in
-            CardEditorView()
+            CardEditorView().modifier(EditorDraftCloseConfirmation(kind: .card))
         }
         .sheet(item: $store.articleSourceDraft) { _ in
             ArticleSourceEditorView()
         }
         .modifier(CardSheets())
+        .modifier(EditorDraftRecoverySheets())
         .modifier(TagSheets())
         .modifier(WritingSheets())
         .modifier(NotebookSheets())
@@ -406,6 +407,7 @@ struct CardSheets: ViewModifier {
     func body(content: Content) -> some View {
         @Bindable var store = store
         return content
+            .sheet(item: $store.duplicateCardReview) { _ in CardDuplicateReviewView() }
             .sheet(item: $store.deckOptionsEditor) { _ in
                 DeckOptionsView()
             }

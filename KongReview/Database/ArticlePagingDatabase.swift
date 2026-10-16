@@ -10,9 +10,29 @@ struct ArticlePage: Sendable {
     var highlightCounts: [Int64: Int]
 }
 
+enum ArticleSort: String, Codable, CaseIterable, Sendable {
+    case savedNewest, savedOldest, title, unreadFirst
+    var label: String {
+        switch self {
+        case .savedNewest: return "最近存档"
+        case .savedOldest: return "最早存档"
+        case .title: return "标题"
+        case .unreadFirst: return "未读优先"
+        }
+    }
+    var orderSQL: String {
+        switch self {
+        case .savedNewest: return "savedAt DESC, id DESC"
+        case .savedOldest: return "savedAt ASC, id ASC"
+        case .title: return "title COLLATE NOCASE ASC, id ASC"
+        case .unreadFirst: return "isRead ASC, savedAt DESC, id DESC"
+        }
+    }
+}
+
 extension AppDatabase {
     /// 计数、有效页码、元数据与本页摘录数使用同一数据库快照。
-    func articlePage(query: String, page: Int, pageSize: Int = 200) async throws -> ArticlePage {
+    func articlePage(query: String, page: Int, pageSize: Int = 200, sort: ArticleSort = .savedNewest) async throws -> ArticlePage {
         try await writer.read { db in
             let size = max(1, pageSize)
             let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,7 +47,7 @@ extension AppDatabase {
                 SELECT id, sourceId, url, title, author, siteName, publishedAt, excerpt,
                        '' AS contentHTML, '' AS contentText, wordCount, savedAt, lastOpenedAt, isRead
                 FROM article
-                """ + filter + " ORDER BY savedAt DESC, id DESC LIMIT ? OFFSET ?",
+                """ + filter + " ORDER BY " + sort.orderSQL + " LIMIT ? OFFSET ?",
                 arguments: StatementArguments(args + [size, (current - 1) * size]))
 
             let sourceIDs = Array(Set(items.compactMap(\.sourceId)))

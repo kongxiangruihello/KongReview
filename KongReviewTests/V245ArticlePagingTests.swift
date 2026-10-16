@@ -88,7 +88,10 @@ final class V245ArticlePagingTests: XCTestCase {
 
     @MainActor
     func testSearchResetsPageAndRejectsOlderRequests() {
-        let state = ArticleListState()
+        let suite = "V245ArticlePagingTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = ArticleListState(persistence: ListPositionPersistence(defaults: defaults))
         state.total = 451
         state.page = 3
         state.pageInput = "3"

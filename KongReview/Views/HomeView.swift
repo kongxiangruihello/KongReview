@@ -8,6 +8,9 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
+            DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
+                                onOpen: { store.showsDraftRecovery = true })
+                .padding(.horizontal, 24)
             DailyReviewSummaryCard(title: store.todayReviewIsComplete ? "今日回顾完成" : "今日功课") {
                 HomeActionsView()
             }

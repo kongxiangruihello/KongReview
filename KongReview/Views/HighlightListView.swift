@@ -26,6 +26,23 @@ struct HighlightListView: View {
 
     private var state: ListState { store.list }
 
+    private var positionKey: String {
+        if let saved { return "highlights.saved." + saved.id }
+        if filter.deletedOnly { return "highlights.trash" }
+        if filter.favoritesOnly { return "highlights.favorites" }
+        if filter.unsortedOnly { return "highlights.unsorted" }
+        if let id = filter.sourceId { return "highlights.source.\(id)" }
+        if let tag = filter.tag { return "highlights.tag." + tag }
+        if filter.masteryOnly { return "highlights.mastery" }
+        return "highlights.all"
+    }
+
+    private func activateList() {
+        let initial = saved.map { HighlightListPosition(query: $0.text, extra: $0.filter, showFilters: true) }
+        state.activate(key: positionKey, initial: initial)
+        state.extraOwner = title
+    }
+
     private var query: HighlightQuery {
         let x = state.extra
         return HighlightQuery(
@@ -48,6 +65,7 @@ struct HighlightListView: View {
         var revision: Int
         var limit: Int
         var page: Int
+        var pageSize: Int
     }
 
     var body: some View {
@@ -63,22 +81,7 @@ struct HighlightListView: View {
             }
             listContent
         }
-        .task(id: title) {
-            // 换了列表：已存搜索带入它的条件，其他列表清空上一个列表的组合筛选
-            if state.extraOwner != title {
-                state.page = 1
-                state.pageInput = "1"
-                state.selection = []
-            }
-            if let saved {
-                state.query = saved.text
-                state.extra = saved.filter
-                state.showFilters = true
-            } else if state.extraOwner != title {
-                state.extra = ListFilter()
-            }
-            state.extraOwner = title
-        }
+        .onDisappear { if state.positionKey == positionKey { state.persistPosition() } }
         .alert("保存当前搜索", isPresented: Binding(
             get: { store.savingSearchName != nil },
             set: { if !$0 { store.savingSearchName = nil } }
@@ -108,33 +111,47 @@ struct HighlightListView: View {
                     }
                 }
             } else {
-                List(selection: Bindable(store.list).selection) {
-                    ForEach(state.items, id: \.id) { h in
-                        HighlightRow(highlight: h, source: store.source(for: h), terms: terms)
-                            .tag(h.id ?? -1)
-                            .onAppear {
-                                if !usesPages, h.id == state.items.last?.id, state.hasMore { state.limit += ListState.pageSize }
-                            }
-                    }
-                    if !usesPages && state.hasMore {
-                        HStack {
-                            Spacer()
-                            Button("加载更多（已显示 \(state.items.count) / \(state.total)）") {
-                                state.limit += ListState.pageSize
-                            }
-                            .buttonStyle(.link)
-                            .handCursor()
-                            Spacer()
+                ScrollViewReader { proxy in
+                    List(selection: Bindable(store.list).selection) {
+                        ForEach(state.items, id: \.id) { h in
+                            HighlightRow(highlight: h, source: store.source(for: h), terms: terms)
+                                .tag(h.id ?? -1)
+                                .id(h.id ?? -1)
+                                .onAppear {
+                                    if !usesPages, h.id == state.items.last?.id, state.hasMore { state.limit += state.pageSize }
+                                }
                         }
-                        .padding(.vertical, 8)
+                        if !usesPages && state.hasMore {
+                            HStack {
+                                Spacer()
+                                Button("加载更多（已显示 \(state.items.count) / \(state.total)）") {
+                                    state.limit += state.pageSize
+                                }
+                                .buttonStyle(.link)
+                                .handCursor()
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                        }
                     }
-                }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
-                .contextMenu(forSelectionType: Int64.self) { ids in
-                    contextItems(Array(ids))
-                } primaryAction: { ids in
-                    if ids.count == 1, let id = ids.first, let h = state.items.first(where: { $0.id == id }) {
-                        store.edit(h)
+                    .listStyle(.inset(alternatesRowBackgrounds: true))
+                    .contextMenu(forSelectionType: Int64.self) { ids in
+                        contextItems(Array(ids))
+                    } primaryAction: { ids in
+                        if ids.count == 1, let id = ids.first, let h = state.items.first(where: { $0.id == id }) {
+                            state.rememberEditing(id)
+                            store.edit(h)
+                        }
+                    }
+                    .onAppear {
+                        if let id = state.anchorID, state.items.contains(where: { $0.id == id }) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                    .onChange(of: state.items) { _, _ in
+                        guard state.positionKey == positionKey, let id = state.anchorID,
+                              state.items.contains(where: { $0.id == id }) else { return }
+                        proxy.scrollTo(id, anchor: .center)
                     }
                 }
             }
@@ -146,7 +163,10 @@ struct HighlightListView: View {
         .navigationTitle(title)
         .navigationSubtitle(state.selection.isEmpty ? "共 \(state.total) 条" : "共 \(state.total) 条 · 已选 \(state.selection.count) 条")
         .searchable(text: Bindable(store.list).query, prompt: "搜索原文、译文、按语")
-        .task(id: LoadKey(title: title, query: query, revision: store.revision, limit: state.limit, page: state.page)) {
+        .task(id: LoadKey(title: positionKey, query: query, revision: store.revision, limit: state.limit,
+                          page: state.page, pageSize: state.pageSize)) {
+            guard !Task.isCancelled else { return }
+            if state.positionKey != positionKey { activateList() }
             await load()
         }
         .confirmationDialog(
@@ -232,6 +252,11 @@ struct HighlightListView: View {
             Text(pageRangeLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Picker("每页", selection: Binding(get: { state.pageSize }, set: { state.changePageSize($0) })) {
+                ForEach(ListPositionPersistence.pageSizes, id: \.self) { Text("\($0) 条").tag($0) }
+            }
+            .fixedSize()
+            .accessibilityLabel("每页摘录数量")
             Spacer()
             Button { goToPage(state.page - 1) } label: {
                 Label("上一页", systemImage: "chevron.left")
@@ -258,9 +283,9 @@ struct HighlightListView: View {
     }
 
     private var pageRangeLabel: String {
-        guard state.total > 0 else { return "共 0 条 · 每页 \(ListState.pageSize) 条" }
-        let first = (state.page - 1) * ListState.pageSize + 1
-        let last = min(state.page * ListState.pageSize, state.total)
+        guard state.total > 0 else { return "共 0 条 · 每页 \(state.pageSize) 条" }
+        let first = (state.page - 1) * state.pageSize + 1
+        let last = min(state.page * state.pageSize, state.total)
         return "第 \(first)–\(last) 条，共 \(state.total) 条"
     }
 
@@ -273,6 +298,7 @@ struct HighlightListView: View {
         state.items = []
         state.isLoading = true
         state.selection = []
+        state.anchorID = nil
         state.page = target
     }
 
@@ -282,12 +308,15 @@ struct HighlightListView: View {
 
     @MainActor
     private func load() async {
+        guard !Task.isCancelled, state.positionKey == positionKey else { return }
         let requestedQuery = query
         let requestedRevision = store.revision
+        let requestedOwner = positionKey
+        let requestedSize = state.pageSize
         let requestID = UUID()
         state.loadID = requestID
         do {
-            if state.lastQuery != requestedQuery {
+            if let previous = state.lastQuery, previous != requestedQuery {
                 // 换了筛选条件：回到第一页，清空选择
                 state.lastQuery = requestedQuery
                 state.selection = []
@@ -298,18 +327,20 @@ struct HighlightListView: View {
                         state.page = 1
                         return
                     }
-                } else if state.limit != ListState.pageSize {
-                    state.limit = ListState.pageSize
+                } else if state.limit != state.pageSize {
+                    state.limit = state.pageSize
                     return   // limit 变化会再次触发 load
                 }
             }
+            state.lastQuery = requestedQuery
             let requestedPage = state.page
-            let requestedLimit = usesPages ? ListState.pageSize : state.limit
+            let requestedLimit = usesPages ? requestedSize : state.limit
             state.isLoading = true
             defer { if state.loadID == requestID { state.isLoading = false } }
             let result = try await store.db.highlightPage(requestedQuery, limit: requestedLimit,
-                                                         offset: usesPages ? (requestedPage - 1) * ListState.pageSize : 0)
+                                                         offset: usesPages ? (requestedPage - 1) * requestedSize : 0)
             guard !Task.isCancelled, state.loadID == requestID,
+                  state.positionKey == requestedOwner, state.pageSize == requestedSize,
                   state.page == requestedPage, query == requestedQuery,
                   store.revision == requestedRevision else { return }
             state.total = result.total
@@ -332,6 +363,7 @@ struct HighlightListView: View {
                 state.pendingSelection = nil
             }
             state.selection = state.selection.filter { id in state.items.contains { $0.id == id } }
+            state.persistPosition()
         } catch {
             if !Task.isCancelled, state.loadID == requestID { store.report(error) }
         }

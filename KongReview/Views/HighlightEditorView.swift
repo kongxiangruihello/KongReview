@@ -4,7 +4,6 @@ import KongReviewCore
 /// 新建 / 编辑摘录。⌘↩ 保存，Esc 取消。
 struct HighlightEditorView: View {
     @Environment(LibraryStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
 
     /// 直接读写 store.editorDraft（不用 @State，见 ViewState.swift）
     private var draftBinding: Binding<HighlightDraft> {
@@ -17,6 +16,9 @@ struct HighlightEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let notice = store.draftRecoveryNotice {
+                Label(notice, systemImage: "info.circle").font(.callout).foregroundStyle(.orange).padding()
+            }
             Form {
                 Section {
                     RichEditor(text: draftBinding.highlight.text, font: .highlight, placeholder: "摘录原文",
@@ -111,6 +113,9 @@ struct HighlightEditorView: View {
             .id(store.editorDraft?.id)
 
             HStack {
+                Text(store.draftSaveError ?? (store.draftPersistence != nil ? "草稿自动保存在本机" : "点击保存后更新正式内容"))
+                    .font(.caption)
+                    .foregroundStyle(store.draftSaveError == nil ? Color.secondary : Color.red)
                 if !draft.isNew {
                     Text("创建于 \(draft.highlight.createdAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption)
@@ -136,8 +141,7 @@ struct HighlightEditorView: View {
     }
 
     private func cancel() {
-        store.editorDraft = nil
-        dismiss()
+        store.requestCloseHighlightEditor()
     }
 
     /// 编辑器里按 ⌘↩

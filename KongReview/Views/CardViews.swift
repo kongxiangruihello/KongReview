@@ -181,6 +181,8 @@ struct CardsHomeView: View {
                     Label("卡片模板", systemImage: "rectangle.split.2x1")
                 }
                 .help("多字段卡片：设置正面、背面各显示哪些字段，哪些折叠")
+                Button { store.findDuplicateCards() } label: { Label("查重", systemImage: "square.on.square") }
+                    .help("比较已有的重复记忆卡，选择保留的卡片和学习进度")
             }
         }
         .alert("重命名牌组", isPresented: Binding(
@@ -533,6 +535,7 @@ struct CardBrowseView: View {
         var deck: String
         var query: String
         var page: Int
+        var pageSize: Int
         var revision: Int
     }
 
@@ -543,9 +546,7 @@ struct CardBrowseView: View {
         return VStack(spacing: 0) {
             HStack {
                 Button {
-                    study.browsingDeck = nil
-                    study.browseQuery = ""
-                    study.browseSelection = []
+                    store.openCardsHome()
                 } label: { Label("牌组", systemImage: "chevron.left") }
                 TextField("搜索正面、背面、标签", text: Bindable(store.study).browseQuery)
                     .textFieldStyle(.roundedBorder)
@@ -563,6 +564,7 @@ struct CardBrowseView: View {
                 ContentUnavailableView(study.browseQuery.isEmpty ? "这个牌组还没有卡片" : "没有找到记忆卡",
                                        systemImage: "rectangle.on.rectangle")
             } else {
+            ScrollViewReader { proxy in
             List(list, id: \.rowID, selection: Bindable(store.study).browseSelection) { c in
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -581,19 +583,25 @@ struct CardBrowseView: View {
                     Text(stateLabel(c)).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .trailing)
                 }
                 .padding(.vertical, 2)
+                .id(c.rowID)
                 .contextMenu { menu(for: study.browseSelection.contains(c.rowID) ? selected : [c.rowID], deckNames: deckNames) }
                 .onTapGesture(count: 2) { store.editCard(c) }
             }
             .id("\(deck)|\(study.browsePage)|\(study.browseLoadedQuery)")
             .disabled(study.browseIsLoading)
+            .onAppear { restoreBrowseAnchor(proxy) }
+            .onChange(of: study.browseItems) { _, _ in restoreBrowseAnchor(proxy) }
+            }
             }
             Divider()
             pageControls
         }
         .navigationTitle("浏览 · \(deck)")
-        .task(id: LoadKey(deck: deck, query: study.browseQuery, page: study.browsePage, revision: store.revision)) {
+        .task(id: LoadKey(deck: deck, query: study.browseQuery, page: study.browsePage,
+                          pageSize: study.browsePageSize, revision: store.revision)) {
             await loadPage()
         }
+        .onDisappear { study.persistBrowsePosition() }
         .toolbar {
             ToolbarItemGroup {
                 Button { store.newCard(deck: deck) } label: { Label("新建卡片", systemImage: "plus") }
@@ -629,8 +637,11 @@ struct CardBrowseView: View {
     private var pageStatus: some View {
         HStack(spacing: 8) {
             if study.browseIsLoading { ProgressView().controlSize(.small) }
-            Text(study.browseTotal == 0 ? "共 0 张 · 每页 \(StudyState.browsePageSize) 张" :
-                "第 \((study.browsePage - 1) * StudyState.browsePageSize + 1)–\(min(study.browsePage * StudyState.browsePageSize, study.browseTotal)) 张，共 \(study.browseTotal) 张")
+            Picker("每页", selection: Binding(get: { study.browsePageSize }, set: { study.changeBrowsePageSize($0) })) {
+                ForEach(ListPositionPersistence.pageSizes, id: \.self) { Text("每页 \($0) 张").tag($0) }
+            }.labelsHidden().frame(width: 115)
+            Text(study.browseTotal == 0 ? "共 0 张" :
+                "第 \((study.browsePage - 1) * study.browsePageSize + 1)–\(min(study.browsePage * study.browsePageSize, study.browseTotal)) 张，共 \(study.browseTotal) 张")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize()
         }
@@ -663,16 +674,27 @@ struct CardBrowseView: View {
         goToPage(Int(study.browsePageInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? study.browsePage)
     }
 
+    private func restoreBrowseAnchor(_ proxy: ScrollViewProxy) {
+        if let anchor = study.browseAnchorID, study.browseItems.contains(where: { $0.id == anchor }) {
+            DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .center) }
+        }
+    }
+
     private func goToPage(_ page: Int) {
         let target = min(max(1, page), study.browsePageCount)
         study.browsePageInput = String(target)
         guard target != study.browsePage else { return }
+        study.browseLoadID = UUID()
         study.browseSelection = []
+        study.browseItems = []
+        study.browseAnchorID = nil
+        study.browseIsLoading = true
         study.browsePage = target
     }
 
     @MainActor
     private func loadPage() async {
+        guard !Task.isCancelled, study.browsingDeck == deck else { return }
         let requestID = UUID()
         let query = study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         study.browseLoadID = requestID
@@ -689,24 +711,30 @@ struct CardBrowseView: View {
             }
         }
         let page = study.browsePage
+        let size = study.browsePageSize
+        let revision = store.revision
         study.browseIsLoading = true
         defer { if study.browseLoadID == requestID { study.browseIsLoading = false } }
         do {
-            let result = try await store.db.cardPage(deck: deck, query: query, limit: StudyState.browsePageSize,
-                                                    offset: (page - 1) * StudyState.browsePageSize)
-            guard !Task.isCancelled, study.browseLoadID == requestID else { return }
+            let result = try await store.db.cardPage(deck: deck, query: query, limit: size,
+                                                    offset: (page - 1) * size)
+            guard !Task.isCancelled, study.browseLoadID == requestID, study.browsingDeck == deck,
+                  study.browsePage == page, study.browsePageSize == size, store.revision == revision,
+                  study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
             study.browseTotal = result.total
             if page > study.browsePageCount {
                 study.browsePage = study.browsePageCount
                 study.browsePageInput = String(study.browsePage)
                 study.browseItems = []
                 study.browseSelection = []
+                study.browseAnchorID = nil
                 return
             }
             study.browseItems = result.items
             study.browsePageInput = String(page)
             let visible = Set(result.items.compactMap(\.id))
             study.browseSelection.formIntersection(visible)
+            study.persistBrowsePosition()
         } catch {
             if !Task.isCancelled, study.browseLoadID == requestID { store.report(error) }
         }
@@ -783,6 +811,11 @@ struct CardEditorView: View {
         let decks = (try? store.db.deckNames()) ?? []
         return VStack(alignment: .leading, spacing: 10) {
             Text(draft?.isNew == true ? "新建记忆卡" : "编辑记忆卡").font(.title2.bold())
+            if let notice = store.draftRecoveryNotice {
+                Label(notice, systemImage: "info.circle").font(.callout).foregroundStyle(.orange)
+            }
+            if let error = store.draftSaveError { Text(error).font(.caption).foregroundStyle(.red) }
+            else if store.draftPersistence != nil { Text("草稿自动保存在本机").font(.caption).foregroundStyle(.secondary) }
             HStack {
                 Text("牌组")
                 TextField("牌组", text: binding(\.card.deck, ""))
@@ -797,6 +830,7 @@ struct CardEditorView: View {
                 TextField("用逗号或空格分隔", text: binding(\.tagsText, ""))
                     .textFieldStyle(.roundedBorder)
             }
+            CardFormattingToolbar(state: store.cardFormatting)
             // 1.2：所见即所得编辑（去掉右侧预览）；背面可加多个自定义栏目
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
@@ -807,20 +841,21 @@ struct CardEditorView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         ForEach(Array(c.fields.indices), id: \.self) { i in
                             Text(i < names.count ? names[i] : "字段\(i + 1)").font(.headline)
-                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: true, autoHeight: true,
-                                       slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel)
+                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: false, autoHeight: true,
+                                       slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel,
+                                       formatting: store.cardFormatting, fieldName: i < names.count ? names[i] : "字段\(i + 1)")
                                 .richEditorFrame()
                         }
                     } else {
                         Text("正面").font(.headline)
                         RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: "问题、字词或章句",
-                                   autoHeight: true, focus: draft?.isNew == true, slot: "card-front",
-                                   onSubmit: submit, onCancel: cancel)
+                                   toolbar: false, autoHeight: true, focus: draft?.isNew == true, slot: "card-front",
+                                   onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "正面")
                             .richEditorFrame()
                         Text("背面").font(.headline).padding(.top, 6)
                         RichEditor(text: binding(\.card.back, ""), mode: .card, placeholder: "答案",
-                                   autoHeight: true, slot: "card-back",
-                                   onSubmit: submit, onCancel: cancel)
+                                   toolbar: false, autoHeight: true, slot: "card-back",
+                                   onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "背面")
                             .richEditorFrame()
                         sectionsEditor
                     }
@@ -849,7 +884,7 @@ struct CardEditorView: View {
                     }
                 }
                 Spacer()
-                Button("取消", role: .cancel) { store.cardEditor = nil }
+                Button("取消", role: .cancel) { store.requestCloseCardEditor() }
                     .keyboardShortcut(.cancelAction)
                 Button("保存") { store.commitCardEditor() }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -895,8 +930,9 @@ struct CardEditorView: View {
                         .buttonStyle(.borderless).help("删除这个栏目")
                 }
                 RichEditor(text: sectionBinding(sec.id, \.text, ""), mode: .card, placeholder: "栏目内容",
-                           toolbar: true, autoHeight: true, slot: "card-section-" + sec.id,
-                           onSubmit: submit, onCancel: cancel)
+                           toolbar: false, autoHeight: true, slot: "card-section-" + sec.id,
+                           onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting,
+                           fieldName: sec.name.isEmpty ? "背面栏目" : sec.name)
                     .richEditorFrame()
             }
             .padding(.top, 8)
@@ -957,7 +993,7 @@ struct CardEditorView: View {
         store.commitCardEditor()
     }
 
-    private func cancel() { store.cardEditor = nil }
+    private func cancel() { store.requestCloseCardEditor() }
 }
 
 // MARK: - Anki 导入预览

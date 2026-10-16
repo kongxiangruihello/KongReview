@@ -172,33 +172,84 @@ final class StudyState {
     var current: Card?
     var showingAnswer = false
     var finished = false
-    var browseQuery = ""
+    private let browsePersistence: ListPositionPersistence
+    private var restoringBrowsePosition = false
+    var browseQuery = "" {
+        didSet { if !restoringBrowsePosition, browseQuery != oldValue { resetBrowsePage(); persistBrowsePosition() } }
+    }
     var browseSelection: Set<Int64> = []
     var browseItems: [Card] = []
     var browseTotal = 0
-    var browsePage = 1
+    var browsePage = 1 { didSet { persistBrowsePosition() } }
     var browsePageInput = "1"
     var browseIsLoading = false
     var browseLoadID = UUID()
     var browseOwnerDeck: String?
     var browseLoadedQuery = ""
     static let browsePageSize = 200
-    var browsePageCount: Int { max(1, (browseTotal + Self.browsePageSize - 1) / Self.browsePageSize) }
+    var browsePageSize = 200 {
+        didSet { if !restoringBrowsePosition, browsePageSize != oldValue { resetBrowsePage(); persistBrowsePosition() } }
+    }
+    var browseAnchorID: Int64? { didSet { persistBrowsePosition() } }
+    var browsePageCount: Int { max(1, (browseTotal + browsePageSize - 1) / browsePageSize) }
+
+    init(defaults: UserDefaults? = .standard) {
+        browsePersistence = ListPositionPersistence(defaults: defaults)
+    }
 
     func openCardBrowser(_ deck: String) {
+        persistBrowsePosition()
+        restoringBrowsePosition = true
         self.deck = nil
         notebookId = nil
         browseLoadID = UUID()
-        browseQuery = ""
         browseSelection = []
         browseItems = []
         browseTotal = 0
+        browseIsLoading = false
+        let saved = browsePersistence.load(CardBrowsePosition.self, for: "cards.deck." + deck) ?? CardBrowsePosition()
+        browseQuery = saved.query
+        browsePageSize = ListPositionPersistence.normalizedPageSize(saved.pageSize)
+        browsePage = max(1, saved.page)
+        browsePageInput = String(browsePage)
+        browseAnchorID = saved.anchorID
+        // 首次载入不能把恢复的页码当作条件变化而归到第一页。
+        browseOwnerDeck = deck
+        browseLoadedQuery = saved.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        browsingDeck = deck
+        restoringBrowsePosition = false
+    }
+
+    func persistBrowsePosition() {
+        guard !restoringBrowsePosition, let owner = browseOwnerDeck else { return }
+        browsePersistence.save(CardBrowsePosition(query: browseQuery, page: max(1, browsePage),
+            pageSize: ListPositionPersistence.normalizedPageSize(browsePageSize), anchorID: browseAnchorID),
+            for: "cards.deck." + owner)
+    }
+
+    /// 离开浏览页时先保存，再解除归属；后续清理临时界面状态不会覆盖已记住的位置。
+    func clearBrowsePositionOwner() {
+        persistBrowsePosition()
+        browseOwnerDeck = nil
+    }
+
+    func changeBrowsePageSize(_ size: Int) {
+        browsePageSize = ListPositionPersistence.normalizedPageSize(size)
+    }
+
+    func rememberBrowsingCard(_ id: Int64?) {
+        guard let id, browseItems.contains(where: { $0.id == id }) else { return }
+        browseAnchorID = id
+    }
+
+    private func resetBrowsePage() {
+        browseLoadID = UUID()
+        browseSelection = []
+        browseItems = []
+        browseAnchorID = nil
         browsePage = 1
         browsePageInput = "1"
-        browseIsLoading = false
-        browseOwnerDeck = nil
-        browseLoadedQuery = ""
-        browsingDeck = deck
+        browseIsLoading = true
     }
     /// 最近用过的牌组（新建卡片时默认放这里）
     var lastDeck: String?
@@ -216,7 +267,7 @@ final class StudyState {
 
 /// 记忆卡编辑面板的草稿
 struct CardDraft: Identifiable {
-    let id = UUID()
+    var id = UUID()
     var card: Card
     var tagsText: String = ""
     var error: String?
@@ -313,37 +364,99 @@ struct ArticleSourceDraft: Identifiable {
 @MainActor
 @Observable
 final class ListState {
-    var query = ""
+    private let persistence: ListPositionPersistence
+    private var restoringPosition = false
+    private(set) var positionKey: String?
+    var query = "" {
+        didSet { if !restoringPosition, query != oldValue { resetForCriteriaChange(); persistPosition() } }
+    }
     var items: [Highlight] = []
     /// 符合当前筛选条件的总数
     var total = 0
-    /// 出处、标签等列表逐步加载时的条数上限，每次增加 pageSize 条。
-    var limit = ListState.pageSize
-    /// 全部摘录、未归类、收藏与最近删除的明确分页（从 1 开始）。
-    var page = 1
+    /// 出处、标签等列表逐步加载时的条数上限。
+    var limit = ListState.pageSize { didSet { persistPosition() } }
+    var page = 1 { didSet { persistPosition() } }
     var pageInput = "1"
+    var pageSize = 200 {
+        didSet { if !restoringPosition, pageSize != oldValue { resetForCriteriaChange(); persistPosition() } }
+    }
     var isLoading = false
     var loadID = UUID()
-    var pageCount: Int { max(1, (total + Self.pageSize - 1) / Self.pageSize) }
-    /// 多选的摘录 id
-    var selection: Set<Int64> = []
-    /// 1.7：列表按新条件载入后再选中的摘录（出处书页“按页码…→在列表中选中”）
+    var pageCount: Int { max(1, (total + pageSize - 1) / pageSize) }
+    /// 多选仅限当前页；定位项另存，恢复位置不会恢复批量操作选择。
+    var selection: Set<Int64> = [] {
+        didSet { if selection.count == 1, let id = selection.first { rememberEditing(id) } }
+    }
+    var anchorID: Int64? { didSet { persistPosition() } }
     var pendingSelection: Set<Int64>?
-    /// 上一次加载用的筛选条件（变化时回到第一页）
     var lastQuery: HighlightQuery?
-    /// 组合筛选（出处、多个标签、日期、只看收藏）
-    var extra = ListFilter()
-    /// 筛选条是否展开
-    var showFilters = false
-    /// 筛选条件属于哪个列表（切换列表时清空）
+    var extra = ListFilter() {
+        didSet { if !restoringPosition, extra != oldValue { resetForCriteriaChange(); persistPosition() } }
+    }
+    var showFilters = false { didSet { persistPosition() } }
     var extraOwner = ""
-    /// 1.6：出处书页按页码排序（否则按录入时间，新的在前）
-    var sourceByPage: Bool = UserDefaults.standard.object(forKey: "list.sourceByPage") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(sourceByPage, forKey: "list.sourceByPage") }
+    /// 出处列表分别记住书页或录入时间排序。
+    var sourceByPage = true {
+        didSet { if !restoringPosition, sourceByPage != oldValue { resetForCriteriaChange(); persistPosition() } }
     }
 
     static let pageSize = 200
     var hasMore: Bool { items.count < total }
+
+    init(defaults: UserDefaults? = .standard) {
+        persistence = ListPositionPersistence(defaults: defaults)
+    }
+
+    func activate(key: String, initial: HighlightListPosition? = nil) {
+        guard positionKey != key else { return }
+        persistPosition()
+        restoringPosition = true
+        let saved = persistence.load(HighlightListPosition.self, for: key) ?? initial ?? HighlightListPosition()
+        positionKey = key
+        loadID = UUID()
+        query = saved.query
+        extra = saved.extra
+        showFilters = saved.showFilters
+        pageSize = ListPositionPersistence.normalizedPageSize(saved.pageSize)
+        page = max(1, saved.page)
+        pageInput = String(page)
+        limit = max(pageSize, saved.limit)
+        sourceByPage = saved.sourceByPage
+        anchorID = saved.anchorID
+        selection = []
+        items = []
+        total = 0
+        lastQuery = nil
+        isLoading = true
+        restoringPosition = false
+    }
+
+    func persistPosition() {
+        guard !restoringPosition, let key = positionKey else { return }
+        persistence.save(HighlightListPosition(query: query, extra: extra, showFilters: showFilters,
+            page: max(1, page), pageSize: ListPositionPersistence.normalizedPageSize(pageSize),
+            limit: limit, sourceByPage: sourceByPage, anchorID: anchorID), for: key)
+    }
+
+    func changePageSize(_ size: Int) {
+        pageSize = ListPositionPersistence.normalizedPageSize(size)
+    }
+
+    func rememberEditing(_ id: Int64?) {
+        guard let id, items.contains(where: { $0.id == id }) else { return }
+        anchorID = id
+    }
+
+    private func resetForCriteriaChange() {
+        loadID = UUID()
+        selection = []
+        items = []
+        anchorID = nil
+        page = 1
+        pageInput = "1"
+        limit = pageSize
+        isLoading = true
+    }
 }
 
 /// 出处列表的排序方式（侧边栏）
