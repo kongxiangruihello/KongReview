@@ -5,9 +5,6 @@ import KongReviewCore
 /// 回顾统计：连续天数、最近 30 天每天回顾的摘录与记忆卡、记忆卡正确率、库存数字
 struct StatsView: View {
     @Environment(LibraryStore.self) private var store
-    /// 首页沿用全部统计，在同一个滚动区域末尾显示今天的入口。
-    var showsHomeActions = false
-
     private struct Bar: Identifiable {
         var day: Date
         var kind: String
@@ -80,10 +77,6 @@ struct StatsView: View {
 
                 Text("统计从 0.7 版开始记录：每日回顾里“下一条 / 收藏 / 弃置 / 做成记忆卡”算回顾一条摘录；记忆卡每评一次分算一次。")
                     .font(.caption).foregroundStyle(.secondary)
-
-                if showsHomeActions {
-                    HomeActionsView()
-                }
             }
             .padding(24)
             .frame(maxWidth: 860, alignment: .leading)
@@ -94,7 +87,7 @@ struct StatsView: View {
         .sheet(item: Bindable(store).chapterProgressRequest) { req in
             ChapterProgressSheet(sourceId: req.sourceId)
         }
-        .navigationTitle(showsHomeActions ? "首页" : "回顾统计")
+        .navigationTitle("回顾统计")
         // 卡片统计只在打开本页、数据变化时重算（SQL 汇总，不读出全部卡片）
         .task(id: store.revision) { store.refreshCardInsights() }
     }

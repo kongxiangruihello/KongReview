@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .quick(let capture):
             QuickCaptureController.shared.show(prefill: capture)
         case .review:
-            QuickCaptureController.shared.store?.selection = .review
+            QuickCaptureController.shared.store?.openTodayReview()
             WindowOpener.showMain()
         case .save(let url):
             WindowOpener.showMain()

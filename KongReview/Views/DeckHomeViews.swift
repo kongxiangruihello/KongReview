@@ -332,8 +332,7 @@ struct DeckTile: View {
                         .help("排程算法；每天新卡 \(o.newPerDay ?? CardSettings.newPerDay) 张、复习 \(o.reviewsPerDay ?? CardSettings.reviewsPerDay) 张（右键“牌组选项…”修改）")
                     Spacer(minLength: 4)
                     PillButton(title: "浏览") {
-                        store.study.browseSelection = []
-                        store.study.browsingDeck = deck.name
+                        store.study.openCardBrowser(deck.name)
                     }
                     .fixedSize()
                     PillButton(icon: finishedToday ? nil : "play.fill", title: "学习", style: .primary, disabled: deck.counts.total == 0) {

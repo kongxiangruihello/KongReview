@@ -2,21 +2,34 @@ import SwiftUI
 import AppKit
 import KongReviewCore
 
-/// 启动页：统计和今日行动共享一个滚动区域。
+/// 启动页：日课概览与今日的两个入口。
 struct HomeView: View {
     @Environment(LibraryStore.self) private var store
 
     var body: some View {
-        StatsView(showsHomeActions: true)
-            .task {
-                // 学习中的卡片会在几分钟后到期；首页停留期间同步日期与队列。
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 60_000_000_000)
-                    guard !Task.isCancelled else { break }
-                    store.checkDayChange()
-                    store.refreshDerived()
-                }
+        ScrollView {
+            DailyReviewSummaryCard(title: store.todayReviewIsComplete ? "今日回顾完成" : "今日功课") {
+                HomeActionsView()
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 48)
+            .frame(maxWidth: .infinity)
+        }
+        .background(ReviewPalette.page)
+        .navigationTitle("首页")
+        .onAppear {
+            store.checkDayChange()
+            store.refreshDerived()
+        }
+        .task {
+            // 学习中的卡片会在几分钟后到期；首页停留期间同步日期与队列。
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { break }
+                store.checkDayChange()
+                store.refreshDerived()
+            }
+        }
     }
 }
 
@@ -27,50 +40,22 @@ struct HomeActionsView: View {
         let _ = store.revision
         let _ = store.today
         let counts = store.todayCounts()
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("今天的安排")
-                .font(.title3.weight(.semibold))
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { actions(counts: counts) }
-                VStack(alignment: .leading, spacing: 12) { actions(counts: counts) }
-            }
-            Text(counts.highlights + counts.cards > 0 ? "接着上次的进度，完成今天的回顾。" : "今天的回顾已完成，可以继续浏览摘录或整理记忆卡。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { actions(counts: counts) }
+            VStack(spacing: 12) { actions(counts: counts) }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ReviewPalette.hair))
     }
 
     @ViewBuilder
     private func actions(counts: (highlights: Int, cards: Int)) -> some View {
-        PillButton(icon: "brain", title: "去学习记忆卡·\(counts.cards)", style: counts.cards > 0 ? .primary : .normal) {
-            startSuggestedDeck()
+        PillButton(icon: "brain", title: "去学习记忆卡 · \(counts.cards)", style: counts.cards > 0 ? .primary : .normal) {
+            store.openCardsHome()
         }
-        .help("继续上次的牌组；上次的牌组已学完时，学习待学最多的牌组")
-        PillButton(icon: "sun.max", title: "去今日回顾·\(counts.highlights)") {
-            // 首页显示的是全库今日队列，保留已记录的进度。
-            store.review.theme = nil
-            store.review.sessionToken += 1
-            store.selection = .review
+        .help("打开记忆卡首页，选择牌组后开始学习")
+        PillButton(icon: "sun.max", title: "去今日回顾 · \(counts.highlights)", style: counts.cards == 0 && counts.highlights > 0 ? .primary : .normal) {
+            store.openTodayReview()
         }
-    }
-
-    private func startSuggestedDeck() {
-        store.checkDayChange()
-        store.refreshDerived()
-        let due = store.deckSummaryCache.filter { $0.counts.total > 0 }
-        let suggested = store.study.lastDeck.flatMap { last in due.first { $0.name == last } }
-            ?? due.max { $0.counts.total < $1.counts.total }
-        if let suggested {
-            store.startStudy(deck: suggested.name)
-        } else {
-            store.study.deck = nil
-            store.study.browsingDeck = nil
-        }
-        store.selection = .cards
+        .help(counts.highlights > 0 ? "继续今天的摘录回顾" : "查看今天的回顾统计")
     }
 }
 

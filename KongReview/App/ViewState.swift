@@ -174,6 +174,32 @@ final class StudyState {
     var finished = false
     var browseQuery = ""
     var browseSelection: Set<Int64> = []
+    var browseItems: [Card] = []
+    var browseTotal = 0
+    var browsePage = 1
+    var browsePageInput = "1"
+    var browseIsLoading = false
+    var browseLoadID = UUID()
+    var browseOwnerDeck: String?
+    var browseLoadedQuery = ""
+    static let browsePageSize = 200
+    var browsePageCount: Int { max(1, (browseTotal + Self.browsePageSize - 1) / Self.browsePageSize) }
+
+    func openCardBrowser(_ deck: String) {
+        self.deck = nil
+        notebookId = nil
+        browseLoadID = UUID()
+        browseQuery = ""
+        browseSelection = []
+        browseItems = []
+        browseTotal = 0
+        browsePage = 1
+        browsePageInput = "1"
+        browseIsLoading = false
+        browseOwnerDeck = nil
+        browseLoadedQuery = ""
+        browsingDeck = deck
+    }
     /// 最近用过的牌组（新建卡片时默认放这里）
     var lastDeck: String?
     /// 正在重命名的牌组与输入框文字

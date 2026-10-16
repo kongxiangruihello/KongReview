@@ -90,14 +90,14 @@ final class StatusItemController: NSObject {
     @objc private func lookup() { CitationLookupController.shared.show() }
 
     @objc private func review() {
-        QuickCaptureController.shared.store?.selection = .review
+        QuickCaptureController.shared.store?.openTodayReview()
         WindowOpener.showMain()
     }
 
     @objc private func openMain() { WindowOpener.showMain() }
 
     @objc private func cards() {
-        QuickCaptureController.shared.store?.selection = .cards
+        QuickCaptureController.shared.store?.openCardsHome()
         WindowOpener.showMain()
     }
 

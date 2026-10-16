@@ -131,7 +131,7 @@ extension LibraryStore {
             AppLog.write("删除笔记本前备份失败：\(error.localizedDescription)")
         }
         perform { try db.deleteNotebook(id) }
-        if case .notebook(let cur) = selection, cur == id { selection = .review }
+        if case .notebook(let cur) = selection, cur == id { openTodayReview() }
         if ReviewScope.notebookID(review.theme) == id { review.theme = nil }
         UserDefaults.standard.removeObject(forKey: "review.session." + ReviewScope.notebook(id))
         if notebookState.notebookId == id { notebookState.notebookId = nil; notebookState.blocks = [] }

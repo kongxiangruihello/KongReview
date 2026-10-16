@@ -529,37 +529,47 @@ struct CardBrowseView: View {
     let deck: String
     private var study: StudyState { store.study }
 
-    private var cards: [Card] {
-        _ = store.revision
-        return (try? store.db.cards(deck: deck, query: study.browseQuery)) ?? []
+    private struct LoadKey: Hashable {
+        var deck: String
+        var query: String
+        var page: Int
+        var revision: Int
     }
 
     var body: some View {
-        let list = cards
+        let list = study.browseItems
         let selected = Array(study.browseSelection)
-        let deckNames = (try? store.db.deckNames()) ?? []
+        let deckNames = store.deckSummaryCache.map(\.name).sorted()
         return VStack(spacing: 0) {
             HStack {
                 Button {
                     study.browsingDeck = nil
                     study.browseQuery = ""
+                    study.browseSelection = []
                 } label: { Label("牌组", systemImage: "chevron.left") }
                 TextField("搜索正面、背面、标签", text: Bindable(store.study).browseQuery)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 320)
                 Spacer()
-                Text("\(list.count) 张").foregroundStyle(.secondary)
+                Text("共 \(study.browseTotal) 张").foregroundStyle(.secondary)
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
             Divider()
+            if study.browseIsLoading && list.isEmpty {
+                ProgressView("正在载入记忆卡…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if list.isEmpty {
+                ContentUnavailableView(study.browseQuery.isEmpty ? "这个牌组还没有卡片" : "没有找到记忆卡",
+                                       systemImage: "rectangle.on.rectangle")
+            } else {
             List(list, id: \.rowID, selection: Bindable(store.study).browseSelection) { c in
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(Markdown.plainText(fromHTML: Card.renderHTML(c.front)))
+                        Text(preview(c.front, limit: 1600))
                             .lineLimit(2)
                         if !c.back.isEmpty {
-                            Text(Markdown.plainText(fromHTML: Card.renderHTML(c.back)))
+                            Text(preview(c.back, limit: 600))
                                 .lineLimit(1).font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -574,8 +584,16 @@ struct CardBrowseView: View {
                 .contextMenu { menu(for: study.browseSelection.contains(c.rowID) ? selected : [c.rowID], deckNames: deckNames) }
                 .onTapGesture(count: 2) { store.editCard(c) }
             }
+            .id("\(deck)|\(study.browsePage)|\(study.browseLoadedQuery)")
+            .disabled(study.browseIsLoading)
+            }
+            Divider()
+            pageControls
         }
         .navigationTitle("浏览 · \(deck)")
+        .task(id: LoadKey(deck: deck, query: study.browseQuery, page: study.browsePage, revision: store.revision)) {
+            await loadPage()
+        }
         .toolbar {
             ToolbarItemGroup {
                 Button { store.newCard(deck: deck) } label: { Label("新建卡片", systemImage: "plus") }
@@ -584,10 +602,118 @@ struct CardBrowseView: View {
                 } label: {
                     Label("操作", systemImage: "ellipsis.circle")
                 }
-                .disabled(selected.isEmpty)
+                .disabled(selected.isEmpty || study.browseIsLoading)
                 Button("学习") { store.startStudy(deck: deck) }
             }
         }
+    }
+
+    private var pageControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                pageStatus
+                Spacer()
+                pageNavigation
+                pageJump
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                pageStatus
+                HStack(spacing: 12) { pageNavigation; Spacer(); pageJump }
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var pageStatus: some View {
+        HStack(spacing: 8) {
+            if study.browseIsLoading { ProgressView().controlSize(.small) }
+            Text(study.browseTotal == 0 ? "共 0 张 · 每页 \(StudyState.browsePageSize) 张" :
+                "第 \((study.browsePage - 1) * StudyState.browsePageSize + 1)–\(min(study.browsePage * StudyState.browsePageSize, study.browseTotal)) 张，共 \(study.browseTotal) 张")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize()
+        }
+    }
+
+    private var pageNavigation: some View {
+        HStack(spacing: 8) {
+            Button { goToPage(study.browsePage - 1) } label: { Label("上一页", systemImage: "chevron.left") }
+                .disabled(study.browsePage <= 1 || study.browseIsLoading)
+            Text("第 \(study.browsePage) / \(study.browsePageCount) 页").monospacedDigit().fixedSize()
+            Button { goToPage(study.browsePage + 1) } label: { Label("下一页", systemImage: "chevron.right") }
+                .disabled(study.browsePage >= study.browsePageCount || study.browseIsLoading)
+        }
+    }
+
+    private var pageJump: some View {
+        HStack(spacing: 6) {
+            TextField("页码", text: Bindable(store.study).browsePageInput)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.center)
+                .frame(width: 52)
+                .accessibilityLabel("跳转到记忆卡页码")
+                .onSubmit(jumpToPage)
+            Button("跳转", action: jumpToPage)
+        }
+        .disabled(study.browseIsLoading)
+    }
+
+    private func jumpToPage() {
+        goToPage(Int(study.browsePageInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? study.browsePage)
+    }
+
+    private func goToPage(_ page: Int) {
+        let target = min(max(1, page), study.browsePageCount)
+        study.browsePageInput = String(target)
+        guard target != study.browsePage else { return }
+        study.browseSelection = []
+        study.browsePage = target
+    }
+
+    @MainActor
+    private func loadPage() async {
+        let requestID = UUID()
+        let query = study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        study.browseLoadID = requestID
+        if study.browseOwnerDeck != deck || study.browseLoadedQuery != query {
+            study.browseOwnerDeck = deck
+            study.browseLoadedQuery = query
+            study.browseSelection = []
+            study.browseItems = []
+            study.browseTotal = 0
+            study.browsePageInput = "1"
+            if study.browsePage != 1 {
+                study.browsePage = 1
+                return
+            }
+        }
+        let page = study.browsePage
+        study.browseIsLoading = true
+        defer { if study.browseLoadID == requestID { study.browseIsLoading = false } }
+        do {
+            let result = try await store.db.cardPage(deck: deck, query: query, limit: StudyState.browsePageSize,
+                                                    offset: (page - 1) * StudyState.browsePageSize)
+            guard !Task.isCancelled, study.browseLoadID == requestID else { return }
+            study.browseTotal = result.total
+            if page > study.browsePageCount {
+                study.browsePage = study.browsePageCount
+                study.browsePageInput = String(study.browsePage)
+                study.browseItems = []
+                study.browseSelection = []
+                return
+            }
+            study.browseItems = result.items
+            study.browsePageInput = String(page)
+            let visible = Set(result.items.compactMap(\.id))
+            study.browseSelection.formIntersection(visible)
+        } catch {
+            if !Task.isCancelled, study.browseLoadID == requestID { store.report(error) }
+        }
+    }
+
+    private func preview(_ text: String, limit: Int) -> String {
+        Markdown.plainText(fromHTML: Card.renderHTML(String(text.prefix(limit))))
     }
 
     @ViewBuilder
