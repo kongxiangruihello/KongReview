@@ -51,7 +51,7 @@ struct KongReviewApp: App {
             CommandMenu("回顾") {
                 Button("今日回顾") { store.openTodayReview(); WindowOpener.showMain() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                Button("记忆卡") { store.selection = .cards }
+                Button("记忆卡") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("回顾统计") { store.selection = .stats }
             }

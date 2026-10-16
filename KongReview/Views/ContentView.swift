@@ -190,6 +190,7 @@ struct SidebarView: View {
             get: { store.selection },
             set: { destination in
                 if destination == .review { store.openTodayReview() }
+                else if destination == .cards { store.openCardsHome() }
                 else { store.selection = destination }
             }
         )) {
@@ -205,13 +206,18 @@ struct SidebarView: View {
                 .tag(SidebarItem.review)
                 Label("全部摘录", systemImage: "text.quote").tag(SidebarItem.all)
                 Label("收藏", systemImage: "star").tag(SidebarItem.favorites)
-                HStack {
-                    Label("记忆卡", systemImage: "brain")
-                    Spacer()
-                    if store.cardCount > 0 {
-                        SidebarCount(store.cardCount)
+                Button { store.openCardsHome() } label: {
+                    HStack {
+                        Label("记忆卡", systemImage: "brain")
+                        Spacer()
+                        if store.cardCount > 0 {
+                            SidebarCount(store.cardCount)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .tag(SidebarItem.cards)
                 Label("回顾统计", systemImage: "chart.bar.xaxis").tag(SidebarItem.stats)
                 Label("未归类", systemImage: "tray").tag(SidebarItem.unsorted)

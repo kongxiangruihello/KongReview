@@ -49,9 +49,9 @@ struct HomeActionsView: View {
     @ViewBuilder
     private func actions(counts: (highlights: Int, cards: Int)) -> some View {
         PillButton(icon: "brain", title: "去学习记忆卡 · \(counts.cards)", style: counts.cards > 0 ? .primary : .normal) {
-            store.startSuggestedStudy()
+            store.openCardsHome()
         }
-        .help("继续上次的牌组；上次的牌组已学完时，学习待学最多的牌组")
+        .help("打开记忆卡首页，选择牌组后开始学习")
         PillButton(icon: "sun.max", title: "去今日回顾 · \(counts.highlights)", style: counts.cards == 0 && counts.highlights > 0 ? .primary : .normal) {
             store.openTodayReview()
         }

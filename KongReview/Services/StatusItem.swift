@@ -97,7 +97,7 @@ final class StatusItemController: NSObject {
     @objc private func openMain() { WindowOpener.showMain() }
 
     @objc private func cards() {
-        QuickCaptureController.shared.store?.selection = .cards
+        QuickCaptureController.shared.store?.openCardsHome()
         WindowOpener.showMain()
     }
 

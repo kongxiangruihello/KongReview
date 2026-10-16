@@ -662,7 +662,31 @@ final class LibraryStore {
         selection = .review
     }
 
-    /// 首页与完成卡共用：继续有待学卡片的最近牌组，否则进入待学最多的牌组。
+    /// 普通记忆卡入口打开牌组总览，保留最近牌组和已保存的学习记录。
+    func openCardsHome() {
+        checkDayChange()
+        study.deck = nil
+        study.browsingDeck = nil
+        study.notebookId = nil
+        study.current = nil
+        study.showingAnswer = false
+        study.finished = false
+        // 使离开的浏览页请求失效，避免异步结果回填旧牌组。
+        study.browseLoadID = UUID()
+        study.browseIsLoading = false
+        study.browseSelection = []
+        study.browseItems = []
+        study.browseTotal = 0
+        study.browsePage = 1
+        study.browsePageInput = "1"
+        study.browseQuery = ""
+        study.browseOwnerDeck = nil
+        study.browseLoadedQuery = ""
+        refreshDerived()
+        selection = .cards
+    }
+
+    /// 回顾完成卡的学习入口：继续有待学卡片的最近牌组，否则进入待学最多的牌组。
     func startSuggestedStudy() {
         checkDayChange()
         refreshDerived()
