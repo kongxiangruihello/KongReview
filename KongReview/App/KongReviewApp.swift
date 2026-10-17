@@ -26,7 +26,7 @@ struct KongReviewApp: App {
         var draftError: String?
         do { draftStorage = try EditorDraftPersistence(directory: EditorDraftPersistence.defaultDirectory()) }
         catch { draftError = "编辑草稿恢复暂不可用：" + error.localizedDescription }
-        let store = LibraryStore(db: db, draftPersistence: draftStorage, positionDefaults: .standard)
+        let store = LibraryStore(db: db, draftPersistence: draftStorage, positionDefaults: .standard, backgroundStatistics: true)
         store.draftSaveError = draftError
         self.store = store
         QuickCaptureController.shared.store = store
@@ -40,6 +40,7 @@ struct KongReviewApp: App {
         .defaultSize(width: 1100, height: 720)
         .commands {
             CommandGroup(replacing: .newItem) {
+                Group {
                 Button("新建摘录") { store.newHighlight() }
                     .keyboardShortcut("n")
                 Button("快速录入浮窗") { QuickCaptureController.shared.show() }
@@ -52,27 +53,42 @@ struct KongReviewApp: App {
                     store.editingSource = Source(title: "")
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+                            }.disabled(store.fullBackupBusy)
             }
             CommandMenu("回顾") {
+                Group {
                 Button("今日回顾") { store.openTodayReview(); WindowOpener.showMain() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("记忆卡") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("回顾统计") { store.selection = .stats }
+                            }.disabled(store.fullBackupBusy)
+            }
+            CommandMenu("查找") {
+                Group {
+                Button("全局搜索…") { WindowOpener.showMain(); store.showGlobalSearch() }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                    .disabled(!store.canShowGlobalSearch)
+                            }.disabled(store.fullBackupBusy)
             }
             CommandGroup(replacing: .help) {
+                Group {
                 Button("KongReview 使用说明") {
                     store.selection = .help
                     WindowOpener.showMain()
                 }
                 Button("导出诊断信息…") { ExportService.exportDiagnostics(store: store) }
+                            }.disabled(store.fullBackupBusy)
             }
             CommandGroup(after: .importExport) {
+                Group {
                 Button("查找重复摘录…") { WindowOpener.showMain(); store.findDuplicates() }
                 Divider()
                 Button("导出全部为 Markdown…") { ExportService.exportAll(store: store) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("立即备份") { ExportService.backupNow(store: store) }
+                Button("导出完整备份…") { store.exportFullBackup() }
+                Button("恢复完整备份…") { store.chooseFullBackupRestore() }
                 Divider()
                 Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
                 Button("从 LiquidText 导入笔记…") { ExportService.importLiquidText(store: store) }
@@ -84,6 +100,7 @@ struct KongReviewApp: App {
                     store.selection = .cards
                     store.apkgExport = ApkgExportRequest(allDecks: decks, decks: Set(decks))
                 }
+                            }.disabled(store.fullBackupBusy)
             }
         }
 

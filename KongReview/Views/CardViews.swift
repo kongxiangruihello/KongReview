@@ -318,7 +318,8 @@ struct StudyView: View {
 
     private var counts: StudyQueue.Counts {
         _ = store.revision
-        if let summary = store.cardLearningSummary { return summary.pending }
+        if store.cardLearningSummaryScope == store.currentCardLearningScope,
+           let summary = store.cardLearningSummary { return summary.pending }
         if study.notebookId != nil { return study.notebookCounts }
         guard let deck = study.deck,
               let s = store.deckSummaryCache.first(where: { $0.name == deck }) else { return .init() }
@@ -462,7 +463,8 @@ struct StudyView: View {
     /// 当前范围的学习总结：张数去重、评分次数独立，待学状态随排程更新。
     private var finished: some View {
         ScrollView {
-            if let summary = store.cardLearningSummary {
+            if store.cardLearningSummaryScope == store.currentCardLearningScope,
+               let summary = store.cardLearningSummary {
                 CardLearningCompletionView(summary: summary,
                                            globalStudiedCards: store.learningActivitySummary.today.cards,
                                            globalRatingCount: store.learningActivitySummary.today.cardRatings,
@@ -489,6 +491,8 @@ struct CardBrowseView: View {
     private struct LoadKey: Hashable {
         var deck: String
         var query: String
+        var tag: String
+        var state: CardBrowseStateFilter
         var page: Int
         var pageSize: Int
         var revision: Int
@@ -511,12 +515,19 @@ struct CardBrowseView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { browseFilters; Spacer(); selectionControls }
+                VStack(alignment: .leading, spacing: 8) { browseFilters; selectionControls }
+            }
+            .controlSize(.small)
+            .padding(.horizontal)
+            .padding(.bottom, 10)
             Divider()
             if study.browseIsLoading && list.isEmpty {
                 ProgressView("正在载入记忆卡…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if list.isEmpty {
-                ContentUnavailableView(study.browseQuery.isEmpty ? "这个牌组还没有卡片" : "没有找到记忆卡",
+                ContentUnavailableView(study.browseQuery.isEmpty && study.browseTag.isEmpty && study.browseStateFilter == .all ? "这个牌组还没有卡片" : "没有符合条件的记忆卡",
                                        systemImage: "rectangle.on.rectangle")
             } else {
             ScrollViewReader { proxy in
@@ -528,6 +539,10 @@ struct CardBrowseView: View {
                         if !c.back.isEmpty {
                             Text(preview(c.back, limit: 600))
                                 .lineLimit(1).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if !c.tags.isEmpty {
+                            Text(c.tags.map { "#" + $0 }.joined(separator: " "))
+                                .font(.caption).foregroundStyle(ReviewPalette.accent).lineLimit(1)
                         }
                     }
                     Spacer()
@@ -542,7 +557,7 @@ struct CardBrowseView: View {
                 .contextMenu { menu(for: study.browseSelection.contains(c.rowID) ? selected : [c.rowID], deckNames: deckNames) }
                 .onTapGesture(count: 2) { store.editCard(c) }
             }
-            .id("\(deck)|\(study.browsePage)|\(study.browseLoadedQuery)")
+            .id("\(deck)|\(study.browsePage)|\(study.browseLoadedQuery)|\(study.browseLoadedTag)|\(study.browseLoadedState.rawValue)")
             .disabled(study.browseIsLoading)
             .onAppear { restoreBrowseAnchor(proxy) }
             .onChange(of: study.browseItems) { _, _ in restoreBrowseAnchor(proxy) }
@@ -552,11 +567,13 @@ struct CardBrowseView: View {
             pageControls
         }
         .navigationTitle("浏览 · \(deck)")
-        .task(id: LoadKey(deck: deck, query: study.browseQuery, page: study.browsePage,
+        .task(id: LoadKey(deck: deck, query: study.browseQuery, tag: study.browseTag,
+                          state: study.browseStateFilter, page: study.browsePage,
                           pageSize: study.browsePageSize, revision: store.revision)) {
             await loadPage()
         }
         .onDisappear { study.persistBrowsePosition() }
+        .sheet(item: Bindable(store.study).cardTagEdit) { _ in CardTagBatchEditView() }
         .toolbar {
             ToolbarItemGroup {
                 Button { store.newCard(deck: deck) } label: { Label("新建卡片", systemImage: "plus") }
@@ -567,6 +584,38 @@ struct CardBrowseView: View {
                 }
                 .disabled(selected.isEmpty || study.browseIsLoading)
                 Button("学习") { store.startStudy(deck: deck) }
+            }
+        }
+    }
+
+    private var browseFilters: some View {
+        HStack(spacing: 10) {
+            Picker("标签", selection: Bindable(store.study).browseTag) {
+                Text("全部标签").tag("")
+                ForEach(Array(Set(study.browseTagOptions + (study.browseTag.isEmpty ? [] : [study.browseTag]))).sorted(), id: \.self) { tag in
+                    Text("#" + tag).tag(tag)
+                }
+            }.frame(maxWidth: 220)
+            Picker("状态", selection: Bindable(store.study).browseStateFilter) {
+                ForEach(CardBrowseStateFilter.allCases, id: \.self) { Text($0.title).tag($0) }
+            }.frame(width: 160)
+            if !study.browseTag.isEmpty || study.browseStateFilter != .all {
+                Button("清除筛选") { study.browseTag = ""; study.browseStateFilter = .all }
+            }
+        }
+    }
+
+    private var selectionControls: some View {
+        HStack(spacing: 10) {
+            Text("本页已选 \(study.browseSelection.count) 张").font(.caption).foregroundStyle(.secondary)
+            Button("选中本页") { study.browseSelection = Set(study.browseItems.compactMap(\.id)) }
+                .disabled(study.browseItems.isEmpty || study.browseIsLoading)
+            if !study.browseSelection.isEmpty {
+                Button("取消选择") { study.browseSelection = [] }
+                Menu("标签操作") {
+                    Button("添加标签…") { store.editCardTags(.add, ids: Array(study.browseSelection), deck: deck) }
+                    Button("移除标签…") { store.editCardTags(.remove, ids: Array(study.browseSelection), deck: deck) }
+                }.disabled(study.browseIsLoading)
             }
         }
     }
@@ -652,10 +701,14 @@ struct CardBrowseView: View {
         guard !Task.isCancelled, study.browsingDeck == deck else { return }
         let requestID = UUID()
         let query = study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tag = study.browseTag
+        let state = study.browseStateFilter
         study.browseLoadID = requestID
-        if study.browseOwnerDeck != deck || study.browseLoadedQuery != query {
+        if study.browseOwnerDeck != deck || study.browseLoadedQuery != query || study.browseLoadedTag != tag || study.browseLoadedState != state {
             study.browseOwnerDeck = deck
             study.browseLoadedQuery = query
+            study.browseLoadedTag = tag
+            study.browseLoadedState = state
             study.browseSelection = []
             study.browseItems = []
             study.browseTotal = 0
@@ -672,10 +725,20 @@ struct CardBrowseView: View {
         defer { if study.browseLoadID == requestID { study.browseIsLoading = false } }
         do {
             let result = try await store.db.cardPage(deck: deck, query: query, limit: size,
-                                                    offset: (page - 1) * size)
+                                                    offset: (page - 1) * size, tag: tag, state: state)
+            let tags: [String]
+            if study.browseTagOptionsDeck == deck, study.browseTagOptionsRevision == revision {
+                tags = study.browseTagOptions
+            } else {
+                tags = try await store.db.cardTagOptions(deck: deck)
+            }
             guard !Task.isCancelled, study.browseLoadID == requestID, study.browsingDeck == deck,
                   study.browsePage == page, study.browsePageSize == size, store.revision == revision,
-                  study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                  study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query,
+                  study.browseTag == tag, study.browseStateFilter == state else { return }
+            study.browseTagOptions = tags
+            study.browseTagOptionsDeck = deck
+            study.browseTagOptionsRevision = revision
             study.browseTotal = result.total
             if page > study.browsePageCount {
                 study.browsePage = study.browsePageCount
@@ -717,6 +780,8 @@ struct CardBrowseView: View {
                 }
             }
         }
+        Button("添加标签…") { store.editCardTags(.add, ids: ids, deck: deck) }
+        Button("移除标签…") { store.editCardTags(.remove, ids: ids, deck: deck) }
         Divider()
         Button("删除 \(ids.count) 张卡片", role: .destructive) {
             store.deleteCards(ids)

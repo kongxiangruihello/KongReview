@@ -9,6 +9,14 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                if store.learningActivitySummary.recentDays.isEmpty && store.derivedIsLoading {
+                    ProgressView("正在读取学习统计…").frame(maxWidth: .infinity, minHeight: 280)
+                } else if store.learningActivitySummary.recentDays.isEmpty, let error = store.derivedStatisticsError {
+                    VStack(spacing: 16) {
+                        Text(error).foregroundStyle(.secondary)
+                        Button("重新读取") { store.refreshDerived() }
+                    }.frame(maxWidth: .infinity, minHeight: 280)
+                } else {
                 HomeLearningHeader(summary: store.homeLearningSummary, day: store.today)
 
                 DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
@@ -18,6 +26,7 @@ struct HomeView: View {
                                       quote: store.dailyReviewQuote(),
                                       onReview: { store.openTodayReview() },
                                       onCards: { store.openCardsHome() })
+                }
             }
             .frame(maxWidth: 960)
             .padding(.horizontal, 28)

@@ -43,7 +43,11 @@ struct CardDuplicateGroup: Identifiable, Sendable {
     var signature: CardDuplicateSignature
     /// 保存完整扫描快照；确认前连学习进度也要重读校验。
     var cards: [Card]
-    var id: String { signature.stableID }
+    /// nil 为原有完全重复组；相似组永远是两张卡，仅作为人工比较建议。
+    var similarityScore: Double?
+    var id: String {
+        similarityScore == nil ? signature.stableID : "similar:" + ids.sorted().map(String.init).joined(separator: ":")
+    }
     var ids: [Int64] { cards.compactMap(\.id) }
 }
 
@@ -61,9 +65,11 @@ enum CardDuplicateCleanupError: LocalizedError, Equatable {
 
 extension AppDatabase {
     /// 全库查重独立于浏览列表分页；查询和分组在后台任务中调用。
-    func cardDuplicateGroups() async throws -> [CardDuplicateGroup] {
+    func cardDuplicateGroups(deck: String? = nil) async throws -> [CardDuplicateGroup] {
         let cards = try await writer.read { db in
-            try Card.fetchAll(db, sql: "SELECT * FROM card WHERE deletedAt IS NULL ORDER BY id")
+            try Card.fetchAll(db, sql: "SELECT * FROM card WHERE deletedAt IS NULL"
+                              + (deck == nil ? "" : " AND deck = ?") + " ORDER BY id",
+                              arguments: deck.map { StatementArguments([$0]) } ?? StatementArguments())
         }
         return Dictionary(grouping: cards, by: CardDuplicateSignature.init)
             .filter { $0.value.count > 1 }
@@ -87,9 +93,14 @@ extension AppDatabase {
             guard current.count == ids.count,
                   current.allSatisfy({ card in
                       card.deletedAt == nil && card == original[card.id ?? -1]
-                          && CardDuplicateSignature(card) == group.signature
+                          && (group.similarityScore != nil || CardDuplicateSignature(card) == group.signature)
                   }) else {
                 throw CardDuplicateCleanupError.staleScan
+            }
+            if group.similarityScore != nil {
+                guard current.count == 2, CardSimilarity.score(current[0], current[1]) != nil else {
+                    throw CardDuplicateCleanupError.staleScan
+                }
             }
             let removed = current.filter { $0.id != keeperID }
             let removedIDs = removed.compactMap(\.id)

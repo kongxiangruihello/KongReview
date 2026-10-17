@@ -40,4 +40,6 @@ struct CardBrowsePosition: Codable, Equatable {
     var page = 1
     var pageSize = 200
     var anchorID: Int64?
+    var tag: String?
+    var stateFilter: String?
 }

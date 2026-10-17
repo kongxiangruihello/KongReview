@@ -8,7 +8,7 @@ struct CardDuplicateReviewView: View {
         let state = store.duplicateCardReview
         return VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("整理重复记忆卡").font(.title2.bold())
+                Text("比较与整理记忆卡").font(.title2.bold())
                 Spacer()
                 if let state, !state.scanning {
                     Text("已整理 \(state.removed) 张")
@@ -17,9 +17,30 @@ struct CardDuplicateReviewView: View {
                 Button("重新扫描") { store.findDuplicateCards() }
                     .disabled(state?.processing == true || state?.scanning == true)
             }
+            HStack(spacing: 18) {
+                Picker("比对方式", selection: Binding(
+                    get: { store.duplicateCardReview?.mode ?? .exact },
+                    set: { store.findDuplicateCards(mode: $0) }
+                )) {
+                    ForEach(CardDuplicateScanMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.pickerStyle(.segmented).frame(width: 320)
+                Picker("范围", selection: Binding(
+                    get: { store.duplicateCardReview?.scopeDeck ?? "" },
+                    set: { store.findDuplicateCards(scopeDeck: $0) }
+                )) {
+                    Text("全部牌组").tag("")
+                    ForEach(Array(Set(store.deckSummaryCache.map(\.name) + (state?.scopeDeck.map { [$0] } ?? []))).sorted(), id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }.frame(maxWidth: 300)
+            }.disabled(state?.processing == true || state?.scanning == true)
             Text("逐组比较，选择要保留的一张：它的牌组、标签和原学习排程全部保留，其余卡片标记为删除，历史回顾记录保留。首次整理前自动备份，可用 ⌘Z 撤销。")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let note = state?.scanNote {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let error = state?.error {
                 Label(error, systemImage: "exclamationmark.triangle")
@@ -30,13 +51,17 @@ struct CardDuplicateReviewView: View {
             if state?.scanning == true {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("正在比对全部记忆卡…").foregroundStyle(.secondary)
+                    Text(state?.mode == .similar ? "正在查找高度相似的正反面内容…" : "正在比对全部记忆卡…").foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let state, let group = state.currentGroup {
                 HStack {
                     Text("第 \(state.position + 1) / \(state.groups.count) 组 · \(group.cards.count) 张")
                         .font(.headline)
+                    if let score = group.similarityScore {
+                        Text("相似度约 \(Int((score * 100).rounded()))% · 请核对差异")
+                            .font(.callout).foregroundStyle(.orange)
+                    }
                     Spacer()
                     Button("上一组") { store.moveDuplicateCardGroup(-1) }
                         .disabled(state.position == 0 || state.processing)
@@ -72,12 +97,12 @@ struct CardDuplicateReviewView: View {
                     .disabled(state.processing || state.keeper[group.id] == nil)
                 }
             } else {
-                ContentUnavailableView(state?.error == nil ? "没有待整理的重复记忆卡" : "扫描未完成",
+                ContentUnavailableView(state?.error == nil ? (state?.mode == .similar ? "本次扫描未发现高度相似的记忆卡" : "没有待整理的重复记忆卡") : "扫描未完成",
                                        systemImage: state?.error == nil ? "checkmark.circle" : "exclamationmark.triangle")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             HStack {
-                Text("多字段卡片只在模板和全部字段也相同时列为重复。")
+                Text("模板、全部字段和自定义栏目必须一致；相似内容仅作建议，请逐字核对后再整理。")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("关闭") { store.closeDuplicateCardReview() }

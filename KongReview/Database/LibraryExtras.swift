@@ -216,6 +216,12 @@ struct BackupInfo: Identifiable, Hashable {
 
 // MARK: - 撤销：改动前的快照
 
+struct CardTagUndoChange: Sendable {
+    var adding: [String]
+    var removing: [String]
+    var reversed: CardTagUndoChange { CardTagUndoChange(adding: removing, removing: adding) }
+}
+
 /// 一次可撤销操作涉及的数据在改动前的样子（摘录含已删除的、出处、记忆卡、网页存档所属出处）
 struct UndoSnapshot: Sendable {
     var highlightIds: [Int64]
@@ -226,6 +232,9 @@ struct UndoSnapshot: Sendable {
     var cards: [Card] = []
     /// 网页存档 id → 所属出处
     var articleSources: [Int64: Int64?] = [:]
+    /// 标签整理的撤销只写标签差量，保护之后发生的评分、移动、删除和不相关标签修改。
+    var cardTagsOnly = false
+    var cardTagUndoChanges: [Int64: CardTagUndoChange] = [:]
 }
 
 extension AppDatabase {
@@ -256,7 +265,23 @@ extension AppDatabase {
         try writer.write { db in
             for var src in s.sources { try src.save(db) }
             for var h in s.highlights { try h.save(db) }
-            for var c in s.cards { try c.save(db) }
+            for var c in s.cards {
+                if s.cardTagsOnly {
+                    guard let id = c.id, var current = try Card.fetchOne(db, key: id) else { continue }
+                    if let change = s.cardTagUndoChanges[id] {
+                        let removing = Set(change.removing)
+                        current.tags.removeAll { removing.contains($0) }
+                        var seen = Set(current.tags)
+                        current.tags += change.adding.filter { seen.insert($0).inserted }
+                    } else {
+                        current.tags = c.tags
+                    }
+                    current.updatedAt = Date()
+                    try current.update(db, columns: ["tags", "updatedAt"])
+                } else {
+                    try c.save(db)
+                }
+            }
             for (aid, sid) in s.articleSources {
                 try db.execute(sql: "UPDATE article SET sourceId = ? WHERE id = ?", arguments: [sid, aid])
             }

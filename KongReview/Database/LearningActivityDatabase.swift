@@ -24,15 +24,22 @@ extension AppDatabase {
             SELECT kr_home_learning_day(at) AS day,
                    COUNT(DISTINCT CASE WHEN kind NOT IN ('card', 'note') THEN highlightId END) AS highlights,
                    COUNT(DISTINCT CASE WHEN kind = 'card' THEN cardId END) AS cards,
-                   SUM(CASE WHEN kind = 'card' AND cardId IS NOT NULL THEN 1 ELSE 0 END) AS ratings
+                   SUM(CASE WHEN kind = 'card' AND cardId IS NOT NULL THEN 1 ELSE 0 END) AS ratings,
+                   SUM(CASE WHEN kind NOT IN ('card', 'note') THEN 1 ELSE 0 END) AS actions,
+                   SUM(CASE WHEN kind = 'card' THEN 1 ELSE 0 END) AS attempts,
+                   SUM(CASE WHEN kind = 'card' AND answer = 1 THEN 1 ELSE 0 END) AS again
             FROM review_event WHERE at < ? GROUP BY day
             """, arguments: [end])
         var history: [String: ReviewStats.Day] = [:]
         var ratings: [String: Int] = [:]
+        var eventDays: [String: ReviewStats.Day] = [:]
+        var again = 0
         for row in rows {
             guard let key: String = row["day"] else { continue }
             history[key] = ReviewStats.Day(key: key, highlights: row["highlights"] ?? 0, cards: row["cards"] ?? 0)
             ratings[key] = row["ratings"] ?? 0
+            eventDays[key] = ReviewStats.Day(key: key, highlights: row["actions"] ?? 0, cards: row["attempts"] ?? 0)
+            again += (row["again"] as Int?) ?? 0
         }
         let count = max(1, days)
         let streaks = ReviewStats.summarize(byDay: history, again: 0, now: now, days: count, calendar: calendar)
@@ -44,6 +51,8 @@ extension AppDatabase {
                                            cards: day?.cards ?? 0, cardRatings: ratings[key] ?? 0)
         }
         return LearningActivitySummary(recentDays: recentDays, currentStreak: streaks.currentStreak,
-                                       longestStreak: streaks.longestStreak, activeDays: streaks.activeDays)
+                                       longestStreak: streaks.longestStreak, activeDays: streaks.activeDays,
+                                       eventSummary: ReviewStats.summarize(byDay: eventDays, again: again,
+                                                                          now: now, days: count, calendar: calendar))
     }
 }

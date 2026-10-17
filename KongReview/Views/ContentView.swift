@@ -15,6 +15,27 @@ struct ContentView: View {
         } detail: {
             detail
         }
+        .disabled(store.fullBackupBusy)
+        .overlay {
+            if store.fullBackupBusy {
+                ZStack {
+                    Color.black.opacity(0.08)
+                    ProgressView(store.maintenanceProgress ?? "正在处理完整备份…")
+                        .padding(24)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { store.showGlobalSearch() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
+                    .disabled(!store.canShowGlobalSearch)
+                    .handCursor()
+                    .help("查找摘录、记忆卡、网页和出处（⌘⇧F）")
+            }
+        }
+        .modifier(GlobalSearchPresentation())
+        .modifier(FullBackupPresentation())
         .sheet(item: $store.editorDraft) { _ in
             HighlightEditorView().modifier(EditorDraftCloseConfirmation(kind: .highlight))
         }

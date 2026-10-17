@@ -69,9 +69,10 @@ extension AppDatabase {
     }
 
     /// 浏览列表的计数和当前页在同一读取快照内完成，不限制学习队列使用的全部卡片查询。
-    func cardPage(deck: String, query: String, limit: Int, offset: Int) async throws -> (items: [Card], total: Int) {
+    func cardPage(deck: String, query: String, limit: Int, offset: Int,
+                  tag: String = "", state: CardBrowseStateFilter = .all) async throws -> (items: [Card], total: Int) {
         try await writer.read { db in
-            let (filter, args) = Self.cardFilter(deck: deck, query: query)
+            let (filter, args) = Self.cardFilter(deck: deck, query: query, tag: tag, state: state)
             let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM card" + filter,
                                          arguments: StatementArguments(args)) ?? 0
             let items = try Card.fetchAll(db,
@@ -81,10 +82,22 @@ extension AppDatabase {
         }
     }
 
-    private static func cardFilter(deck: String?, query: String) -> (String, [(any DatabaseValueConvertible)?]) {
+    private static func cardFilter(deck: String?, query: String, tag: String = "",
+                                   state: CardBrowseStateFilter = .all) -> (String, [(any DatabaseValueConvertible)?]) {
         var filter = " WHERE deletedAt IS NULL"
         var args: [(any DatabaseValueConvertible)?] = []
         if let deck { filter += " AND deck = ?"; args.append(deck) }
+        if !tag.isEmpty {
+            filter += " AND EXISTS (SELECT 1 FROM json_each(card.tags) WHERE value = ?)"
+            args.append(tag)
+        }
+        switch state {
+        case .all: break
+        case .new: filter += " AND isSuspended = 0 AND state = 'new'"
+        case .learning: filter += " AND isSuspended = 0 AND state IN ('learning', 'relearning')"
+        case .review: filter += " AND isSuspended = 0 AND state = 'review'"
+        case .suspended: filter += " AND isSuspended = 1"
+        }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty {
             let pattern = SearchQuery.likePattern(ChineseFold.fold(q))

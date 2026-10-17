@@ -197,6 +197,18 @@ final class StudyState {
     var browseQuery = "" {
         didSet { if !restoringBrowsePosition, browseQuery != oldValue { resetBrowsePage(); persistBrowsePosition() } }
     }
+    var browseTag = "" {
+        didSet { if !restoringBrowsePosition, browseTag != oldValue { resetBrowsePage(); persistBrowsePosition() } }
+    }
+    var browseStateFilter: CardBrowseStateFilter = .all {
+        didSet { if !restoringBrowsePosition, browseStateFilter != oldValue { resetBrowsePage(); persistBrowsePosition() } }
+    }
+    var browseTagOptions: [String] = []
+    var browseTagOptionsDeck: String?
+    var browseTagOptionsRevision = -1
+    var browseLoadedTag = ""
+    var browseLoadedState: CardBrowseStateFilter = .all
+    var cardTagEdit: CardTagEditRequest?
     var browseSelection: Set<Int64> = []
     var browseItems: [Card] = []
     var browseTotal = 0
@@ -229,6 +241,11 @@ final class StudyState {
         browseIsLoading = false
         let saved = browsePersistence.load(CardBrowsePosition.self, for: "cards.deck." + deck) ?? CardBrowsePosition()
         browseQuery = saved.query
+        browseTag = saved.tag ?? ""
+        browseStateFilter = CardBrowseStateFilter(rawValue: saved.stateFilter ?? "") ?? .all
+        browseTagOptions = []
+        browseTagOptionsDeck = nil
+        browseTagOptionsRevision = -1
         browsePageSize = ListPositionPersistence.normalizedPageSize(saved.pageSize)
         browsePage = max(1, saved.page)
         browsePageInput = String(browsePage)
@@ -236,6 +253,8 @@ final class StudyState {
         // 首次载入不能把恢复的页码当作条件变化而归到第一页。
         browseOwnerDeck = deck
         browseLoadedQuery = saved.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        browseLoadedTag = browseTag
+        browseLoadedState = browseStateFilter
         browsingDeck = deck
         restoringBrowsePosition = false
     }
@@ -243,7 +262,8 @@ final class StudyState {
     func persistBrowsePosition() {
         guard !restoringBrowsePosition, let owner = browseOwnerDeck else { return }
         browsePersistence.save(CardBrowsePosition(query: browseQuery, page: max(1, browsePage),
-            pageSize: ListPositionPersistence.normalizedPageSize(browsePageSize), anchorID: browseAnchorID),
+            pageSize: ListPositionPersistence.normalizedPageSize(browsePageSize), anchorID: browseAnchorID,
+            tag: browseTag, stateFilter: browseStateFilter.rawValue),
             for: "cards.deck." + owner)
     }
 

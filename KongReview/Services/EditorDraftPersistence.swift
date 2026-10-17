@@ -100,6 +100,30 @@ final class EditorDraftPersistence {
         if !contents.highlights.isEmpty || !contents.cards.isEmpty { try write(contents) }
     }
 
+    /// 完整恢复后重新读取文件，并丢弃与恢复前数据库对应的编辑基线。
+    func reloadFromDisk() throws {
+        let next = try Self.readContents(at: fileURL)
+        contents = next
+        highlightSessions = [:]
+        cardSessions = [:]
+    }
+
+    /// 仅校验导入副本，绝不写入当前草稿目录。
+    static func validateBackupFile(at url: URL) throws -> (highlights: Int, cards: Int) {
+        let value = try readContents(at: url)
+        return (value.highlights.filter(\.hasUnsavedChanges).count,
+                value.cards.filter(\.hasUnsavedChanges).count)
+    }
+
+    private static func readContents(at url: URL) throws -> FileContents {
+        guard FileManager.default.fileExists(atPath: url.path) else { return FileContents() }
+        let value = try JSONDecoder().decode(FileContents.self, from: Data(contentsOf: url))
+        guard value.version == 1 else { throw DraftError.unsupportedVersion }
+        guard Set(value.highlights.map(\.id)).count == value.highlights.count,
+              Set(value.cards.map(\.id)).count == value.cards.count else { throw DraftError.invalidContents }
+        return value
+    }
+
     private func replace(with next: FileContents) throws {
         // 不因打开未改动的表单创建目录或文件。
         if contents.highlights.isEmpty, contents.cards.isEmpty,
@@ -120,7 +144,13 @@ final class EditorDraftPersistence {
 
     private enum DraftError: LocalizedError {
         case unsupportedVersion
-        var errorDescription: String? { "草稿文件来自较新版本，请先升级 KongReview。原文件已保留。" }
+        case invalidContents
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedVersion: return "草稿文件来自较新版本，请先升级 KongReview。原文件已保留。"
+            case .invalidContents: return "草稿文件包含重复记录，无法恢复。原文件已保留。"
+            }
+        }
     }
 }
 

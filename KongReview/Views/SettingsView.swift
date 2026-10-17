@@ -12,6 +12,7 @@ enum SettingsKeys {
 }
 
 struct SettingsView: View {
+    @Environment(LibraryStore.self) private var store
     var body: some View {
         TabView {
             QuickCaptureSettings()
@@ -26,6 +27,7 @@ struct SettingsView: View {
                 .tabItem { Label("数据", systemImage: "externaldrive") }
         }
         .frame(width: 600, height: 500)
+        .disabled(store.fullBackupBusy)
     }
 }
 
@@ -231,6 +233,14 @@ private struct DataSettings: View {
                             NSWorkspace.shared.activateFileViewerSelecting([dir])
                         }
                     }
+                }
+            }
+            Section("完整备份与换机恢复") {
+                Text("将资料、已存入应用的图片与音频、草稿和可迁移设置保存为一个文件。恢复前会校验并预览，随后另存恢复前的完整资料。")
+                    .font(.callout)
+                HStack {
+                    Button("导出完整备份…") { store.exportFullBackup() }
+                    Button("恢复完整备份…") { store.chooseFullBackupRestore() }
                 }
             }
             Section("存储") {
