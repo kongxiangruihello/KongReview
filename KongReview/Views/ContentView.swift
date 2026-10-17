@@ -35,6 +35,7 @@ struct ContentView: View {
             }
         }
         .modifier(GlobalSearchPresentation())
+        .modifier(LearningExplorerPresentation())
         .modifier(FullBackupPresentation())
         .sheet(item: $store.editorDraft) { _ in
             HighlightEditorView().modifier(EditorDraftCloseConfirmation(kind: .highlight))

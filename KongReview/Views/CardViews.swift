@@ -304,6 +304,7 @@ struct StudyView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle("学习 · \(study.deck ?? "")")
+        .disabled(store.learningExplorer != nil)
         .onAppear { if study.current == nil && !study.finished { store.nextCard() } }
         .task {
             store.refreshDerived()

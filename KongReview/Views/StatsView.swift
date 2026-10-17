@@ -29,6 +29,7 @@ struct StatsView: View {
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                Button("打开学习记录日历") { store.learningExplorer = .init(route: .day(Date())) }.handCursor()
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                     tile("今天 · 全库", "\(activity.today.highlights) 条摘录\n\(activity.today.cards) 张卡 · \(activity.today.cardRatings) 次评分", "sun.max")
                     tile("连续学习", "\(activity.currentStreak) 天", "flame")

@@ -48,6 +48,21 @@ struct CardDuplicateReviewView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if state?.mode == .similar {
+                HStack {
+                    if state?.scanning == true { Button("暂停扫描") { store.pauseFullSimilarity() } }
+                    else if state?.paused == true {
+                        Button("继续扫描") { store.continueFullSimilarity() }.disabled((state?.groups.count ?? 0) >= 200)
+                        Button("清空本批建议并继续") {
+                            store.duplicateCardReview?.groups = []
+                            store.duplicateCardReview?.keeper = [:]
+                            store.duplicateCardReview?.position = 0
+                            store.continueFullSimilarity()
+                        }
+                        Text("暂停后可比较和整理；关闭窗口将结束本次扫描。").font(.caption).foregroundStyle(.secondary)
+                    }
+                }.disabled(state?.processing == true)
+            }
             if state?.scanning == true {
                 VStack(spacing: 12) {
                     ProgressView()
@@ -97,7 +112,7 @@ struct CardDuplicateReviewView: View {
                     .disabled(state.processing || state.keeper[group.id] == nil)
                 }
             } else {
-                ContentUnavailableView(state?.error == nil ? (state?.mode == .similar ? "本次扫描未发现高度相似的记忆卡" : "没有待整理的重复记忆卡") : "扫描未完成",
+                ContentUnavailableView(state?.error == nil ? (state?.mode == .similar ? (state?.paused == true ? "扫描已暂停，暂无待比较建议" : "本次扫描未发现高度相似的记忆卡") : "没有待整理的重复记忆卡") : "扫描未完成",
                                        systemImage: state?.error == nil ? "checkmark.circle" : "exclamationmark.triangle")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -113,6 +128,7 @@ struct CardDuplicateReviewView: View {
         .padding(22)
         .frame(minWidth: 800, idealWidth: 960, minHeight: 620, idealHeight: 740)
         .interactiveDismissDisabled(state?.processing == true)
+        .onDisappear { store.fullSimilarityTask?.cancel(); store.fullSimilaritySession = nil }
         .confirmationDialog("保留选中的卡片及其学习进度？", isPresented: Binding(
             get: { store.duplicateCardReview?.confirmingGroupID != nil },
             set: { if !$0 { store.duplicateCardReview?.confirmingGroupID = nil } }

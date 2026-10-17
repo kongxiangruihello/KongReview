@@ -513,7 +513,8 @@ struct HighlightMenu: View {
                 if let c = try? store.db.cards().first(where: { $0.highlightId == id }) { store.editCard(c) }
             }
         } else {
-            Button("做成记忆卡") { store.makeCard(from: highlight) }
+            Button("做成记忆卡／查看已有卡") { store.makeCard(from: highlight) }
+            if let id = highlight.id { Button("查看关联记忆卡") { store.learningExplorer = .init(route: .related(id)) } }
         }
         if highlight.isDiscarded {
             Button("恢复（取消弃置）") {

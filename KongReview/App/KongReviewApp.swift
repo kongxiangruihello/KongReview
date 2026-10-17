@@ -53,7 +53,7 @@ struct KongReviewApp: App {
                     store.editingSource = Source(title: "")
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-                            }.disabled(store.fullBackupBusy)
+                            }.disabled(store.fullBackupBusy || store.learningExplorer != nil)
             }
             CommandMenu("回顾") {
                 Group {
@@ -62,14 +62,14 @@ struct KongReviewApp: App {
                 Button("记忆卡") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("回顾统计") { store.selection = .stats }
-                            }.disabled(store.fullBackupBusy)
+                            }.disabled(store.fullBackupBusy || store.learningExplorer != nil)
             }
             CommandMenu("查找") {
                 Group {
                 Button("全局搜索…") { WindowOpener.showMain(); store.showGlobalSearch() }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
                     .disabled(!store.canShowGlobalSearch)
-                            }.disabled(store.fullBackupBusy)
+                            }.disabled(store.fullBackupBusy || store.learningExplorer != nil)
             }
             CommandGroup(replacing: .help) {
                 Group {
@@ -78,7 +78,7 @@ struct KongReviewApp: App {
                     WindowOpener.showMain()
                 }
                 Button("导出诊断信息…") { ExportService.exportDiagnostics(store: store) }
-                            }.disabled(store.fullBackupBusy)
+                            }.disabled(store.fullBackupBusy || store.learningExplorer != nil)
             }
             CommandGroup(after: .importExport) {
                 Group {
@@ -100,7 +100,7 @@ struct KongReviewApp: App {
                     store.selection = .cards
                     store.apkgExport = ApkgExportRequest(allDecks: decks, decks: Set(decks))
                 }
-                            }.disabled(store.fullBackupBusy)
+                            }.disabled(store.fullBackupBusy || store.learningExplorer != nil)
             }
         }
 

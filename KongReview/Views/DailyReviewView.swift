@@ -344,7 +344,7 @@ struct DailyReviewView: View {
 
     /// 写按语时返回 nil，让单键快捷键失效
     private func key(_ k: KeyEquivalent) -> KeyboardShortcut? {
-        editingNote ? nil : KeyboardShortcut(k, modifiers: [])
+        (editingNote || store.learningExplorer != nil) ? nil : KeyboardShortcut(k, modifiers: [])
     }
 
     /// 回顾卡片：出处头 → 正文、译文、按语 → 折叠的出处详情 → 右下角操作图标。
@@ -466,8 +466,8 @@ struct DailyReviewView: View {
             CardIconButton(icon: "square.and.pencil", help: "就地编辑（E）；按住 ⌥ 点击打开编辑面板") {
                 if NSEvent.modifierFlags.contains(.option) { store.edit(h) } else { startInlineEdit(h) }
             }
-            CardIconButton(icon: hasCard ? "brain.fill" : "brain", help: hasCard ? "已做成记忆卡" : "做成记忆卡（M）") {
-                if !hasCard { makeCard(card) }
+            CardIconButton(icon: hasCard ? "brain.fill" : "brain", help: hasCard ? "查看关联记忆卡" : "做成记忆卡（M）") {
+                if hasCard, let id = card.highlight.id { store.learningExplorer = .init(route: .related(id)) } else { makeCard(card) }
             }
             CardIconButton(icon: "rectangle.dashed", help: "做成填空卡（C）") { store.startCloze(for: h) }
             Menu {
@@ -600,7 +600,7 @@ struct DailyReviewView: View {
                 Button("") { act(.favorite, card) }.keyboardShortcut(key("f"))
                 Button("") { startInlineEdit(card.highlight) }.keyboardShortcut(key("e"))
                 Button("") { store.edit(card.highlight) }
-                    .keyboardShortcut(editingNote ? nil : KeyboardShortcut("e", modifiers: .option))
+                    .keyboardShortcut((editingNote || store.learningExplorer != nil) ? nil : KeyboardShortcut("e", modifiers: .option))
                 Button("") { store.startCloze(for: card.highlight) }.keyboardShortcut(key("c"))
                 Button("") { state.showRelated.toggle() }.keyboardShortcut(key("r"))
             }

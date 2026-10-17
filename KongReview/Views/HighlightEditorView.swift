@@ -20,6 +20,7 @@ struct HighlightEditorView: View {
                 Label(notice, systemImage: "info.circle").font(.callout).foregroundStyle(.orange).padding()
             }
             Form {
+                if let id = draft.highlight.id { RelatedCardsInline(highlightID: id) }
                 Section {
                     RichEditor(text: draftBinding.highlight.text, font: .highlight, placeholder: "摘录原文",
                                minHeight: 150, focus: draft.isNew, slot: "hl-text",

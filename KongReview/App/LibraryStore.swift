@@ -35,6 +35,11 @@ final class LibraryStore {
     var derivedStatisticsError: String?
     var cardLearningSummaryScope: CardLearningScope = .all
     let globalSearch = GlobalSearchState()
+    var learningExplorer: LearningExplorerRequest?
+    var learningExplorerPendingTarget: GlobalSearchTarget?
+    @ObservationIgnored var fullSimilaritySession: FullSimilaritySession?
+    @ObservationIgnored var fullSimilarityTask: Task<Void, Never>?
+    @ObservationIgnored var fullSimilarityRunID = UUID()
     var fullBackupBusy = false
     var fullBackupRestore: PreparedFullBackup?
 
@@ -773,6 +778,10 @@ final class LibraryStore {
     /// 单条摘录做成记忆卡（牌组“摘录”）；不弹提示，界面上的脑形图标会变色
     func makeCard(from highlight: Highlight) {
         guard let id = highlight.id else { return }
+        if let existing = try? db.cards(highlightIds: [id]), !existing.isEmpty {
+            learningExplorer = .init(route: .related(id))
+            return
+        }
         perform { _ = try db.makeCards(fromHighlights: [id], style: CitationSettings.style) }
     }
 
@@ -926,6 +935,7 @@ final class LibraryStore {
     }
 
     func answerCurrent(_ a: CardAnswer) {
+        guard learningExplorer == nil else { return }
         guard !fullBackupBusy else { return }
         checkDayChange()
         guard let c = study.current else { return }
@@ -959,7 +969,7 @@ final class LibraryStore {
             && citationCheck == nil && editionImport == nil && chapterProgressRequest == nil
             && backupList == nil && duplicateCardReview == nil && cardSyncOffer == nil
             && !showsDraftRecovery && !closingHighlightEditor && !closingCardEditor
-            && !globalSearch.isPresented && fullBackupRestore == nil && !fullBackupBusy
+            && learningExplorer == nil && !globalSearch.isPresented && fullBackupRestore == nil && !fullBackupBusy
     }
 
     var canUndoLastCardRating: Bool {

@@ -6,7 +6,7 @@ struct GlobalSearchPresentation: ViewModifier {
     func body(content: Content) -> some View {
         @Bindable var state = store.globalSearch
         return content.sheet(isPresented: $state.isPresented, onDismiss: {
-            if let target = state.takePendingTarget() { store.openGlobalSearchResult(target) }
+            if let target = state.takePendingTarget() { store.learningExplorer = .init(route: .document(target, state.normalizedQuery)) }
         }) {
             GlobalSearchView()
         }
@@ -160,7 +160,7 @@ struct GlobalSearchView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Text(hit.title.isEmpty ? hit.target.kind.title : hit.title)
+                    Text(KeywordHighlight.attributed(hit.title.isEmpty ? hit.target.kind.title : hit.title, query: store.globalSearch.normalizedQuery))
                         .font(.body.weight(.medium)).foregroundStyle(ReviewPalette.ink).lineLimit(2)
                     if let badge = hit.badge {
                         Text(badge).font(.caption2).foregroundStyle(ReviewPalette.sub)
@@ -169,10 +169,10 @@ struct GlobalSearchView: View {
                     }
                 }
                 if !hit.preview.isEmpty {
-                    Text(hit.preview).font(.callout).foregroundStyle(ReviewPalette.ink.opacity(0.85)).lineLimit(3)
+                    Text(KeywordHighlight.attributed(hit.preview, query: store.globalSearch.normalizedQuery)).font(.callout).foregroundStyle(ReviewPalette.ink.opacity(0.85)).lineLimit(3)
                 }
                 if !hit.context.isEmpty {
-                    Text(hit.context).font(.caption).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+                    Text(KeywordHighlight.attributed(hit.context, query: store.globalSearch.normalizedQuery)).font(.caption).foregroundStyle(ReviewPalette.sub).lineLimit(1)
                 }
             }
             Spacer(minLength: 8)

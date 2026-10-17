@@ -72,6 +72,8 @@ extension LibraryStore {
         do { try draftPersistence?.flush() }
         catch { report(error); return }
         invalidateDerivedStatistics()
+        fullSimilarityTask?.cancel()
+        fullSimilaritySession = nil
         fullBackupBusy = true
         maintenanceProgress = "正在保存恢复前的完整备份并恢复资料…"
         fullBackupRestore = nil
@@ -125,7 +127,7 @@ extension LibraryStore {
     }
 
     private var hasBlockingFullBackupPanel: Bool {
-        globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
+        learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
             || study.cardTagEdit != nil || study.renamingDeck != nil || duplicateCardReview != nil || duplicateReview != nil
             || newNotebookRequest != nil || addArticleDraft != nil || articleSourceDraft != nil || clozeDraft != nil
             || backupList != nil || tagEditor != nil || showTagManager || bibliographyRequest != nil

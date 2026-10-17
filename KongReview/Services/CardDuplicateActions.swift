@@ -6,6 +6,7 @@ struct CardDuplicateReview: Identifiable {
     var scanID = UUID()
     var scanning = true
     var processing = false
+    var paused = false
     var groups: [CardDuplicateGroup] = []
     var position = 0
     var keeper: [String: Int64] = [:]
@@ -30,6 +31,9 @@ extension LibraryStore {
         if let scopeDeck { state.scopeDeck = scopeDeck.isEmpty ? nil : scopeDeck }
         state.scanID = UUID()
         state.scanning = true
+        state.paused = false
+        fullSimilarityTask?.cancel()
+        fullSimilaritySession = nil
         state.backupDone = false
         state.groups = []
         state.position = 0
@@ -38,32 +42,17 @@ extension LibraryStore {
         state.error = nil
         state.scanNote = nil
         duplicateCardReview = state
+        if state.mode == .similar { continueFullSimilarity(); return }
         let token = state.scanID
         let db = self.db
-        let scanMode = state.mode
         let deck = state.scopeDeck
         Task.detached(priority: .userInitiated) {
             do {
-                let groups: [CardDuplicateGroup]
-                let note: String?
-                if scanMode == .similar {
-                    let scan = try await db.similarCardGroups(deck: deck)
-                    groups = scan.groups
-                    var parts = ["\(deck.map { "牌组「\($0)」" } ?? "全部牌组")：相似扫描最多检查最近 \(CardSimilarity.cardLimit) 张卡片；本次完成比对 \(scan.scannedCount) 张"]
-                    if scan.omittedCount > 0 { parts.append("另有 \(scan.omittedCount) 张超出范围、正文过长或缺少正反面，未参与比对") }
-                    if scan.comparisonsLimited { parts.append("已达到候选比对上限，结果可能不完整") }
-                    if scan.suggestionsLimited { parts.append("本次最多显示 \(CardSimilarity.suggestionLimit) 组建议") }
-                    if scan.textBudgetLimited { parts.append("已达到正文总量上限，请选择单个牌组继续比较") }
-                    parts.append("提示仅供人工比较，相似不代表重复")
-                    note = parts.joined(separator: "；") + "。"
-                } else {
-                    groups = try await db.cardDuplicateGroups(deck: deck)
-                    note = nil
-                }
+                let groups = try await db.cardDuplicateGroups(deck: deck)
                 await MainActor.run {
                     guard self.duplicateCardReview?.scanID == token else { return }
                     self.duplicateCardReview?.groups = groups
-                    self.duplicateCardReview?.scanNote = note
+                    self.duplicateCardReview?.scanNote = nil
                     self.duplicateCardReview?.scanning = false
                 }
             } catch {
@@ -138,6 +127,8 @@ extension LibraryStore {
 
     func closeDuplicateCardReview() {
         guard duplicateCardReview?.processing != true else { return }
+        fullSimilarityTask?.cancel()
+        fullSimilaritySession = nil
         duplicateCardReview = nil
     }
 }

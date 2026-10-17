@@ -89,6 +89,10 @@ struct DeckHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 hero
+                HStack {
+                    Button("难卡集中练习") { store.learningExplorer = .init(route: .difficult) }
+                    Button("学习记录日历") { store.learningExplorer = .init(route: .day(Date())) }
+                }
                 VStack(alignment: .leading, spacing: 14) {
                     sectionHeader
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 560), spacing: 18, alignment: .top)],
@@ -541,6 +545,9 @@ struct ReviewHeatmapView: View {
                 .frame(width: Self.cell, height: Self.cell)
                 .overlay(RoundedRectangle(cornerRadius: 2.5).stroke(isToday ? ReviewPalette.ink.opacity(0.5) : .clear, lineWidth: 1))
                 .help(Self.tooltip(date, n: n, deck: day?.topDeck, calendar: calendar))
+                .onTapGesture { store.learningExplorer = .init(route: .day(date)) }
+                .handCursor()
+                .accessibilityAddTraits(.isButton)
         } else {
             Color.clear.frame(width: Self.cell, height: Self.cell)
         }

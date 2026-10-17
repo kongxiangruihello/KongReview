@@ -38,14 +38,14 @@ enum CardSimilarity {
         var signature: CardDuplicateSignature
     }
 
-    static func face(_ raw: String) -> TextFace? {
+    static func face(_ raw: String, includeLongText: Bool = false) -> TextFace? {
         // 超长 HTML 也不进入渲染，避免单张卡片占满后台任务。
-        guard raw.utf8.count <= 48_000 else { return nil }
+        guard includeLongText || raw.utf8.count <= 48_000 else { return nil }
         let rendered = Card.renderHTML(raw)
         let text = Markdown.plainText(fromHTML: rendered)
             .precomposedStringWithCanonicalMapping
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard !text.isEmpty, text.count <= textLimit else { return nil }
+        guard !text.isEmpty, includeLongText || text.count <= textLimit else { return nil }
         let chars = Array(text)
         let grams = Set(chars.indices.dropLast().map { String(chars[$0...($0 + 1)]) })
         // 相同文字但不同图片、音频、链接不能因为去掉 HTML 而被视为相似。
@@ -61,8 +61,8 @@ enum CardSimilarity {
         return TextFace(text: text, grams: grams, media: media)
     }
 
-    static func candidate(_ card: Card) -> Candidate? {
-        guard let front = face(card.front), let back = face(card.back) else { return nil }
+    static func candidate(_ card: Card, includeLongText: Bool = false) -> Candidate? {
+        guard let front = face(card.front, includeLongText: includeLongText), let back = face(card.back, includeLongText: includeLongText) else { return nil }
         let signature = CardDuplicateSignature(card)
         var metadata = signature
         metadata.front = ""
@@ -86,7 +86,7 @@ enum CardSimilarity {
     }
 
     static func score(_ a: Card, _ b: Card) -> Double? {
-        guard let first = candidate(a), let second = candidate(b) else { return nil }
+        guard let first = candidate(a, includeLongText: true), let second = candidate(b, includeLongText: true) else { return nil }
         return score(first, second)
     }
 
