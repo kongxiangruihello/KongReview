@@ -1,7 +1,7 @@
 import SwiftUI
 import KongReviewCore
 
-/// 首页与今日回顾完成页共用的日课卡：统计、近七天、今日一句和下一步。
+/// 今日回顾完成页的日课卡：统计、近七天、今日一句和下一步。
 struct DailyReviewSummaryCard<Actions: View>: View {
     @Environment(LibraryStore.self) private var store
     let title: String

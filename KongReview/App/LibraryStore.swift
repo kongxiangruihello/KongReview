@@ -620,12 +620,22 @@ final class LibraryStore {
     var stats: ReviewStats.Summary = .empty
     /// 各牌组今天的新卡 / 学习中 / 待复习
     var deckSummaryCache: [DeckSummary] = []
+    /// 首页两项学习任务的进度与去重记录
+    var homeLearningSummary: HomeLearningSummary = .empty
 
     func refreshDerived() {
+        let now = Date()
         staleSummary = (try? db.staleSummary()) ?? AppDatabase.StaleSummary()
-        stats = (try? db.reviewSummary(now: Date(), days: 30)) ?? .empty
-        deckSummaryCache = (try? db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
+        stats = (try? db.reviewSummary(now: now, days: 30)) ?? .empty
+        deckSummaryCache = (try? db.deckSummaries(now: now, newPerDay: CardSettings.newPerDay,
                                                   reviewsPerDay: CardSettings.reviewsPerDay)) ?? []
+        homeLearningSummary = (try? db.homeLearningSummary(
+            now: now,
+            dailyReviewCount: max(0, UserDefaults.standard.object(forKey: SettingsKeys.dailyCount) as? Int ?? 10),
+            newCardsPerDay: CardSettings.newPerDay,
+            reviewsPerDay: CardSettings.reviewsPerDay,
+            deckSummaries: deckSummaryCache
+        )) ?? .empty
     }
 
     // MARK: 1.0：相关摘录
