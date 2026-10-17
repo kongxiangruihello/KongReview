@@ -233,9 +233,11 @@ struct CardIconButton: View {
                 .foregroundStyle(active ? ReviewPalette.again : ReviewPalette.sub)
                 .frame(width: 28, height: 26)
                 .contentShape(Rectangle())
+                .help(help)
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
         .handCursor()
     }
 }

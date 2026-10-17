@@ -260,7 +260,7 @@ struct DailyReviewView: View {
         }
     }
 
-    /// 与首页共用截图中的日课卡；回顾结束后保留从头再看、再抽一组等操作。
+    /// 回顾结束后的日课卡，保留从头再看、再抽一组等操作。
     private var finished: some View {
         let due = store.dueCardCount()
         return ScrollView {
@@ -309,7 +309,7 @@ struct DailyReviewView: View {
         editingNote ? nil : KeyboardShortcut(k, modifiers: [])
     }
 
-    /// 回顾卡片：出处头（封面、书名、作者，右侧写按语与展开详情）→ 正文 → 译文、按语 → 折叠的出处详情 → 右下角图标
+    /// 回顾卡片：出处头 → 正文、译文、按语 → 折叠的出处详情 → 右下角操作图标。
     private func reviewCard(_ card: ReviewCard) -> some View {
         let h = card.highlight
         let source = store.source(for: h)
@@ -337,10 +337,6 @@ struct DailyReviewView: View {
                     }
                 }
                 Spacer(minLength: 12)
-                CardIconButton(icon: h.note == nil ? "text.bubble" : "text.bubble.fill",
-                               help: h.note == nil ? "写按语（N）" : "改按语（N）") {
-                    state.noteDraft = h.note ?? ""
-                }
                 CardIconButton(icon: state.showDetails ? "chevron.up" : "chevron.down",
                                help: state.showDetails ? "收起出处详情" : "展开出处详情（完整引文、位置、标签）") {
                     state.showDetails.toggle()
@@ -388,55 +384,98 @@ struct DailyReviewView: View {
 
             relatedSection(h)
             Rectangle().fill(ReviewPalette.hair).frame(height: 1).padding(.top, 22)
-            HStack(spacing: 14) {
-                Text("添加于 \(h.createdAt.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub.opacity(0.8))
-                Spacer()
-                CardIconButton(icon: h.isFavorite ? "heart.fill" : "heart", help: "收藏（F）", active: h.isFavorite) {
-                    act(.favorite, card)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    addedDate(h)
+                    Spacer(minLength: 14)
+                    cardActions(card)
                 }
-                CardIconButton(icon: "square.and.pencil", help: "就地编辑（E）；按住 ⌥ 点击打开编辑面板") {
-                    if NSEvent.modifierFlags.contains(.option) { store.edit(h) } else { startInlineEdit(h) }
-                }
-                CardIconButton(icon: hasCard ? "brain.fill" : "brain", help: hasCard ? "已做成记忆卡" : "做成记忆卡（M）") {
-                    if !hasCard { makeCard(card) }
-                }
-                CardIconButton(icon: "rectangle.dashed", help: "做成填空卡（C）") { store.startCloze(for: h) }
-                Menu {
-                    Button((h.frequency ?? 0) > 0 ? "✓ 多出现" : "多出现") { store.setFrequency(1, for: h) }
-                    Button((h.frequency ?? 0) == 0 ? "✓ 正常" : "正常") { store.setFrequency(nil, for: h) }
-                    Button((h.frequency ?? 0) < 0 ? "✓ 少出现" : "少出现") { store.setFrequency(-1, for: h) }
-                    Divider()
-                    Button("不再出现（弃置）") { act(.discard, card) }
-                } label: {
-                    Image(systemName: (h.frequency ?? 0) > 0 ? "dial.high" : ((h.frequency ?? 0) < 0 ? "dial.low" : "dial.medium"))
-                        .font(.system(size: 14))
-                        .foregroundStyle((h.frequency ?? 0) == 0 ? ReviewPalette.sub : ReviewPalette.accent)
-                }
-                .menuStyle(.borderlessButton)
-                .handCursor()
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .frame(width: 28, height: 26)
-                .help("这条摘录以后出现得多一些还是少一些")
-                Menu {
-                    Button("复制文字（含出处）") { copy(h, source: source) }
-                    Button("生成分享图…") { store.shareImageHighlight = h }
-                    if let id = h.id {
-                        Divider()
-                        AddToNotebookMenu(ids: [id])
+                VStack(alignment: .leading, spacing: 14) {
+                    addedDate(h)
+                    HStack {
+                        Spacer(minLength: 0)
+                        cardActions(card)
                     }
-                } label: {
-                    Image(systemName: "square.and.arrow.up").font(.system(size: 14)).foregroundStyle(ReviewPalette.sub)
                 }
-                .menuStyle(.borderlessButton)
-                .handCursor()
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .frame(width: 28, height: 26)
-                .help("复制或生成分享图")
             }
             .padding(.top, 12)
+        }
+    }
+
+    private func addedDate(_ h: Highlight) -> some View {
+        Text("添加于 \(h.createdAt.formatted(date: .abbreviated, time: .omitted))")
+            .font(.system(size: 11.5))
+            .foregroundStyle(ReviewPalette.sub.opacity(0.8))
+            .fixedSize()
+    }
+
+    private func cardActions(_ card: ReviewCard) -> some View {
+        let h = card.highlight
+        let source = store.source(for: h)
+        let hasCard = store.cardHighlightIDs.contains(card.id)
+        let hasNote = !(h.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack(spacing: 14) {
+            CardIconButton(icon: h.isFavorite ? "heart.fill" : "heart",
+                           help: h.isFavorite ? "取消收藏（F）" : "收藏（F）", active: h.isFavorite) {
+                act(.favorite, card)
+            }
+            CardIconButton(icon: hasNote ? "text.bubble.fill" : "text.bubble",
+                           help: hasNote ? "编辑按语（N）" : "添加按语（N）") {
+                state.inlineDraft = nil
+                state.noteDraft = h.note ?? ""
+            }
+            .keyboardShortcut(key("n"))
+            .disabled(editingNote)
+            CardIconButton(icon: "square.and.pencil", help: "就地编辑（E）；按住 ⌥ 点击打开编辑面板") {
+                if NSEvent.modifierFlags.contains(.option) { store.edit(h) } else { startInlineEdit(h) }
+            }
+            CardIconButton(icon: hasCard ? "brain.fill" : "brain", help: hasCard ? "已做成记忆卡" : "做成记忆卡（M）") {
+                if !hasCard { makeCard(card) }
+            }
+            CardIconButton(icon: "rectangle.dashed", help: "做成填空卡（C）") { store.startCloze(for: h) }
+            Menu {
+                Button((h.frequency ?? 0) > 0 ? "✓ 多出现" : "多出现") { store.setFrequency(1, for: h) }
+                Button((h.frequency ?? 0) == 0 ? "✓ 正常" : "正常") { store.setFrequency(nil, for: h) }
+                Button((h.frequency ?? 0) < 0 ? "✓ 少出现" : "少出现") { store.setFrequency(-1, for: h) }
+                Divider()
+                Button("不再出现（弃置）") { act(.discard, card) }
+            } label: {
+                Image(systemName: (h.frequency ?? 0) > 0 ? "dial.high" : ((h.frequency ?? 0) < 0 ? "dial.low" : "dial.medium"))
+                    .font(.system(size: 14))
+                    .foregroundStyle((h.frequency ?? 0) == 0 ? ReviewPalette.sub : ReviewPalette.accent)
+                    .frame(width: 28, height: 26)
+                    .contentShape(Rectangle())
+                    .help("调整这条摘录的回顾频率")
+            }
+            .menuStyle(.borderlessButton)
+            .handCursor()
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .frame(width: 28, height: 26)
+            .help("调整这条摘录的回顾频率")
+            .accessibilityLabel("调整回顾频率")
+            Menu {
+                Button("复制文字（含出处）") { copy(h, source: source) }
+                Button("生成分享图…") { store.shareImageHighlight = h }
+                if let id = h.id {
+                    Divider()
+                    AddToNotebookMenu(ids: [id])
+                }
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 14))
+                    .foregroundStyle(ReviewPalette.sub)
+                    .frame(width: 28, height: 26)
+                    .contentShape(Rectangle())
+                    .help("复制、分享或加入专题笔记本")
+            }
+            .menuStyle(.borderlessButton)
+            .handCursor()
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .frame(width: 28, height: 26)
+            .help("复制、分享或加入专题笔记本")
+            .accessibilityLabel("复制、分享或加入专题笔记本")
         }
     }
 
@@ -496,7 +535,7 @@ struct DailyReviewView: View {
         .padding(.top, 22)
     }
 
-    /// 卡片下方的操作条：上一条 ｜ 弃置 · 按语 · 记忆卡 ｜ 保留（主操作）
+    /// 卡片下方的操作条：上一条 ｜ 弃置 · 记忆卡 ｜ 保留（主操作）。
     @ViewBuilder
     private func controls(for card: ReviewCard) -> some View {
         let hasCard = store.cardHighlightIDs.contains(card.id)
@@ -507,8 +546,6 @@ struct DailyReviewView: View {
             PillButton(icon: "xmark", title: "弃置", key: "⌫") { act(.discard, card) }
                 .keyboardShortcut(key(.delete))
                 .help("以后不再出现（可在列表中恢复）")
-            PillButton(icon: "text.bubble", title: "按语", key: "N", disabled: editingNote) { state.inlineDraft = nil; state.noteDraft = card.highlight.note ?? "" }
-                .keyboardShortcut(key("n"))
             PillButton(icon: "brain", title: hasCard ? "已是记忆卡" : "记忆卡", key: "M", disabled: hasCard) { makeCard(card) }
                 .keyboardShortcut(key("m"))
             BarSeparator()
