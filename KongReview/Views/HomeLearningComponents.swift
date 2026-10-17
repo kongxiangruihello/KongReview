@@ -120,6 +120,13 @@ struct HomeLearningDashboard: View {
                 .font(.system(size: 11))
                 .foregroundStyle(ReviewPalette.sub)
                 .fixedSize(horizontal: false, vertical: true)
+            if summary.cardsDueCount == 0, let detail = summary.cardAvailability?.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(ReviewPalette.sub)
+                    .lineLimit(2)
+                    .help(detail)
+            }
         }
         .frame(minHeight: 58, alignment: .top)
         .help("今日已学按不同卡片计数；同一张卡反复评分只算一张。当前待学按到期时间更新，可能包含今天已经学过的卡。")
@@ -142,6 +149,15 @@ struct HomeLearningDashboard: View {
     }
 
     private var cardsStatus: String {
+        if let availability = summary.cardAvailability {
+            switch availability.kind {
+            case .waitingLearning: return "稍后可学"
+            case .dailyLimit: return "已达上限"
+            case .allSuspended: return "全部暂停"
+            case .scheduled: return "暂无到期"
+            default: break
+            }
+        }
         if summary.cardsIsComplete { return "当前待学已完成" }
         return summary.activeCardCount > 0 ? "待学习" : "尚无卡片"
     }

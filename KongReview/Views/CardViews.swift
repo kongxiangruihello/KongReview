@@ -305,10 +305,20 @@ struct StudyView: View {
         .background(ReviewPalette.page)
         .navigationTitle("学习 · \(study.deck ?? "")")
         .onAppear { if study.current == nil && !study.finished { store.nextCard() } }
+        .task {
+            store.refreshDerived()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { break }
+                store.checkDayChange()
+                store.refreshDerived()
+            }
+        }
     }
 
     private var counts: StudyQueue.Counts {
         _ = store.revision
+        if let summary = store.cardLearningSummary { return summary.pending }
         if study.notebookId != nil { return study.notebookCounts }
         guard let deck = study.deck,
               let s = store.deckSummaryCache.first(where: { $0.name == deck }) else { return .init() }
@@ -318,12 +328,10 @@ struct StudyView: View {
     private var header: some View {
         HStack {
             Button {
-                study.deck = nil
-                study.notebookId = nil
-                study.current = nil
-                study.finished = false
+                store.openCardsHome()
             } label: { Label("牌组", systemImage: "chevron.left") }
                 .keyboardShortcut(.escape, modifiers: [])
+                .handCursor()
             Spacer()
             let c = counts
             HStack(spacing: 16) {
@@ -332,8 +340,14 @@ struct StudyView: View {
                 headerCount(DeckColors.reviewColor, "待复习", c.review)
             }
             Spacer()
-            // 与左边的返回按钮对称，让计数居中
-            Label("牌组", systemImage: "chevron.left").hidden()
+            Button { store.undoLastCardRating() } label: {
+                Label("撤销评分", systemImage: "arrow.uturn.backward")
+            }
+            .keyboardShortcut(store.cardRatingShortcutIsAvailable
+                              ? KeyboardShortcut("z", modifiers: .command) : nil)
+            .disabled(!store.canUndoLastCardRating)
+            .handCursor()
+            .help("撤销上一笔评分，恢复这张卡原来的学习安排（⌘Z）")
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -445,83 +459,24 @@ struct StudyView: View {
         }
     }
 
-    /// 学完：页面中部的总结卡——今日复习次数、正确率、明天到期
+    /// 当前范围的学习总结：张数去重、评分次数独立，待学状态随排程更新。
     private var finished: some View {
-        let _ = store.revision
-        let start = Calendar.current.startOfDay(for: Date())
-        let answers = (try? store.db.cardAnswersToday()) ?? (total: 0, correct: 0)
-        let accuracy = answers.total == 0 ? "—" : "\(Int((Double(answers.correct) / Double(answers.total) * 100).rounded()))"
-        let tomorrowEnd = Calendar.current.date(byAdding: .day, value: 2, to: start) ?? start
-        let deckCards: [Card] = {
-            if let nid = study.notebookId {
-                let ids = ((try? store.db.notebookHighlights(nid)) ?? []).compactMap(\.id)
-                return (try? store.db.cards(highlightIds: ids)) ?? []
+        ScrollView {
+            if let summary = store.cardLearningSummary {
+                CardLearningCompletionView(summary: summary,
+                                           globalStudiedCards: store.learningActivitySummary.today.cards,
+                                           globalRatingCount: store.learningActivitySummary.today.cardRatings,
+                                           onReturn: { store.openCardsHome() },
+                                           onResume: { store.nextCard(); store.refreshDerived() })
+                    .padding(24)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ProgressView("正在更新学习统计…").padding(40)
             }
-            return study.deck.flatMap { try? store.db.cards(deck: $0) } ?? []
-        }()
-        let dueTomorrow = deckCards.filter { $0.state != .new && !$0.isSuspended && $0.due < tomorrowEnd }.count
-        return VStack(spacing: 0) {
-            // 1.8：学完盖一枚“日课已毕”
-            SealStamp(text: "日课已毕", size: 20)
-                .padding(.bottom, 4)
-            Text(study.notebookId != nil ? "这本笔记本的卡片今天学完了" : "这个牌组今天学完了")
-                .font(.system(size: 26, weight: .semibold, design: .serif))
-                .foregroundStyle(ReviewPalette.ink)
-                .padding(.top, 12)
-            Text(study.deck ?? "")
-                .font(.system(size: 13))
-                .foregroundStyle(ReviewPalette.sub)
-                .padding(.top, 6)
-                .padding(.bottom, 24)
-            HStack(spacing: 0) {
-                summaryStat("\(answers.total)", unit: "次", label: "今日复习（全部牌组）")
-                Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                summaryStat(accuracy, unit: answers.total == 0 ? "" : "%", label: "答对率（非“重来”）")
-                Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                summaryStat("\(dueTomorrow)", unit: "张", label: "明天到期", accent: true)
-            }
-            .frame(height: 100)
-            .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
-            .overlay(alignment: .bottom) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
-            Text("学习中的卡片到时间会再出现；新卡与复习数量受每日上限约束。")
-                .font(.system(size: 12.5))
-                .foregroundStyle(ReviewPalette.sub)
-                .padding(.top, 18)
-            Text("温故而知新，可以为师矣。——《论语·为政》")
-                .font(.custom("Kaiti SC", size: 13))
-                .foregroundStyle(ReviewPalette.sub.opacity(0.9))
-                .padding(.top, 10)
-            HStack(spacing: 8) {
-                PillButton(icon: "chevron.left", title: "返回牌组", style: .primary) {
-                    study.deck = nil
-                    study.notebookId = nil
-                    study.finished = false
-                }
-                PillButton(icon: "arrow.clockwise", title: "再查一次") { store.nextCard() }
-            }
-            .padding(.top, 22)
         }
-        .padding(.horizontal, 48)
-        .padding(.vertical, 36)
-        .frame(width: 600)
-        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ReviewPalette.hair))
-        .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.08), radius: 20, y: 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func summaryStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(number)
-                    .font(.system(size: 36, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
-                Text(unit).font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.sub)
-            }
-            Text(label).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity)
-    }
 }
 
 // MARK: - 浏览牌组

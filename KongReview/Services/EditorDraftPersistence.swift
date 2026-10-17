@@ -43,11 +43,13 @@ final class EditorDraftPersistence {
     /// 首次收到草稿时取数据库原值作比较基线；后续输入始终沿用该基线。
     /// 不存放未修改的记录和空白新建表单，避免打开/取消就产生恢复提示。
     func recordHighlight(_ draft: HighlightDraft, original: Highlight? = nil,
-                         originalEditionPages: [Int64: String]? = nil) throws {
+                         originalEditionPages: [Int64: String]? = nil,
+                         reviewMode: ReviewEditorMode? = nil) throws {
         let existing = highlightSessions[draft.id] ?? contents.highlights.first { $0.id == draft.id }
-        let value = SavedHighlightDraft(draft: draft,
+        var value = SavedHighlightDraft(draft: draft,
             original: existing?.original ?? original ?? (draft.isNew ? nil : draft.highlight),
             originalEditionPages: existing?.originalEditionPages ?? originalEditionPages ?? draft.editionPages)
+        value.reviewMode = reviewMode ?? existing?.reviewMode
         var next = contents
         next.highlights.removeAll { $0.id == draft.id }
         if value.hasUnsavedChanges { next.highlights.append(value) }
@@ -71,6 +73,19 @@ final class EditorDraftPersistence {
         next.highlights.removeAll { $0.id == id }
         try replace(with: next)
         highlightSessions[id] = nil
+    }
+
+    /// 进入完整编辑面板后，草稿可包含出处、标签等额外修改，不再由回顾的小编辑器自动接管。
+    func detachReviewHighlight(id: UUID) throws {
+        var next = contents
+        guard let index = next.highlights.firstIndex(where: { $0.id == id }),
+              next.highlights[index].reviewMode != nil else { return }
+        next.highlights[index].reviewMode = nil
+        try replace(with: next)
+        if var session = highlightSessions[id] {
+            session.reviewMode = nil
+            highlightSessions[id] = session
+        }
     }
 
     func removeCard(id: UUID) throws {
@@ -132,6 +147,8 @@ struct SavedHighlightDraft: Codable, Identifiable {
     var editionPages: [Int64: String]
     var original: Highlight?
     var originalEditionPages: [Int64: String]
+    /// 可选字段兼容 2.5/2.6 的草稿文件；回顾里的编辑也出现在同一个恢复列表。
+    var reviewMode: ReviewEditorMode?
 
     init(draft: HighlightDraft, original: Highlight?, originalEditionPages: [Int64: String]) {
         id = draft.id

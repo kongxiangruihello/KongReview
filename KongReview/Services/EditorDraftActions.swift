@@ -66,6 +66,7 @@ extension LibraryStore {
         }
         guard draftSaveError == nil else { return }
         do {
+            review.recordCurrentEditor()
             try draftPersistence?.flush()
             switch kind {
             case .highlight: editorDraft = nil; closingHighlightEditor = false
@@ -97,6 +98,7 @@ extension LibraryStore {
         do {
             switch selected.kind {
             case .highlight:
+                review.leaveCurrentEditor()
                 guard let saved = savedHighlightDrafts.first(where: { $0.id == selected.id }) else { return }
                 let current = try saved.highlight.id.flatMap { try db.highlight(id: $0) }
                 let pages = try saved.highlight.id.map { try db.editionPages($0) } ?? [:]
@@ -116,6 +118,7 @@ extension LibraryStore {
                     notices.append("已删除版本的未保存页码保留在按语中。")
                 }
                 recovered.draft.editionPages = recovered.draft.editionPages.filter { validSources.contains($0.key) }
+                try draftPersistence?.detachReviewHighlight(id: saved.id)
                 editorDraft = recovered.draft
                 draftRecoveryNotice = notices.isEmpty ? nil : notices.joined(separator: "\n")
             case .card:
@@ -136,7 +139,10 @@ extension LibraryStore {
         guard let selected = draftPendingDiscard else { return }
         do {
             switch selected.kind {
-            case .highlight: try draftPersistence?.removeHighlight(id: selected.id)
+            case .highlight:
+                if review.editorSession?.id == selected.id {
+                    review.discardCurrentEditor()
+                } else { try draftPersistence?.removeHighlight(id: selected.id) }
             case .card: try draftPersistence?.removeCard(id: selected.id)
             }
             draftPendingDiscard = nil

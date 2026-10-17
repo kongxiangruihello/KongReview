@@ -36,20 +36,42 @@ struct DailyReviewView: View {
                 finished
             } else {
                 let card = state.cards[state.position]
-                ScrollView {
-                    VStack(spacing: 18) {
-                        if let d = store.currentWeeklyDigest() {
-                            WeeklyDigestCard(digest: d)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 18) {
+                            if let d = store.currentWeeklyDigest() {
+                                WeeklyDigestCard(digest: d)
+                            }
+                            if let notice = state.draftNotice {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Label(notice, systemImage: "doc.badge.clock")
+                                        .font(.callout).foregroundStyle(ReviewPalette.sub)
+                                    Spacer(minLength: 0)
+                                    Button("查看草稿") { store.showsDraftRecovery = true }
+                                        .buttonStyle(.link).handCursor()
+                                }
+                            }
+                            reviewCard(card)
+                            noteEditor(for: card)
+                                .id("review-note-editor")
                         }
-                        reviewCard(card)
-                        noteEditor(for: card)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 28)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: 820)
+                        .frame(maxWidth: .infinity)
+                        .background(ReviewReadingScrollAttachment(
+                            owner: ReviewReadingPositions.owner(day: state.day, scope: state.theme, highlightID: card.id),
+                            positions: state.reading, review: state, isEditing: editingNote, restoreToken: state.scrollRestoreToken))
                     }
-                    .padding(.horizontal, 40)
-                    .padding(.top, 28)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: 820)
-                    .frame(maxWidth: .infinity)
+                    .onChange(of: state.noteDraft != nil) { _, opened in
+                        if opened { scrollToNote(using: proxy) }
+                    }
+                    .onAppear {
+                        if state.noteDraft != nil { scrollToNote(using: proxy) }
+                    }
                 }
+                .id(card.id)
                 controls(for: card)
                     .padding(.top, 4)
                     .padding(.bottom, 22)
@@ -59,7 +81,22 @@ struct DailyReviewView: View {
         .navigationTitle(scopeTitle)
         .task(id: (state.theme ?? "") + "|" + store.today + "|\(state.sessionToken)") { loadSession(forceNew: false) }
         .onChange(of: store.revision) { refreshCards() }
-        .onChange(of: state.position) { persist() }
+        .onChange(of: state.position) { persist(); resumeEditorForCurrentCard() }
+        .onDisappear { state.leaveCurrentEditor() }
+        .confirmationDialog("放弃这份回顾草稿？", isPresented: Binding(
+            get: { state.confirmsDiscardDraft }, set: { state.confirmsDiscardDraft = $0 }), titleVisibility: .visible) {
+            Button("放弃草稿", role: .destructive) { state.discardCurrentEditor() }
+            Button("继续编辑", role: .cancel) {}
+        } message: { Text("只删除未保存的修改，正式内容保持原样。") }
+    }
+
+    private func scrollToNote(using proxy: ScrollViewProxy) {
+        DispatchQueue.main.async { proxy.scrollTo("review-note-editor", anchor: .top) }
+    }
+
+    private func resumeEditorForCurrentCard() {
+        guard state.cards.indices.contains(state.position) else { return }
+        state.resumeEditor(for: state.cards[state.position].highlight)
     }
 
     // MARK: 子视图
@@ -236,19 +273,20 @@ struct DailyReviewView: View {
 
     @ViewBuilder
     private func noteEditor(for card: ReviewCard) -> some View {
-        if state.noteDraft != nil {
+        if state.noteDraft != nil, state.editorHighlightID == card.highlight.id {
             ReviewCardContainer(padding: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("按语").font(.caption).foregroundStyle(.secondary)
                 RichEditor(text: Binding(get: { state.noteDraft ?? "" }, set: { state.noteDraft = $0 }),
                            font: .note, placeholder: "写下按语…", autoHeight: false, minHeight: 160, focus: true,
-                           slot: "review-note-draft",
-                           onSubmit: { saveNote(for: card) }, onCancel: { state.noteDraft = nil })
+                           slot: "review-note-draft-\(card.id)",
+                           onSubmit: { saveNote(for: card) }, onCancel: { state.leaveCurrentEditor() })
                     .frame(height: 180)
                     .richEditorFrame()
                 HStack {
+                    Button("放弃草稿", role: .destructive) { state.confirmsDiscardDraft = true }
                     Spacer()
-                    Button("取消") { state.noteDraft = nil }
+                    Button("收起，保留草稿") { state.leaveCurrentEditor() }
                         .keyboardShortcut(.cancelAction)
                     Button("保存按语") { saveNote(for: card) }
                         .keyboardShortcut(.return, modifiers: .command)
@@ -348,15 +386,15 @@ struct DailyReviewView: View {
                 inlineEditor(card)
             } else {
             // 正文与译文、按语（网页渲染：Markdown 标题、列表、图片都按真实样式显示）
-            RichWebText(text: h.text, style: .highlight, slot: "review-text")
+            RichWebText(text: h.text, style: .highlight, slot: "review-text-\(card.id)")
             if let t = h.translation {
-                RichWebText(text: t, style: .translation, slot: "review-translation")
+                RichWebText(text: t, style: .translation, slot: "review-translation-\(card.id)")
                     .padding(.top, 16)
             }
             if let n = h.note {
                 HStack(alignment: .top, spacing: 10) {
                     RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor.opacity(0.7)).frame(width: 3)
-                    RichWebText(text: n, style: .note, slot: "review-note")
+                    RichWebText(text: n, style: .note, slot: "review-note-\(card.id)")
                 }
                 .padding(.top, 18)
             }
@@ -421,8 +459,7 @@ struct DailyReviewView: View {
             }
             CardIconButton(icon: hasNote ? "text.bubble.fill" : "text.bubble",
                            help: hasNote ? "编辑按语（N）" : "添加按语（N）") {
-                state.inlineDraft = nil
-                state.noteDraft = h.note ?? ""
+                state.beginNote(for: h)
             }
             .keyboardShortcut(key("n"))
             .disabled(editingNote)
@@ -611,35 +648,26 @@ struct DailyReviewView: View {
     }
 
     private func saveNote(for card: ReviewCard) {
-        guard let draft = state.noteDraft else { return }
-        var h = card.highlight
-        h.note = draft.nilIfBlank
-        store.save(h)
-        store.logReview(.note, highlightId: h.id)
-        state.noteDraft = nil
+        guard state.editorHighlightID == card.highlight.id else { return }
+        do {
+            guard let saved = try state.saveCurrentEditor() else { return }
+            store.reload()
+            store.logReview(.note, highlightId: saved.id)
+        } catch { store.report(error) }
     }
 
     /// 1.2：就地编辑——原文、译文、按语直接在卡片上改
     private func startInlineEdit(_ h: Highlight) {
-        state.noteDraft = nil
-        state.inlineDraft = InlineEditDraft(id: h.id, text: h.text, translation: h.translation ?? "", note: h.note ?? "")
+        state.beginInline(for: h)
     }
 
     private func saveInline(_ card: ReviewCard) {
-        guard let d = state.inlineDraft else { return }
-        guard d.id == card.highlight.id else { state.inlineDraft = nil; return }
-        let text = d.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { NSSound.beep(); return }
-        var h = card.highlight
-        let changed = h.text != text || (h.translation ?? "") != d.translation.trimmingCharacters(in: .whitespacesAndNewlines)
-            || (h.note ?? "") != d.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        state.inlineDraft = nil
-        guard changed else { return }
-        h.text = text
-        h.translation = d.translation.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
-        h.note = d.note.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
-        h.updatedAt = Date()
-        store.saveEdited(h)
+        guard state.editorHighlightID == card.highlight.id else { return }
+        do {
+            guard let saved = try state.saveCurrentEditor() else { return }
+            store.reload()
+            store.offerCardSync(for: saved.id)
+        } catch { store.report(error) }
     }
 
     @ViewBuilder
@@ -649,31 +677,41 @@ struct DailyReviewView: View {
             Text("原文").font(.caption).foregroundStyle(ReviewPalette.sub)
             RichEditor(text: Binding(get: { state.inlineDraft?.text ?? "" }, set: { state.inlineDraft?.text = $0 }),
                        font: .highlight, placeholder: "摘录原文", autoHeight: false, minHeight: 220, focus: true,
-                       slot: "inline-text", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                       slot: "inline-text-\(card.id)", onSubmit: { saveInline(card) }, onCancel: { state.leaveCurrentEditor() })
                 .frame(height: 260)
                 .richEditorFrame()
             Text("译文 / 白话").font(.caption).foregroundStyle(ReviewPalette.sub).padding(.top, 6)
             RichEditor(text: Binding(get: { state.inlineDraft?.translation ?? "" }, set: { state.inlineDraft?.translation = $0 }),
                        placeholder: "（可选）", toolbar: true, autoHeight: false, minHeight: 130,
-                       slot: "inline-translation", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                       slot: "inline-translation-\(card.id)", onSubmit: { saveInline(card) }, onCancel: { state.leaveCurrentEditor() })
                 .frame(height: 150)
                 .richEditorFrame()
             Text("按语").font(.caption).foregroundStyle(ReviewPalette.sub).padding(.top, 6)
             RichEditor(text: Binding(get: { state.inlineDraft?.note ?? "" }, set: { state.inlineDraft?.note = $0 }),
                        font: .note, placeholder: "（可选）", autoHeight: false, minHeight: 130,
-                       slot: "inline-note", onSubmit: { saveInline(card) }, onCancel: { state.inlineDraft = nil })
+                       slot: "inline-note-\(card.id)", onSubmit: { saveInline(card) }, onCancel: { state.leaveCurrentEditor() })
                 .frame(height: 150)
                 .richEditorFrame()
             HStack {
                 Button("在编辑面板中打开（出处、位置、标签）…") {
-                    state.inlineDraft = nil
-                    store.edit(h)
+                    // 走既有恢复入口，把同一份草稿带入完整编辑面板。
+                    state.recordCurrentEditor()
+                    if let id = state.editorSession?.id,
+                       store.savedHighlightDrafts.contains(where: { $0.id == id }) {
+                        state.leaveCurrentEditor()
+                        store.scheduleDraftRecovery(id: id, kind: .highlight)
+                        store.performPendingDraftRecovery()
+                    } else {
+                        state.leaveCurrentEditor()
+                        store.edit(h)
+                    }
                 }
                 .buttonStyle(.link)
                 .handCursor()
                 .font(.system(size: 12))
                 Spacer()
-                Button("取消") { state.inlineDraft = nil }
+                Button("放弃草稿", role: .destructive) { state.confirmsDiscardDraft = true }
+                Button("收起，保留草稿") { state.leaveCurrentEditor() }
                     .keyboardShortcut(.cancelAction)
                 Button("保存") { saveInline(card) }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -690,8 +728,7 @@ struct DailyReviewView: View {
     }
 
     private func go(_ delta: Int) {
-        state.noteDraft = nil
-        state.inlineDraft = nil
+        state.leaveCurrentEditor()
         state.position = max(0, min(state.cards.count, state.position + delta))
         persist()
     }
@@ -699,8 +736,8 @@ struct DailyReviewView: View {
     private func loadSession(forceNew: Bool) {
         let today = ReviewSessionRecord.dayString(Date())
         let key = ReviewSessionRecord.key(theme: state.theme)
-        state.noteDraft = nil
-        state.inlineDraft = nil
+        state.leaveCurrentEditor()
+        defer { resumeEditorForCurrentCard() }
         do {
             // 专题回顾：笔记本里的摘录有增删或换序时不沿用当天的进度
             // 1.7：按书回顾同理——书里的摘录（按页码）有变化时重新开始

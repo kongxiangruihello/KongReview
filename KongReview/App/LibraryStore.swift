@@ -110,13 +110,17 @@ final class LibraryStore {
     var errorMessage: String?
 
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
-    let review = ReviewState()
+    let review: ReviewState
     let list: ListState
     let articleList: ArticleListState
     let sourceManager: SourceManagerState
     let articleReading: ArticleReadingState
     let cardFormatting = CardFormattingState()
     let study: StudyState
+    var lastCardRating: CardRatingUndoToken?
+    var lastCardRatingScope: CardLearningScope?
+    var cardLearningSummary: CardLearningSummary?
+    var globalCardLearningSummary: CardLearningSummary?
 
     /// 侧边栏“出处”分组是否展开（默认折叠，记住上次状态）
     var sourcesExpanded: Bool = UserDefaults.standard.bool(forKey: "sidebar.sourcesExpanded") {
@@ -185,6 +189,11 @@ final class LibraryStore {
         self.sourceManager = SourceManagerState(defaults: positionDefaults)
         self.articleReading = ArticleReadingState(defaults: positionDefaults)
         self.study = StudyState(defaults: positionDefaults)
+        self.review = ReviewState(db: db, persistence: draftPersistence, defaults: positionDefaults)
+        self.review.onDraftChange = { [weak self] error in
+            self?.draftSaveError = error
+            self?.draftRevision += 1
+        }
         reload()
     }
 
@@ -605,6 +614,7 @@ final class LibraryStore {
                 AppLog.write("从备份恢复：\(info.url.lastPathComponent)；恢复前的数据另存为 \(safety.lastPathComponent)")
                 await MainActor.run {
                     self.maintenanceProgress = nil
+                    self.clearCardRatingUndo()
                     self.reload()
                     self.infoMessage = "已恢复到 \(info.date.formatted(date: .abbreviated, time: .shortened)) 的备份（\(info.highlights) 条摘录、\(info.cards) 张卡）。\n恢复前的数据另存为“\(safety.lastPathComponent)”，在备份文件夹里，需要时可以再恢复回来。"
                 }
@@ -622,20 +632,35 @@ final class LibraryStore {
     var deckSummaryCache: [DeckSummary] = []
     /// 首页两项学习任务的进度与去重记录
     var homeLearningSummary: HomeLearningSummary = .empty
+    var learningActivitySummary: LearningActivitySummary = .empty
 
     func refreshDerived() {
         let now = Date()
         staleSummary = (try? db.staleSummary()) ?? AppDatabase.StaleSummary()
         stats = (try? db.reviewSummary(now: now, days: 30)) ?? .empty
+        learningActivitySummary = (try? db.learningActivitySummary(now: now, days: 30)) ?? .empty
         deckSummaryCache = (try? db.deckSummaries(now: now, newPerDay: CardSettings.newPerDay,
                                                   reviewsPerDay: CardSettings.reviewsPerDay)) ?? []
+        globalCardLearningSummary = try? db.cardLearningSummary(
+            scope: .all, now: now,
+            newPerDay: CardSettings.newPerDay, reviewsPerDay: CardSettings.reviewsPerDay
+        )
         homeLearningSummary = (try? db.homeLearningSummary(
             now: now,
             dailyReviewCount: max(0, UserDefaults.standard.object(forKey: SettingsKeys.dailyCount) as? Int ?? 10),
             newCardsPerDay: CardSettings.newPerDay,
             reviewsPerDay: CardSettings.reviewsPerDay,
-            deckSummaries: deckSummaryCache
+            deckSummaries: deckSummaryCache,
+            activitySummary: learningActivitySummary,
+            cardAvailability: globalCardLearningSummary?.availability
         )) ?? .empty
+        cardLearningSummary = currentCardLearningScope == .all ? globalCardLearningSummary : try? db.cardLearningSummary(
+            scope: currentCardLearningScope, now: now,
+            newPerDay: CardSettings.newPerDay, reviewsPerDay: CardSettings.reviewsPerDay
+        )
+        if study.notebookId != nil, let cardLearningSummary {
+            study.notebookCounts = cardLearningSummary.pending
+        }
     }
 
     // MARK: 1.0：相关摘录
@@ -686,6 +711,7 @@ final class LibraryStore {
         let key = ReminderPlan.dayKey(Date())
         guard key != today else { return }
         today = key
+        clearCardRatingUndo()
         reload()
         onReviewedToday?()
     }
@@ -693,6 +719,7 @@ final class LibraryStore {
     /// “今日回顾”入口始终打开全库的当天队列，沿用已存进度和完成状态。
     func openTodayReview() {
         checkDayChange()
+        review.leaveCurrentEditor()
         review.theme = nil
         review.noteDraft = nil
         review.inlineDraft = nil
@@ -703,6 +730,7 @@ final class LibraryStore {
     /// 普通记忆卡入口打开牌组总览，保留最近牌组和已保存的学习记录。
     func openCardsHome() {
         checkDayChange()
+        clearCardRatingUndo()
         study.clearBrowsePositionOwner()
         study.deck = nil
         study.browsingDeck = nil
@@ -858,11 +886,13 @@ final class LibraryStore {
     }
 
     func startStudy(deck: String) {
+        clearCardRatingUndo()
         study.notebookId = nil
         study.deck = deck
         study.lastDeck = deck
         study.browsingDeck = nil
         nextCard()
+        refreshDerived()
     }
 
     /// 学习：取下一张（按牌组自己的每日上限）
@@ -898,15 +928,70 @@ final class LibraryStore {
     }
 
     func answerCurrent(_ a: CardAnswer) {
+        checkDayChange()
         guard let c = study.current else { return }
         do {
-            _ = try db.answer(c, a, scheduler: scheduler(forDeck: c.deck))
+            lastCardRating = try db.answerRecordingUndo(c, a, scheduler: scheduler(forDeck: c.deck))
+            lastCardRatingScope = currentCardLearningScope
             if !reviewedToday { reviewedToday = true; onReviewedToday?() }
         } catch {
             report(error)
+            return
         }
         nextCard()
         revisionBump()
+    }
+
+    var currentCardLearningScope: CardLearningScope {
+        if let id = study.notebookId { return .notebook(id) }
+        if let deck = study.deck { return .deck(deck) }
+        return .all
+    }
+
+    /// 文字面板和对话框打开时，⌘Z 交给正在编辑的内容。
+    var cardRatingShortcutIsAvailable: Bool {
+        selection == .cards && study.deck != nil && study.browsingDeck == nil
+            && cardEditor == nil && editorDraft == nil && clozeDraft == nil
+            && editingSource == nil && newNotebookRequest == nil && tagEditor == nil
+            && addArticleDraft == nil && articleSourceDraft == nil && batchPrompt == nil
+            && exportRequest == nil && mergeRequest == nil && pendingImport == nil && cardImport == nil
+            && deckOptionsEditor == nil && templateEditor == nil && apkgExport == nil
+            && shareImageHighlight == nil && bibliographyRequest == nil && pageRange == nil
+            && citationCheck == nil && editionImport == nil && chapterProgressRequest == nil
+            && backupList == nil && duplicateCardReview == nil && cardSyncOffer == nil
+            && !showsDraftRecovery && !closingHighlightEditor && !closingCardEditor
+    }
+
+    var canUndoLastCardRating: Bool {
+        guard cardRatingShortcutIsAvailable, let token = lastCardRating,
+              Calendar.current.isDateInToday(token.event.at),
+              lastCardRatingScope == currentCardLearningScope else { return false }
+        return (try? db.canUndoCardRating(token)) ?? false
+    }
+
+    func clearCardRatingUndo() {
+        lastCardRating = nil
+        lastCardRatingScope = nil
+    }
+
+    func undoLastCardRating() {
+        checkDayChange()
+        guard cardRatingShortcutIsAvailable, let token = lastCardRating,
+              Calendar.current.isDateInToday(token.event.at),
+              lastCardRatingScope == currentCardLearningScope else { return }
+        do {
+            let restored = try db.undoCardRating(token)
+            clearCardRatingUndo()
+            study.current = restored
+            study.showingAnswer = true
+            study.finished = false
+            reviewedToday = (try? db.reviewedToday()) ?? false
+            onReviewedToday?()
+            revisionBump()
+        } catch {
+            clearCardRatingUndo()
+            report(error)
+        }
     }
 
     // MARK: 0.9：封面、频率、填空卡、已存搜索、Obsidian、收件箱

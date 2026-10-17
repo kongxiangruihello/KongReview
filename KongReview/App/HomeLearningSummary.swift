@@ -26,6 +26,7 @@ struct HomeLearningSummary: Equatable {
     var cardsLearningDueCount = 0
     var cardsReviewDueCount = 0
     var activeCardCount = 0
+    var cardAvailability: CardStudyAvailability?
     var cardsDueCount: Int { cardsNewDueCount + cardsLearningDueCount + cardsReviewDueCount }
 
     var learningStreak = 0
@@ -35,10 +36,14 @@ struct HomeLearningSummary: Equatable {
     var reviewIsComplete: Bool {
         reviewHasSession && reviewTotalCount > 0 && reviewPendingCount == 0
     }
-    var cardsIsComplete: Bool { activeCardCount > 0 && cardsDueCount == 0 }
+    var cardsIsComplete: Bool {
+        guard activeCardCount > 0 && cardsDueCount == 0 else { return false }
+        guard let availability = cardAvailability else { return true }
+        return availability.kind == .complete || availability.kind == .scheduled
+    }
     var isEmpty: Bool { reviewCandidateCount == 0 && reviewTotalCount == 0 && activeCardCount == 0 }
     var isComplete: Bool {
-        !isEmpty && cardsDueCount == 0
+        !isEmpty && (cardsIsComplete || activeCardCount == 0)
             && (reviewIsComplete || (reviewCandidateCount == 0 && reviewTotalCount == 0))
     }
 

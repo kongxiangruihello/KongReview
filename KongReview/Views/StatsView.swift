@@ -16,35 +16,39 @@ struct StatsView: View {
         _ = store.revision
         _ = store.today
         let s = store.stats
+        let activity = store.learningActivitySummary
         let insights = store.cardInsights
         let cards = insights?.counts ?? CardStateCounts()
         let classified = store.highlightCounts.values.reduce(0, +)
         let highlights = store.staleSummary.total
         let unsorted = max(0, highlights - classified)
-        let bars = s.lastDays.flatMap { d -> [Bar] in
-            let date = Self.parse(d.key)
-            return [Bar(day: date, kind: "摘录", count: d.highlights), Bar(day: date, kind: "记忆卡", count: d.cards)]
+        let bars = activity.recentDays.flatMap { d -> [Bar] in
+            return [Bar(day: d.date, kind: "回顾摘录（条）", count: d.highlights),
+                    Bar(day: d.date, kind: "已学卡片（张）", count: d.cards)]
         }
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                    tile("今天", "\(s.today.highlights) 条摘录\n\(s.today.cards) 次记忆卡", "sun.max")
-                    tile("连续回顾", "\(s.currentStreak) 天", "flame")
-                    tile("最长连续", "\(s.longestStreak) 天", "trophy")
-                    tile("回顾过的天数", "\(s.activeDays) 天", "calendar")
-                    tile("累计回顾", "\(s.totalHighlights) 条摘录\n\(s.totalCards) 次记忆卡", "sum")
+                    tile("今天 · 全库", "\(activity.today.highlights) 条摘录\n\(activity.today.cards) 张卡 · \(activity.today.cardRatings) 次评分", "sun.max")
+                    tile("连续学习", "\(activity.currentStreak) 天", "flame")
+                    tile("最长连续", "\(activity.longestStreak) 天", "trophy")
+                    tile("学习过的天数", "\(activity.activeDays) 天", "calendar")
+                    tile("累计操作次数", "\(s.totalHighlights) 次摘录操作\n\(s.totalCards) 次评分", "sum")
                     tile("记忆卡正确率", s.cardAccuracy.map { String(format: "%.0f%%", $0 * 100) } ?? "—", "checkmark.circle")
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("最近 30 天").font(.headline)
+                    Text("最近 30 天 · 每天去重").font(.headline)
                     Chart(bars) { b in
-                        BarMark(x: .value("日期", b.day, unit: .day), y: .value("次数", b.count))
+                        BarMark(x: .value("日期", b.day, unit: .day), y: .value("条／张", b.count))
                             .foregroundStyle(by: .value("类别", b.kind))
                     }
-                    .chartForegroundStyleScale(["摘录": Color.blue, "记忆卡": Color.purple])
+                    .chartForegroundStyleScale(["回顾摘录（条）": Color.blue, "已学卡片（张）": Color.purple])
                     .frame(height: 220)
+                    Text("摘录、卡片在当天各算一次；同一卡片可多次评分。首页的今日回顾进度只计算当前一组，以上为全库当日学习记录。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if insights?.counts.total ?? 0 > 0 {

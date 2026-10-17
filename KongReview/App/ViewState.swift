@@ -11,13 +11,33 @@ import KongReviewCore
 @Observable
 final class ReviewState {
     /// 主题回顾：按标签限定范围；nil 为全库
-    var theme: String?
+    var theme: String? {
+        willSet { if newValue != theme { leaveCurrentEditor() } }
+    }
     var cards: [ReviewCard] = []
-    var position = 0
+    var position = 0 {
+        willSet { if newValue != position { leaveCurrentEditor() } }
+    }
     /// 正在写按语时的草稿（非 nil 表示编辑框打开；此时单键快捷键停用）
-    var noteDraft: String?
+    var noteDraft: String? { didSet { recordCurrentEditor() } }
     /// 1.2：卡片上就地编辑原文、译文、按语时的草稿（非 nil 表示正在编辑；此时单键快捷键停用）
-    var inlineDraft: InlineEditDraft?
+    var inlineDraft: InlineEditDraft? { didSet { recordCurrentEditor() } }
+    var draftNotice: String?
+    var confirmsDiscardDraft = false
+    var scrollRestoreToken = 0
+    let reading: ReviewReadingPositions
+    @ObservationIgnored var onDraftChange: ((String?) -> Void)?
+    @ObservationIgnored let editorPersistence: EditorDraftPersistence?
+    @ObservationIgnored let database: AppDatabase?
+    @ObservationIgnored var editorSession: ReviewEditorSession?
+    @ObservationIgnored var suppressEditorRecording = false
+    @ObservationIgnored var volatileDrafts: [UUID: SavedHighlightDraft] = [:]
+
+    init(db: AppDatabase? = nil, persistence: EditorDraftPersistence? = nil, defaults: UserDefaults? = nil) {
+        database = db
+        editorPersistence = persistence
+        reading = ReviewReadingPositions(defaults: defaults)
+    }
     /// 1.4：改变它会让回顾页重新载入当前范围（“回顾这本”时从头开始）
     var sessionToken = 0
     /// 当前这组回顾是哪一天的（跨日时据此刷新）
