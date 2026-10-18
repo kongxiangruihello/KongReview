@@ -34,6 +34,7 @@ struct VisualEditorRep: NSViewRepresentable {
         c.parent = self
         let config = WKWebViewConfiguration()
         config.userContentController.add(WeakScriptHandler(c), name: "krEditor")
+        config.userContentController.addUserScript(WKUserScript(source:EditorTextScript.source,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
         if formatting != nil {
             config.userContentController.addUserScript(WKUserScript(source: CardFormattingScript.source,
                 injectionTime: .atDocumentEnd, forMainFrameOnly: true))
@@ -57,6 +58,7 @@ struct VisualEditorRep: NSViewRepresentable {
         c.wantsFocus = focus
         handle?.webView = wv
         handle?.coordinator = c
+        handle?.valueReader = { [weak c] in c?.parent?.text }
         wv.loadHTMLString(EditorPage.page(text: HTMLSourceCodec.editable(text), mode: .card, font: font, placeholder: placeholder,
                                           toolbar: toolbar, autoHeight: autoHeight, tabOut: onTab != nil), baseURL: nil)
         return wv
@@ -82,6 +84,7 @@ struct VisualEditorRep: NSViewRepresentable {
         if coordinator.parent?.handle?.webView === wv {
             coordinator.parent?.handle?.webView = nil
             coordinator.parent?.handle?.coordinator = nil
+            if coordinator.parent?.handle?.textView == nil { coordinator.parent?.handle?.valueReader = nil }
         }
         wv.configuration.userContentController.removeScriptMessageHandler(forName: "krEditor")
         coordinator.parent = nil
@@ -129,6 +132,8 @@ struct VisualEditorRep: NSViewRepresentable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any], let type = body["type"] as? String, let p = parent else { return }
             switch type {
+            case "find":
+                p.handle?.showsFind = true
             case "focus":
                 p.formatting?.activate(p.slot)
             case "external-link":

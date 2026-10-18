@@ -26,7 +26,7 @@ import GRDB
     private func pump() async throws { try await Task.sleep(for:.milliseconds(400)) }
     private func press(_ title: String, in window: NSWindow) throws {
         let all = nodes(window.contentView!)
-        guard all.contains(where:{ attribute($0,"accessibilityLabel") != nil || attribute($0,"accessibilityTitle") != nil }) else {
+        guard all.contains(where:{ (attribute($0,"accessibilityRole") as? String) == "AXButton" }) else {
             throw XCTSkip("当前命令行测试宿主未暴露原生辅助功能树，无法验证按钮点击。")
         }
         let button = try XCTUnwrap(all.first { (attribute($0,"accessibilityLabel") as? String) == title || (attribute($0,"accessibilityTitle") as? String) == title },"未找到按钮：\(title)，节点：\(all.compactMap { attribute($0,"accessibilityLabel") as? String }.joined(separator:" | "))")

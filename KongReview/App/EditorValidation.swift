@@ -9,6 +9,10 @@ import KongReviewCore
     static func makeStore() -> LibraryStore {
         do {
             let db = try AppDatabase(DatabaseQueue())
+            try db.writer.write { sql in
+                let pixel = Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1xoAAAAASUVORK5CYII=")!
+                try sql.execute(sql:"INSERT INTO card_media(name,data) VALUES (?,?)",arguments:["exists.png",pixel])
+            }
             let source = try db.save(Source(title:"独立测试出处"))
             let h = try db.save(Highlight(sourceId:source.id,text:"测试原文"))
             var card = try db.save(Card(deck:"示例牌组",front:"<p>Hello World</p>",back:"<p>已有答案</p>",highlightId:h.id))

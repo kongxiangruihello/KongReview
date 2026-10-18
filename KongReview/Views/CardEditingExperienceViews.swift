@@ -8,10 +8,13 @@ struct CardComparisonView: View {
     let existing: Card
     var draftID: UUID? = nil
     @State private var confirming = false
+    @State private var showsTextDifference = true
     @State private var error: String?
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             Text(draftID == nil ? "修改前后对照" : "重复卡片对照").font(.title2.bold())
+            Toggle("标出文字差异（绿色新增、红色删除、橙色改动）",isOn:$showsTextDifference).toggleStyle(.checkbox)
+            Text("按段落比较正文文字；排版和媒体变化请关闭此选项查看原排版。").font(.caption).foregroundStyle(.secondary)
             HStack(alignment:.top,spacing:16) {
                 pane(incoming,title:"当前输入")
                 Divider()
@@ -38,10 +41,20 @@ struct CardComparisonView: View {
             Text(context(card)).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             let faces = store.faces(of:card)
             Text("正面").font(.caption.bold())
-            CardWebView(front:faces.front,back:nil,store:store).frame(minHeight:120)
+            faceView(faces.front,front:true,current:title == "当前输入").frame(minHeight:120)
             Text("背面").font(.caption.bold())
-            CardWebView(front:faces.back,back:nil,store:store).frame(minHeight:180)
+            faceView(faces.back,front:false,current:title == "当前输入").frame(minHeight:180)
         }.frame(maxWidth:.infinity)
+    }
+    @ViewBuilder private func faceView(_ html: String,front: Bool,current: Bool) -> some View {
+        if showsTextDifference {
+            let old = store.faces(of:existing), new = store.faces(of:incoming)
+            let difference = ParagraphDifference.make(before:front ? old.front : old.back,after:front ? new.front : new.back)
+            VStack(alignment:.leading,spacing:4) {
+                if difference.coarse { Text("长文采用区块比较").font(.caption).foregroundStyle(.secondary) }
+                ParagraphDifferenceView(rows:current ? difference.after : difference.before)
+            }
+        } else { CardWebView(front:html,back:nil,store:store) }
     }
     private func context(_ card: Card) -> String {
         guard let id = card.highlightId else { return "出处：未关联摘录" }

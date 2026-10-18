@@ -16,6 +16,37 @@ final class EditorWebViewTests: XCTestCase {
         _ = NSApplication.shared
     }
 
+    func testFieldSearchReplacementPreservesHTMLAndUndo() async throws {
+        try requireDesktopSession()
+        let ready = expectation(description:"查找编辑器就绪")
+        let messages = EditorMessageRecorder(ready:ready)
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(messages,name:"krEditor")
+        config.userContentController.addUserScript(WKUserScript(source:EditorTextScript.source,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
+        let view = WKWebView(frame:NSRect(x:0,y:0,width:560,height:240),configuration:config)
+        defer { view.stopLoading(); config.userContentController.removeScriptMessageHandler(forName:"krEditor") }
+        view.loadHTMLString(EditorPage.page(text:"<p>Alpha <strong>Beta</strong> Alpha</p>",mode:.card),baseURL:nil)
+        await fulfillment(of:[ready],timeout:10)
+        guard messages.receivedReady else { return }
+        let before = try await view.evaluateJavaScript("krFlush()") as? String
+        let matches = try await view.evaluateJavaScript("krEditorFind('Alpha',false,0)") as? [String:Any]
+        XCTAssertEqual(matches?["count"] as? Int,2)
+        let highlighted = try await view.evaluateJavaScript("krFlush()") as? String
+        XCTAssertEqual(highlighted,before,"查找高亮不能写入正文")
+        let preview = try await view.evaluateJavaScript("krEditorReplacementPreview('Alpha',false,'Gamma')") as? [String:Any]
+        let original = try XCTUnwrap(preview?["original"] as? String), proposed = try XCTUnwrap(preview?["proposed"] as? String)
+        XCTAssertTrue(proposed.contains("<strong>Beta</strong>"))
+        let applied = try await view.evaluateJavaScript("krEditorApply(\(EditorPage.jsonString(proposed)),\(EditorPage.jsonString(original)))") as? Bool
+        XCTAssertEqual(applied,true)
+        let replaced = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertTrue(replaced?.contains("Gamma <strong>Beta</strong> Gamma") == true)
+        _ = try await view.evaluateJavaScript("document.execCommand('undo'); krFlush();")
+        let undone = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertEqual(undone,before)
+        let rejected = try await view.evaluateJavaScript("krEditorApply('<p>不应覆盖</p>','stale')") as? Bool
+        XCTAssertEqual(rejected,false)
+    }
+
     func testVisualSourceRoundTripFlushAndCloze() async throws {
         try requireDesktopSession()
         let ready = expectation(description:"文字编辑器就绪")

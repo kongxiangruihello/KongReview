@@ -20,6 +20,7 @@ struct RichEditor: View {
     var handle: RichEditorHandle? = nil
     var formatting: CardFormattingState? = nil
     var fieldName = ""
+    @State private var toolsMode: EditorToolMode?
     @State private var localHandle = RichEditorHandle()
     @State private var measuredHeight: CGFloat = 70
     @State private var showsSource = false
@@ -30,11 +31,17 @@ struct RichEditor: View {
     @State private var htmlIssueCount = 0
     @Environment(LibraryStore.self) private var store: LibraryStore?
     var body: some View {
+        @Bindable var editor = handle ?? localHandle
         let contentMinimum = max(24,minHeight - 28 - (showsSource && toolbar ? 30 : 0))
         VStack(alignment:.leading,spacing:0) {
             HStack {
                 Text(showsSource ? "HTML 源码" : "文字").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                Button { editor.showsFind.toggle() } label: { Image(systemName:"magnifyingglass") }.help("查找与替换当前字段 ⌘F").accessibilityLabel("查找与替换当前字段").accessibilityIdentifier("editor-find-"+slot)
+                Menu {
+                    Button("格式清理预览…") { openTools(.cleanup,editor:editor) }
+                    Button("检查链接与媒体…") { openTools(.resources,editor:editor) }
+                } label: { Image(systemName:"ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize().help("正文整理工具").accessibilityLabel("正文整理工具").accessibilityIdentifier("editor-tools-"+slot)
                 if showsSource {
                     Button(htmlIssueCount == 0 ? "检查 HTML" : "HTML 提醒 · \(htmlIssueCount)") {
                         htmlCheckStored = text
@@ -50,8 +57,9 @@ struct RichEditor: View {
                 }
                 .buttonStyle(.plain).handCursor().disabled(switching)
                 .help(showsSource ? "切换为文字编辑" : "编辑 HTML 源码")
-                .accessibilityLabel(showsSource ? "切换为文字编辑" : "编辑 HTML 源码")
+                .accessibilityLabel(showsSource ? "切换为文字编辑" : "编辑 HTML 源码").accessibilityIdentifier("editor-mode-"+slot)
             }.padding(.horizontal,8).padding(.vertical,4)
+                .background(EditorFindPresenter(handle:editor,fieldName:fieldName.isEmpty ? placeholder : fieldName).frame(width:0,height:0))
             if showsSource {
             if toolbar {
                 ScrollView(.horizontal,showsIndicators:false) {
@@ -77,6 +85,23 @@ struct RichEditor: View {
                     .frame(height:autoHeight ? max(contentMinimum,WebHeights.shared.values["visual-" + slot] ?? contentMinimum) : nil)
             }
         }
+        .onChange(of:editor.showsFind) { _, visible in if !visible { editor.clearFind() } }
+        .task(id:EditorFindRefresh(query:editor.findQuery,sensitive:editor.findCaseSensitive,text:text,source:showsSource,visible:editor.showsFind)) {
+            guard editor.showsFind else { return }
+            do { try await Task.sleep(for:.milliseconds(200)) } catch { return }
+            editor.refreshFind()
+        }
+        .sheet(item:$editor.mutation) { mutation in EditorMutationPreview(mutation:mutation,handle:editor) }
+        .sheet(item:$toolsMode) { mode in
+            if let source = editor.toolSnapshot {
+                if mode == .cleanup { EditorCleanupView(original:source,sourceMode:editor.toolSourceMode,handle:editor,store:store,storedBaseline:editor.toolBaseline) }
+                else { EditorResourcesView(original:source,fieldName:fieldName.isEmpty ? placeholder : fieldName,store:store) { range in
+                    guard editor.toolSnapshot == source, text == editor.toolBaseline else { return }
+                    editor.pendingSelection = range; showsSource = true
+                    editor.revealSourceSelection(range,in:source)
+                } }
+            }
+        }
         .task(id:showsSource ? text : "") {
             guard showsSource else { return }
             do { try await Task.sleep(for:.milliseconds(350)) } catch { return }
@@ -89,7 +114,24 @@ struct RichEditor: View {
             HTMLCheckView(text:$text,original:htmlCheckSource ?? text,storedOriginal:htmlCheckStored)
         }
     }
+    private func openTools(_ mode: EditorToolMode,editor: RichEditorHandle) {
+        editor.toolBaseline = text
+        if mode == .resources {
+            editor.snapshot { _, _ in
+                editor.toolBaseline = text
+                editor.toolSnapshot = editor.textView?.string ?? HTMLSourceCodec.editable(text)
+                editor.toolSourceMode = true; toolsMode = mode
+            }
+            return
+        }
+        editor.snapshot { value,sourceMode in
+            guard let value else { editor.findError = "编辑器尚未就绪，请稍后重试。"; return }
+            editor.toolBaseline = text
+            editor.toolSnapshot = value; editor.toolSourceMode = sourceMode; toolsMode = mode
+        }
+    }
     private func toggleMode() {
+        (handle ?? localHandle).clearFind()
         if showsSource { showsSource = false; return }
         let editor = handle ?? localHandle
         guard let web = editor.webView, editor.coordinator?.ready == true else { showsSource = true; return }
@@ -112,6 +154,21 @@ struct RichEditorFrame: ViewModifier {
 extension View { func richEditorFrame() -> some View { modifier(RichEditorFrame()) } }
 
 @MainActor @Observable final class RichEditorHandle {
+    var showsFind = false
+    var findQuery = ""
+    var findReplacement = ""
+    var findCaseSensitive = false
+    var findCount = 0
+    var findIndex = 0
+    var findTruncated = false
+    var findError: String?
+    var findRequest = UUID()
+    var mutation: EditorMutation?
+    var toolSnapshot: String?
+    var toolSourceMode = false
+    var toolBaseline = ""
+    var valueReader: (() -> String?)?
+    var pendingSelection: NSRange?
     weak var textView: HTMLSourceTextView?
     weak var webView: WKWebView?
     weak var coordinator: VisualEditorRep.Coordinator?
@@ -162,6 +219,7 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
         view.textContainer?.containerSize = NSSize(width:400,height:CGFloat.greatestFiniteMagnitude)
         view.minSize = NSSize(width:0,height:minHeight); view.maxSize = NSSize(width:CGFloat.greatestFiniteMagnitude,height:CGFloat.greatestFiniteMagnitude)
         view.setAccessibilityLabel((fieldName.isEmpty ? placeholder : fieldName) + " HTML 源码")
+        view.setAccessibilityIdentifier("editor-source-"+slot)
         view.setAccessibilityHelp("直接编辑 HTML 标签和正文，命令回车保存；粘贴保留源码。")
         context.coordinator.lastStored = text
         view.string = HTMLSourceCodec.editable(text)
@@ -171,6 +229,7 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
         handle.textView = view
         formatting?.attach(slot:slot,name:fieldName,textView:view)
         let c = context.coordinator
+        handle.valueReader = { [weak c] in c?.parent.text }
         view.changed = { [weak c, weak view] value in
             guard let c, let view else { return }; c.lastStored = value; c.parent.text = value; c.measure(view)
         }
@@ -182,6 +241,10 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
             (view.enclosingScrollView as? SourceScrollView)?.fitSourceWidth()
             c?.measure(view)
             if c?.parent.focus == true { view.window?.makeFirstResponder(view) }
+            if let selection = c?.parent.handle.pendingSelection, NSMaxRange(selection) <= (view.string as NSString).length {
+                view.setSelectedRange(selection); view.scrollRangeToVisible(selection); c?.parent.handle.pendingSelection = nil
+            }
+            c?.parent.handle.refreshFind()
         }
         return scroll
     }
@@ -194,12 +257,20 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
         }
         handle.textView = view; formatting?.attach(slot:slot,name:fieldName,textView:view)
         c.measure(view)
+        if let selection = handle.pendingSelection, NSMaxRange(selection) <= (view.string as NSString).length {
+            handle.pendingSelection = nil
+            DispatchQueue.main.async { [weak view] in view?.setSelectedRange(selection); view?.scrollRangeToVisible(selection) }
+        }
     }
-    private func configure(_ view: HTMLSourceTextView) { view.submit = onSubmit; view.cancel = onCancel; view.tabOut = onTab }
+    private func configure(_ view: HTMLSourceTextView) { view.submit = onSubmit; view.cancel = onCancel; view.tabOut = onTab
+        view.openFind = { [weak handle] in handle?.showsFind = true } }
     static func dismantleNSView(_ scroll: SourceScrollView, coordinator: Coordinator) {
         guard let view = scroll.documentView as? HTMLSourceTextView else { return }
         coordinator.parent.formatting?.detach(slot:coordinator.parent.slot,textView:view)
-        if coordinator.parent.handle.textView === view { coordinator.parent.handle.textView = nil }
+        if coordinator.parent.handle.textView === view {
+            coordinator.parent.handle.textView = nil
+            if coordinator.parent.handle.webView == nil { coordinator.parent.handle.valueReader = nil }
+        }
         view.changed = nil; view.resized = nil; view.focused = nil
     }
     @MainActor final class Coordinator {
@@ -265,6 +336,7 @@ final class HTMLSourceTextView: NSTextView {
     var submit: (()->Void)?
     var cancel: (()->Void)?
     var tabOut: ((Bool)->Void)?
+    var openFind: (()->Void)?
     override func didChangeText() { super.didChangeText(); changed?(string) }
     override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); resized?() }
     override func becomeFirstResponder() -> Bool { let ok = super.becomeFirstResponder(); if ok { focused?() }; return ok }
@@ -276,6 +348,7 @@ final class HTMLSourceTextView: NSTextView {
         if hasMarkedText() { super.keyDown(with:event); return }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if event.modifierFlags.contains(.command) {
+            if key == "f", let openFind { openFind(); return }
             if key == "\r", let submit { submit(); return }
             let tags = ["b":"strong","i":"em","u":"u","1":"h1","2":"h2","3":"h3","e":"code","k":"a"]
             if let tag = tags[key] { applyHTML(tag); return }
