@@ -36,6 +36,34 @@ final class V35HTMLSourceTests: XCTestCase {
         XCTAssertTrue(view.string.contains("&amp;b=&quot;2&quot;"))
         XCTAssertTrue(view.string.contains(">😀史料</a>"))
     }
+    @MainActor func testSourceViewportKeepsLeftEdgeVisibleAfterResizeAndCaretScroll() {
+        let scroll = SourceScrollView(frame:NSRect(x:0,y:0,width:320,height:160))
+        scroll.contentView = SourceClipView()
+        scroll.hasHorizontalScroller = false
+        scroll.hasVerticalScroller = true
+        let view = HTMLSourceTextView(frame:NSRect(x:0,y:0,width:900,height:1500))
+        view.isRichText = false
+        view.isHorizontallyResizable = false
+        view.isVerticallyResizable = true
+        view.textContainerInset = NSSize(width:10,height:10)
+        view.textContainer?.widthTracksTextView = true
+        view.string = "<p>" + String(repeating:"很长的正文abcdef",count:200) + "</p>"
+        scroll.documentView = view
+        for width: CGFloat in [320,180,680,240] {
+            scroll.setFrameSize(NSSize(width:width,height:160))
+            scroll.tile()
+            view.setSelectedRange(NSRange(location:(view.string as NSString).length,length:0))
+            view.scrollRangeToVisible(view.selectedRange())
+            scroll.contentView.scroll(to:NSPoint(x:140,y:100))
+            XCTAssertEqual(scroll.contentView.bounds.origin.x,0,accuracy:0.5)
+            XCTAssertEqual(view.frame.width,scroll.contentView.bounds.width,accuracy:0.5)
+            XCTAssertEqual(view.textContainer!.containerSize.width,view.frame.width-20,accuracy:0.5)
+            let constrained = scroll.contentView.constrainBoundsRect(NSRect(x:-80,y:30,width:width,height:160))
+            XCTAssertEqual(constrained.origin.x,0)
+            XCTAssertGreaterThan(scroll.contentView.bounds.origin.y,0,"Vertical reading must remain available")
+        }
+        XCTAssertTrue(view.string.hasPrefix("<p>很长的正文"))
+    }
     func testHighlightSearchCrossesInlineTagsAndIgnoresAttributes() throws {
         let db = try AppDatabase(DatabaseQueue())
         let h = try db.save(Highlight(text:"<p data-secret=\"uniqueattribute\">臺<strong>灣歷</strong>史</p>"))

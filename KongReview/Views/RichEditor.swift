@@ -79,6 +79,7 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> SourceScrollView {
         let scroll = SourceScrollView()
+        scroll.contentView = SourceClipView()
         scroll.drawsBackground = false; scroll.hasVerticalScroller = !autoHeight; scroll.hasHorizontalScroller = false
         scroll.borderType = .noBorder; scroll.passScroll = autoHeight
         let view = HTMLSourceTextView(frame:NSRect(x:0,y:0,width:400,height:minHeight))
@@ -97,6 +98,8 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
         context.coordinator.lastStored = text
         view.string = HTMLSourceCodec.editable(text)
         scroll.documentView = view
+        scroll.fitSourceWidth()
+        view.setSelectedRange(NSRange(location:0,length:0))
         handle.textView = view
         formatting?.attach(slot:slot,name:fieldName,textView:view)
         let c = context.coordinator
@@ -107,7 +110,9 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
         view.focused = { [weak c] in guard let c else { return }; c.parent.formatting?.activate(c.parent.slot) }
         configure(view)
         DispatchQueue.main.async { [weak c,weak view] in
-            guard let view else { return }; c?.measure(view)
+            guard let view else { return }
+            (view.enclosingScrollView as? SourceScrollView)?.fitSourceWidth()
+            c?.measure(view)
             if c?.parent.focus == true { view.window?.makeFirstResponder(view) }
         }
         return scroll
@@ -141,8 +146,47 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
         }
     }
 }
+/// Source always wraps within the viewport. AppKit can otherwise scroll horizontally
+/// to reveal the insertion point while SwiftUI is still assigning the initial width.
+final class SourceClipView: NSClipView {
+    override func scroll(to newOrigin: NSPoint) {
+        super.scroll(to:NSPoint(x:0,y:newOrigin.y))
+    }
+    override func setBoundsOrigin(_ newOrigin: NSPoint) {
+        super.setBoundsOrigin(NSPoint(x:0,y:newOrigin.y))
+    }
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var bounds = super.constrainBoundsRect(proposedBounds)
+        bounds.origin.x = 0
+        return bounds
+    }
+}
 final class SourceScrollView: NSScrollView {
     var passScroll = false
+    private var fittingWidth = false
+    override func tile() {
+        super.tile()
+        fitSourceWidth()
+    }
+    func fitSourceWidth() {
+        guard !fittingWidth, let view = documentView as? NSTextView,
+              contentView.bounds.width > 0 else { return }
+        fittingWidth = true
+        defer { fittingWidth = false }
+        let width = contentView.bounds.width
+        if abs(view.frame.width - width) > 0.5 {
+            view.setFrameSize(NSSize(width:width,height:view.frame.height))
+        }
+        // Inset belongs to NSTextView; the text container must exclude both edges.
+        let textWidth = max(1,width - view.textContainerInset.width * 2)
+        if let container = view.textContainer, abs(container.containerSize.width - textWidth) > 0.5 {
+            container.containerSize = NSSize(width:textWidth,height:container.containerSize.height)
+        }
+        if contentView.bounds.origin.x != 0 {
+            contentView.scroll(to:NSPoint(x:0,y:contentView.bounds.origin.y))
+            reflectScrolledClipView(contentView)
+        }
+    }
     override func scrollWheel(with event: NSEvent) { if passScroll { nextResponder?.scrollWheel(with:event) } else { super.scrollWheel(with:event) } }
 }
 final class HTMLSourceTextView: NSTextView {
