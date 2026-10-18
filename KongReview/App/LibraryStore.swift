@@ -157,7 +157,10 @@ final class LibraryStore {
     var cardHighlightIDs: Set<Int64> = []
     var cardCount = 0
     var cardImport: CardImportPreview?
-    var cardEditor: CardDraft? { didSet { persistCardEditorDraft() } }
+    var cardEditor: CardDraft? { didSet {
+        if oldValue?.card != cardEditor?.card { cardEditor?.duplicate = nil; cardEditor?.error = nil }
+        persistCardEditorDraft()
+    } }
     var articleSourceDraft: ArticleSourceDraft?
     /// 今天是否已回顾（决定是否还要提醒）
     var reviewedToday = false
@@ -176,7 +179,8 @@ final class LibraryStore {
     /// 封面变化计数（界面据此重新加载图片）
     var coverRevision = 0
     /// 填空卡制作面板
-    var clozeDraft: ClozeDraft?
+    var clozeInputDuplicate: Card?
+    var clozeDraft: ClozeDraft? { didSet { clozeInputDuplicate = nil } }
     /// 1.7：逐条做填空卡的队列（笔记本里的摘录）
     var clozeQueue: [Int64] = []
     var clozeQueueTotal = 0
@@ -815,11 +819,7 @@ final class LibraryStore {
     func saveCard(_ card: Card) {
         guard !fullBackupBusy else { return }
         do {
-            if let duplicate = try db.duplicateCard(for: card) {
-                errorMessage = "已有相同正反面内容的记忆卡（牌组：\(duplicate.deck)），请修改内容后再保存。"
-                return
-            }
-            perform { _ = try db.save(card) }
+            perform { _ = try db.saveInputCards([card]) }
         } catch { report(error) }
     }
 
@@ -844,7 +844,7 @@ final class LibraryStore {
     }
 
     /// 保存卡片编辑面板；若正在学习的就是这张卡，同步刷新
-    func commitCardEditor() {
+    func commitCardEditor(allowDeleted: Bool = false) {
         guard !fullBackupBusy else { return }
         guard var d = cardEditor else { return }
         if d.isNew, let hid = d.card.highlightId {
@@ -877,16 +877,15 @@ final class LibraryStore {
         }
         guard !d.card.front.isEmpty else { return }
         do {
-            if let duplicate = try db.duplicateCard(for: d.card) {
-                cardEditor?.error = "已有相同正反面内容的记忆卡（牌组：\(duplicate.deck)），请修改内容后再保存。"
-                return
-            }
-            let saved = try db.save(d.card)
+            let saved = try db.saveInputCards([d.card],allowDeleted:allowDeleted)[0]
             study.lastDeck = saved.deck
             if study.current?.id == saved.id { study.current = saved }
             finishCardEditorDraft(id: d.id)
             cardEditor = nil
             reload()
+        } catch let error as CardInputDuplicateError {
+            cardEditor?.error = error.localizedDescription
+            cardEditor?.duplicate = error.card
         } catch {
             report(error)
         }
@@ -1055,23 +1054,25 @@ final class LibraryStore {
     }
 
     /// 按填空编号生成卡片（与 Anki 相同：c1、c2… 各一张）
-    func commitCloze() {
+    func commitCloze(allowDeleted: Bool = false) {
         guard !fullBackupBusy else { return }
         guard let d = clozeDraft else { return }
         let numbers = AnkiContent.clozeNumbers(d.text)
         guard !numbers.isEmpty else { return }
         let extra = Markdown.html(d.extra)
-        var saved = false
-        perform {
-            for n in numbers {
-                let c = AnkiContent.cloze(Markdown.html(d.text), number: n)
-                let back = extra.isEmpty ? c.back : c.back + "<hr>" + extra
-                _ = try db.save(Card(deck: d.deck.nilIfBlank ?? "填空", front: c.front, back: back, tags: d.tags,
-                                     highlightId: d.highlightId))
-            }
-            saved = true
+        let cards = numbers.map { n in
+            let c = AnkiContent.cloze(Markdown.html(d.text),number:n)
+            let back = extra.isEmpty ? c.back : c.back + "<hr>" + extra
+            return Card(deck:d.deck.nilIfBlank ?? "填空",front:c.front,back:back,tags:d.tags,highlightId:d.highlightId)
         }
-        guard saved else { return }   // 出错时留在面板上（错误已提示）
+        do {
+            _ = try db.saveInputCards(cards,allowDeleted:allowDeleted)
+            reload()
+        } catch let error as CardInputDuplicateError {
+            clozeInputDuplicate = error.card
+            infoMessage = error.localizedDescription
+            return
+        } catch { report(error); return }
         study.lastDeck = d.deck
         clozeDraft = nil
         if d.progress != nil {

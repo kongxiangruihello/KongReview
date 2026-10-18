@@ -39,29 +39,9 @@ extension AppDatabase {
         try writer.read { db in try Card.fetchOne(db, key: id) }
     }
 
-    /// 正反面相同即为重复，跨牌组检查；编辑原卡以及已删除的卡片不参与比较。
+    /// Compare the visible front across decks, excluding the edited card and trash.
     func duplicateCard(for card: Card) throws -> Card? {
-        func normalized(_ value: String) -> String {
-            value.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
-        }
-        func sectionContents(_ card: Card) -> [String] {
-            (card.sections ?? []).filter { !normalized($0.name).isEmpty || !normalized($0.text).isEmpty }
-                .flatMap { [normalized($0.name), normalized($0.text)] }
-        }
-        let front = normalized(card.front), back = normalized(card.back)
-        let sections = sectionContents(card)
-        return try writer.read { db in
-            let rows = try Row.fetchCursor(db, sql: "SELECT id, front, back FROM card WHERE deletedAt IS NULL ORDER BY id")
-            while let row = try rows.next() {
-                let id: Int64 = row["id"]
-                if id != card.id, normalized(row["front"]) == front, normalized(row["back"]) == back {
-                    if let existing = try Card.fetchOne(db, key: id), sectionContents(existing) == sections {
-                        return existing
-                    }
-                }
-            }
-            return nil
-        }
+        try writer.read { db in try Self.matchingFront(card,deleted:false,in:db) }
     }
 
     /// 牌组内全部卡片（不含已删除）

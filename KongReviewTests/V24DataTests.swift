@@ -136,13 +136,13 @@ final class V24DataTests: XCTestCase {
         XCTAssertNil(try db.deckOptions()["新"])
     }
 
-    func testDuplicateCardsCompareBothFacesAcrossDecksAndIgnoreSelfAndDeleted() throws {
+    func testDuplicateCardsCompareFrontAcrossDecksAndIgnoreSelfAndDeleted() throws {
         let db = try AppDatabase(DatabaseQueue())
         let existing = try db.save(Card(deck: "甲", front: " café \n", back: "答案\t"))
         let duplicate = Card(deck: "乙", front: "\u{00A0}cafe\u{0301}\t", back: "\n答案 ")
         XCTAssertEqual(try db.duplicateCard(for: duplicate)?.id, existing.id)
         XCTAssertNil(try db.duplicateCard(for: existing))
-        XCTAssertNil(try db.duplicateCard(for: Card(front: "café", back: "另一答案")))
+        XCTAssertEqual(try db.duplicateCard(for: Card(front: "café", back: "另一答案"))?.id, existing.id)
         XCTAssertNil(try db.duplicateCard(for: Card(front: "另一问题", back: "答案")))
         try db.save(Card(front: "已删除", back: "答案", deletedAt: Date()))
         XCTAssertNil(try db.duplicateCard(for: Card(front: "已删除", back: "答案")))

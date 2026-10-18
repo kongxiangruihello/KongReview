@@ -78,6 +78,9 @@ struct ClozeEditorView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+            if let duplicate = store.clozeInputDuplicate {
+                CardInputDuplicateNotice(card:duplicate) { store.commitCloze(allowDeleted:true) }.id(duplicate.id)
+            }
             HStack {
                 Spacer()
                 if d?.progress != nil {

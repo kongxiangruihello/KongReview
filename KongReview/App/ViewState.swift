@@ -307,6 +307,7 @@ final class StudyState {
 
 /// 记忆卡编辑面板的草稿
 struct CardDraft: Identifiable {
+    var duplicate: Card?
     var id = UUID()
     var card: Card
     var tagsText: String = ""
