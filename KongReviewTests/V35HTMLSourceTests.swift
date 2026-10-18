@@ -5,6 +5,19 @@ import KongReviewCore
 @testable import KongReview
 
 final class V35HTMLSourceTests: XCTestCase {
+    func testReadingRendersBareDomainHTMLLinksAsClickableHTTPS() {
+        for source in ["<p><a href=\"gemini.google.com\">gemini</a></p>",
+                       "[gemini](gemini.google.com)",
+                       "<a href='https://gemini.google.com'>gemini</a>"] {
+            let html = RichWebText.bodyHTML(source)
+            XCTAssertTrue(html.contains("<a href=\"https://gemini.google.com\">gemini</a>"),html)
+            XCTAssertFalse(html.contains("[gemini]"))
+        }
+        let query = Markdown.richHTML("<a href=\"example.com/search?q=史料&amp;page=2\">检索</a>")
+        XCTAssertTrue(query.contains("https://example.com/search?q=史料&amp;page=2"))
+        XCTAssertFalse(Markdown.html("[bad](javascript:alert)").contains("<a "))
+        XCTAssertFalse(Markdown.html("[relative](notes/page)").contains("<a "))
+    }
     func testLegacyConversionAndExactSourcePreservation() {
         XCTAssertTrue(HTMLSourceCodec.editable("**旧正文**").contains("<strong>"))
         let source = "<section data-id=\"甲\">\n<p>原文 &amp; <em>注</em></p>\n</section>"

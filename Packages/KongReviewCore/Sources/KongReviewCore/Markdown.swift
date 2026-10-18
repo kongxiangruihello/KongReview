@@ -124,9 +124,29 @@ public enum Markdown {
         t = replace(t, #"\*\*([^*]+)\*\*"#, "<strong>$1</strong>")
         t = replace(t, #"(?<!\*)\*([^*\s][^*]*?)\*(?!\*)"#, "<em>$1</em>")
         t = replace(t, #"!\[([^\]]*)\]\(([^)\s]+)\)"#, "<img alt=\"$1\" src=\"$2\">")
-        t = replace(t, #"(?<!!)\[([^\]]+)\]\((https?://[^)\s]+)\)"#, "<a href=\"$2\">$1</a>")
+        if let links = try? NSRegularExpression(pattern:#"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)"#) {
+            let original = t as NSString
+            for match in links.matches(in:t,range:NSRange(location:0,length:original.length)).reversed() {
+                let raw = original.substring(with:match.range(at:2))
+                guard let url = webLinkDestination(raw) else { continue }
+                let label = original.substring(with:match.range(at:1))
+                let anchor = "<a href=\"" + url.replacingOccurrences(of:"\"",with:"&quot;") + "\">" + label + "</a>"
+                t = (t as NSString).replacingCharacters(in:match.range,with:anchor)
+            }
+        }
         t = replace(t, #"~~([^~]+)~~"#, "<del>$1</del>")
         return t
+    }
+
+    /// Bare website hosts are common in manually entered HTML href values.
+    /// Resolve them as HTTPS rather than an unusable relative app URL.
+    static func webLinkDestination(_ value: String) -> String? {
+        let lower = value.lowercased()
+        if lower.hasPrefix("https://") || lower.hasPrefix("http://") { return value }
+        let host = value.hasPrefix("//") ? String(value.dropFirst(2)) : value
+        let pattern = #"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,63}(?::[0-9]+)?(?:[/?#][^\s]*)?$"#
+        guard host.range(of:pattern,options:.regularExpression) != nil else { return nil }
+        return "https://" + host
     }
 
     static func replace(_ s: String, _ pattern: String, _ template: String) -> String {
