@@ -892,7 +892,7 @@ struct CardEditorView: View {
                     .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("直接编辑 HTML 源码。⌘B、⌘I、⌘K 插入对应标签；粘贴保留源码文字。⌘↩ 保存。")
+            Text("默认编辑文字；点击各字段右上角 <> 切换 HTML 源码。⌘B、⌘I、⌘K 设置格式；⌘↩ 保存。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

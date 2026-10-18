@@ -1,9 +1,9 @@
 import SwiftUI
 import AppKit
+import WebKit
 import KongReviewCore
 
-/// All body editors expose literal HTML source. Legacy Markdown is converted for display only;
-/// opening/cancelling an editor never rewrites the stored content.
+/// Default to visual editing; each field can independently reveal its HTML source.
 struct RichEditor: View {
     @Binding var text: String
     var mode: RichEditorMode = .markdown
@@ -22,8 +22,24 @@ struct RichEditor: View {
     var fieldName = ""
     @State private var localHandle = RichEditorHandle()
     @State private var measuredHeight: CGFloat = 70
+    @State private var showsSource = false
+    @State private var switching = false
+    @Environment(LibraryStore.self) private var store: LibraryStore?
     var body: some View {
+        let contentMinimum = max(24,minHeight - 28 - (showsSource && toolbar ? 30 : 0))
         VStack(alignment:.leading,spacing:0) {
+            HStack {
+                Text(showsSource ? "HTML 源码" : "文字").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button { toggleMode() } label: {
+                    Image(systemName:"chevron.left.forwardslash.chevron.right")
+                        .foregroundStyle(showsSource ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.plain).handCursor().disabled(switching)
+                .help(showsSource ? "切换为文字编辑" : "编辑 HTML 源码")
+                .accessibilityLabel(showsSource ? "切换为文字编辑" : "编辑 HTML 源码")
+            }.padding(.horizontal,8).padding(.vertical,4)
+            if showsSource {
             if toolbar {
                 ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:6) {
@@ -34,11 +50,30 @@ struct RichEditor: View {
                     }.controlSize(.small).padding(5)
                 }.fixedSize(horizontal:false,vertical:true)
             }
-            HTMLSourceEditorRep(text:$text,measuredHeight:$measuredHeight,autoHeight:autoHeight,minHeight:minHeight,
+            HTMLSourceEditorRep(text:$text,measuredHeight:$measuredHeight,autoHeight:autoHeight,minHeight:contentMinimum,
                 focus:focus,placeholder:placeholder,slot:slot,handle:handle ?? localHandle,formatting:formatting,fieldName:fieldName,
                 onSubmit:onSubmit,onCancel:onCancel,onTab:onTab)
-                .frame(minHeight:minHeight)
-                .frame(height:autoHeight ? max(minHeight,measuredHeight) : nil)
+                .frame(minHeight:contentMinimum)
+                .frame(height:autoHeight ? max(contentMinimum,measuredHeight) : nil)
+            } else {
+                VisualEditorRep(text:$text,mode:.card,font:font,placeholder:placeholder,toolbar:toolbar,
+                    autoHeight:autoHeight,focus:focus,slot:"visual-" + slot,
+                    onSubmit:onSubmit,onCancel:onCancel,onTab:onTab,handle:handle ?? localHandle,
+                    formatting:formatting,fieldName:fieldName,store:store)
+                    .frame(minHeight:contentMinimum)
+                    .frame(height:autoHeight ? max(contentMinimum,WebHeights.shared.values["visual-" + slot] ?? contentMinimum) : nil)
+            }
+        }
+    }
+    private func toggleMode() {
+        if showsSource { showsSource = false; return }
+        let editor = handle ?? localHandle
+        guard let web = editor.webView, editor.coordinator?.ready == true else { showsSource = true; return }
+        switching = true
+        // Flush input before dismantling WebKit. Change messages arrive before this callback.
+        web.evaluateJavaScript("krFlush(); true;") { _, error in
+            switching = false
+            if error == nil { showsSource = true }
         }
     }
 }
@@ -54,7 +89,16 @@ extension View { func richEditorFrame() -> some View { modifier(RichEditorFrame(
 
 @MainActor @Observable final class RichEditorHandle {
     weak var textView: HTMLSourceTextView?
+    weak var webView: WKWebView?
+    weak var coordinator: VisualEditorRep.Coordinator?
     func focus(selectAll: Bool = false) {
+        if let webView {
+            webView.window?.makeFirstResponder(webView)
+            if coordinator?.ready == true {
+                webView.evaluateJavaScript(selectAll ? "krSelectAll();" : "krFocus();",completionHandler:nil)
+            } else { coordinator?.wantsFocus = true; coordinator?.pendingSelectAll = selectAll }
+            return
+        }
         guard let textView else { return }
         textView.window?.makeFirstResponder(textView)
         if selectAll { textView.selectAll(nil) }
@@ -131,6 +175,7 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
     static func dismantleNSView(_ scroll: SourceScrollView, coordinator: Coordinator) {
         guard let view = scroll.documentView as? HTMLSourceTextView else { return }
         coordinator.parent.formatting?.detach(slot:coordinator.parent.slot,textView:view)
+        if coordinator.parent.handle.textView === view { coordinator.parent.handle.textView = nil }
         view.changed = nil; view.resized = nil; view.focused = nil
     }
     @MainActor final class Coordinator {

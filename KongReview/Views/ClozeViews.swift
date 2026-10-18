@@ -28,7 +28,7 @@ struct ClozeEditorView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    RichEditor(text:text,mode:.card,placeholder:"HTML 源码：选中正文中的字词挖空",minHeight:200,slot:"cloze-source",handle:sourceHandle)
+                    RichEditor(text:text,mode:.card,placeholder:"选中正文中的字词挖空",minHeight:200,slot:"cloze-source",handle:sourceHandle)
                         .frame(minHeight: 200)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(ReviewPalette.hair))
                     HStack {
@@ -101,6 +101,14 @@ struct ClozeEditorView: View {
     }
 
     private func wrap(sameNumber: Bool) {
+        if let web = sourceHandle.webView {
+            let largest = store.clozeDraft?.numbers.max() ?? 0
+            let number = sameNumber ? max(1,largest) : largest + 1
+            web.evaluateJavaScript(VisualClozeScript.wrap(number:number)) { result, error in
+                if error != nil || (result as? Bool) != true { store.infoMessage = "先在文本框里选中要挖空的字词。" }
+            }
+            return
+        }
         guard let view = sourceHandle.textView, view.selectedRange().length > 0 else {
             store.infoMessage = "先在文本框里选中要挖空的字词。"
             return
@@ -109,5 +117,23 @@ struct ClozeEditorView: View {
         guard HTMLSourceCodec.canWrapCloze(view.string,range:r) else { store.infoMessage = "请选择标签外的完整正文，不要选中 HTML 标签或截断实体。"; return }
         let updated = AnkiContent.wrapCloze(view.string,range:r,sameNumber:sameNumber)
         view.insertText(updated,replacementRange:NSRange(location:0,length:(view.string as NSString).length))
+    }
+}
+
+/// Use the browser editing command so a visual cloze remains undoable and keeps inline markup.
+enum VisualClozeScript {
+    static func wrap(number: Int) -> String {
+        """
+        (function(){
+          var ed=document.getElementById('ed'), s=window.getSelection();
+          if(!ed || !s || !s.rangeCount || s.isCollapsed) return false;
+          var r=s.getRangeAt(0);
+          if(!ed.contains(r.commonAncestorContainer)) return false;
+          var box=document.createElement('div'); box.appendChild(r.cloneContents());
+          ed.focus();
+          document.execCommand('insertHTML',false,'{{c\(number)::'+box.innerHTML+'}}');
+          ed.dispatchEvent(new Event('input',{bubbles:true})); krFlush(); return true;
+        })();
+        """
     }
 }

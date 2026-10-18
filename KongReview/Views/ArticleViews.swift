@@ -610,7 +610,7 @@ struct ArticleSourceEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("编辑存档正文").font(.title2.bold())
-            Text("直接编辑存档正文的 HTML 源码；标签、属性和链接按输入保存。已划下的摘录不受影响。")
+            Text("默认显示存档正文；右上角 <> 可切换 HTML 源码编辑。已划下的摘录不受影响。")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             RichEditor(text:html,mode:.card,placeholder:"存档正文 HTML",minHeight:300,slot:"article-source").richEditorFrame()

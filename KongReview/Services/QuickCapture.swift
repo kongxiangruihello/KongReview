@@ -16,7 +16,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
 
     private var panel: QuickCapturePanel?
     /// 系统配置好的可滚动文本视图（自动换行、随宽度伸缩）
-    /// 正文与按语均使用统一 HTML 源码编辑器。
+    /// 正文与按语均使用统一文字／HTML 双模式编辑器。
     private let editorModel = QuickCaptureText()
     private let editorHandle = RichEditorHandle()
     private var editorHost: NSView?
@@ -177,7 +177,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.onCancel = { [weak self] in self?.close() }
 
-        // 正文：HTML 源码编辑器
+        // 正文：文字／HTML 双模式编辑器
         let editorView = QuickCaptureEditor(
             model: editorModel, handle: editorHandle,
             onSubmit: { [weak self] in self?.save() },
@@ -211,13 +211,16 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         authorField.placeholderString = "可留空"
         locationField.placeholderString = "页码、卷次、章节"
         tagsField.placeholderString = "用逗号或空格分隔"
-        let noteView = NSHostingView(rootView: RichEditor(text: Bindable(noteModel).text,
-            placeholder: "个人按语 HTML，可留空", minHeight: 75, slot: "quick-note",
+        let noteEditor = RichEditor(text: Bindable(noteModel).text,
+            placeholder: "个人按语，可留空", minHeight: 75, slot: "quick-note",
             onSubmit: { [weak self] in self?.save() }, onCancel: { [weak self] in self?.close() },
             onTab: { [weak self] back in
                 guard let self else { return }
                 if back { self.panel?.makeFirstResponder(self.tagsField) } else { self.editorHandle.focus() }
-            }, handle: noteHandle))
+            }, handle: noteHandle)
+        let noteView = NSHostingView(rootView: Group {
+            if let store { noteEditor.environment(store) } else { noteEditor }
+        })
         noteView.sizingOptions = []
         noteView.heightAnchor.constraint(equalToConstant: 110).isActive = true
 
@@ -351,7 +354,7 @@ struct QuickCaptureEditor: View {
     let onTab: (Bool) -> Void
 
     var body: some View {
-        RichEditor(text: Bindable(model).text, font: .highlight, placeholder: "摘录原文 HTML 源码",
+        RichEditor(text: Bindable(model).text, font: .highlight, placeholder: "摘录原文",
                    toolbar: true, minHeight: 135, slot: "quick-capture",
                    onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle)
     }
