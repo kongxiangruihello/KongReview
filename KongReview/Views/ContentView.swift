@@ -36,6 +36,7 @@ struct ContentView: View {
         }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
+        .modifier(LearningMaterialExportPresentation())
         .modifier(FullBackupPresentation())
         .sheet(item: $store.editorDraft) { _ in
             HighlightEditorView().modifier(EditorDraftCloseConfirmation(kind: .highlight))
@@ -172,6 +173,8 @@ struct ContentView: View {
             HighlightListView(title: "收藏", filter: .init(favoritesOnly: true))
         case .cards:
             CardsHomeView()
+        case .growth:
+            GrowthView()
         case .stats:
             StatsView()
         case .unsorted:
@@ -250,6 +253,8 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .sidebarMenuRow()
                 .tag(SidebarItem.cards)
+                Label("个人成长", systemImage: "leaf")
+                    .tag(SidebarItem.growth)
                 Label("回顾统计", systemImage: "chart.bar.xaxis")
                     .sidebarMenuRow()
                     .tag(SidebarItem.stats)

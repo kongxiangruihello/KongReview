@@ -66,13 +66,14 @@ final class V29LearningExplorerTests: XCTestCase {
         XCTAssertTrue(Set(first.rows.map(\.id)).isDisjoint(with: second.rows.map(\.id)))
     }
     @MainActor
-    func testExistingLinkedCardOpensRelationsWithoutCreatingAnother() throws {
+    func testExistingLinkedCardOpensPreviewWithoutCreatingAnother() throws {
         let db = try AppDatabase(DatabaseQueue())
         let h = try db.save(Highlight(text: "原文"))
         _ = try db.makeCards(fromHighlights: [h.id!])
         let store = LibraryStore(db: db, positionDefaults: nil)
         store.makeCard(from: h)
-        XCTAssertEqual(store.learningExplorer?.route, .related(h.id!))
+        XCTAssertEqual(store.cardEditor?.card.highlightId, h.id)
+        XCTAssertNil(store.cardEditor?.card.id)
         XCTAssertEqual(try db.cards(highlightIds: [h.id!]).count, 1)
         XCTAssertFalse(store.canShowGlobalSearch)
         XCTAssertFalse(store.cardRatingShortcutIsAvailable)

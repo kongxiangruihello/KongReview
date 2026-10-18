@@ -10,6 +10,7 @@ enum SidebarItem: Hashable {
     case favorites
     case cards
     case stats
+    case growth
     case unsorted
     case trash
     case articles
@@ -40,6 +41,10 @@ final class LibraryStore {
     @ObservationIgnored var fullSimilaritySession: FullSimilaritySession?
     @ObservationIgnored var fullSimilarityTask: Task<Void, Never>?
     @ObservationIgnored var fullSimilarityRunID = UUID()
+    var learningMaterialExport: LearningMaterialExportRequest?
+    @ObservationIgnored var flushGrowthReflection: (() throws -> Void)?
+    var growthGeneration = 0
+    var growthFlushKey: String?
     var fullBackupBusy = false
     var fullBackupRestore: PreparedFullBackup?
 
@@ -196,6 +201,8 @@ final class LibraryStore {
 
     /// 每次写入后递增，列表视图据此重新查询
     private(set) var revision = 0
+    var journeyRevision = 0
+    var journeyNavigation = JourneyNavigation()
 
     init(db: AppDatabase, draftPersistence: EditorDraftPersistence? = nil, positionDefaults: UserDefaults? = nil,
          backgroundStatistics: Bool = false,
@@ -627,6 +634,12 @@ final class LibraryStore {
 
     /// 先把当前数据另存一份“恢复前”备份，再用所选备份替换
     func restoreBackup(_ info: BackupInfo) {
+        do { try flushGrowthReflection?() } catch { report(error); return }
+        growthGeneration += 1
+        journeyNavigation = JourneyNavigation()
+        flushGrowthReflection = nil
+        selection = .home
+        fullSimilarityTask?.cancel(); fullSimilaritySession = nil
         let db = self.db
         maintenanceProgress = "正在恢复备份…"
         pendingRestore = nil
@@ -778,11 +791,14 @@ final class LibraryStore {
     /// 单条摘录做成记忆卡（牌组“摘录”）；不弹提示，界面上的脑形图标会变色
     func makeCard(from highlight: Highlight) {
         guard let id = highlight.id else { return }
-        if let existing = try? db.cards(highlightIds: [id]), !existing.isEmpty {
-            learningExplorer = .init(route: .related(id))
-            return
-        }
-        perform { _ = try db.makeCards(fromHighlights: [id], style: CitationSettings.style) }
+        do {
+            guard let current = try db.highlights(ids: [id]).first, current.deletedAt == nil else {
+                errorMessage = "原摘录已删除，请刷新后重试。"; return
+            }
+            let source = sources.first { $0.id == current.sourceId }
+            let card = Card.from(current, source: source, deck: study.lastDeck ?? "摘录", style: CitationSettings.style)
+            cardEditor = CardDraft(card: card, tagsText: TagParser.format(card.tags))
+        } catch { report(error) }
     }
 
     /// 回顾页顶部提示：所有牌组今天待学的卡片数
@@ -831,6 +847,13 @@ final class LibraryStore {
     func commitCardEditor() {
         guard !fullBackupBusy else { return }
         guard var d = cardEditor else { return }
+        if d.isNew, let hid = d.card.highlightId {
+            do {
+                guard let original = try db.highlights(ids: [hid]).first, original.deletedAt == nil else {
+                    cardEditor?.error = "原摘录已删除，草稿已保留；请先处理原摘录关联。"; return
+                }
+            } catch { report(error); return }
+        }
         d.card.front = d.card.front.trimmingCharacters(in: .whitespacesAndNewlines)
         d.card.back = d.card.back.trimmingCharacters(in: .whitespacesAndNewlines)
         d.card.deck = d.card.deck.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "默认"
@@ -969,7 +992,7 @@ final class LibraryStore {
             && citationCheck == nil && editionImport == nil && chapterProgressRequest == nil
             && backupList == nil && duplicateCardReview == nil && cardSyncOffer == nil
             && !showsDraftRecovery && !closingHighlightEditor && !closingCardEditor
-            && learningExplorer == nil && !globalSearch.isPresented && fullBackupRestore == nil && !fullBackupBusy
+            && learningMaterialExport == nil && learningExplorer == nil && !globalSearch.isPresented && fullBackupRestore == nil && !fullBackupBusy
     }
 
     var canUndoLastCardRating: Bool {

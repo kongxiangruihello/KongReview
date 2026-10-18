@@ -269,7 +269,9 @@ enum FullBackupService {
         let queue = try DatabaseQueue(path: url.path, configuration: config)
         defer { try? queue.close() }
         // 格式 1 只接收本版本已认识的完整结构，不运行备份内未知触发器或更高版本迁移。
-        let reference = try AppDatabase(DatabaseQueue())
+        let identifiers = try queue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
+        // 先和已知历史版本的结构逐项比较，验证后才在恢复目标执行本机迁移。
+        let reference = try AppDatabase(DatabaseQueue(), upTo: identifiers.contains("v14-growth-progress") ? nil : "v13-event-card-state")
         let schema = try reference.writer.read { try schemaSignature($0) }
         return try queue.read { db in
             guard try schemaSignature(db) == schema else { throw BackupError.unsupported }

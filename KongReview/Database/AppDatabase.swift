@@ -60,11 +60,12 @@ extension Highlight: @retroactive FetchableRecord, @retroactive MutablePersistab
 final class AppDatabase {
     let writer: any DatabaseWriter
 
-    init(_ writer: any DatabaseWriter) throws {
+    init(_ writer: any DatabaseWriter, upTo migration: String? = nil) throws {
         self.writer = writer
         // 1.2：繁简归一函数。索引触发器在写连接上调用它，所以必须在迁移之前注册。
         try writer.writeWithoutTransaction { db in AppDatabase.registerFunctions(db) }
-        try migrator.migrate(writer)
+        if let migration { try migrator.migrate(writer, upTo: migration) }
+        else { try migrator.migrate(writer) }
     }
 
     /// kr_fold(文本)：繁体转简体、全角转半角、英文转小写（见 ChineseFold），供繁简通搜的索引使用
@@ -384,6 +385,13 @@ final class AppDatabase {
         // 2.2：记忆卡回答记录写上回答前的卡片状态（导入的旧卡第一次复习不再被算成新卡）
         m.registerMigration("v13-event-card-state") { db in
             try db.alter(table: "review_event") { t in t.add(column: "cardState", .text) }
+        }
+        m.registerMigration("v14-growth-progress") { db in
+            try db.create(table: "app_progress") { t in
+                t.column("key", .text).primaryKey()
+                t.column("payload", .blob).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
         }
         return m
     }

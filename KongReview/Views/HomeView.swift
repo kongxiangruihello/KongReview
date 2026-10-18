@@ -17,6 +17,7 @@ struct HomeView: View {
                         Button("重新读取") { store.refreshDerived() }
                     }.frame(maxWidth: .infinity, minHeight: 280)
                 } else {
+                Button("查看个人成长 · 日／周／月／年小结") { store.selection = .growth }.handCursor()
                 HomeLearningHeader(summary: store.homeLearningSummary, day: store.today)
 
                 DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
@@ -27,6 +28,8 @@ struct HomeView: View {
                                       onReview: { store.openTodayReview() },
                                       onCards: { store.openCardsHome() })
                 }
+                DailyArrangementView().id("\(store.today)|\(store.growthGeneration)")
+                HomeTodayPlans().id(store.growthGeneration)
             }
             .frame(maxWidth: 960)
             .padding(.horizontal, 28)

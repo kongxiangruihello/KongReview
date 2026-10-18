@@ -18,6 +18,7 @@ struct NotebookView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header
+                    DisclosureGroup("专题学习总览") { TopicLearningView(notebookID: notebookId).frame(minHeight: 420) }.padding(.vertical, 16)
                     if st.blocks.isEmpty {
                         emptyState
                     } else {

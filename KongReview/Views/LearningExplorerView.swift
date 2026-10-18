@@ -74,7 +74,9 @@ struct LearningExplorerView: View {
     @State private var practice = false
     @State private var showAnswer = false
     @State private var matchIndex = 0
-    @State private var history: [LearningExplorerRoute] = []
+    private struct Position { let route: LearningExplorerRoute; let page: Int; let deck: String; let practice: Bool; let anchor: Int64? }
+    @State private var history: [Position] = []
+    @State private var rowAnchor: Int64?
     private var current: LearningExplorerRoute { route ?? initial }
     private var key: String { "\(current)|\(deck)|\(page)|\(store.revision)" }
     private var title: String {
@@ -88,7 +90,7 @@ struct LearningExplorerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                if !history.isEmpty { Button("返回") { route = history.removeLast(); practice = false; page = 0 } }
+                if !history.isEmpty { Button("返回") { let position = history.removeLast(); route = position.route; practice = position.practice; page = position.page; deck = position.deck; rowAnchor = position.anchor } }
                 Text(title).font(.title2.bold())
                 Spacer()
                 Button("关闭") { store.learningExplorer = nil }.keyboardShortcut(.cancelAction)
@@ -133,8 +135,8 @@ struct LearningExplorerView: View {
                                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
                         }.buttonStyle(.plain).disabled(row.target == nil).handCursor()
                     }
-                }
-            }
+                }.scrollTargetLayout()
+            }.scrollPosition(id:$rowAnchor,anchor:.top)
             HStack {
                 Text("共 \(result.total) 项 · 第 \(page + 1) / \(max(1,(result.total+49)/50)) 页")
                 Spacer()
@@ -175,6 +177,9 @@ struct LearningExplorerView: View {
                     .onChange(of: matchIndex) { _, i in if matches.indices.contains(i) { proxy.scrollTo(matches[i], anchor: .top) } }
                 }
             }
+            if case .card(let card) = document, let id = card.id {
+                DifficultCarePanel(cardID: id,onOpenCard:{ navigate(.document(.init(kind:.card,recordID:$0),"")) }).id(id).padding(4)
+            }
             Divider()
             HStack {
                 Button("打开原条目／编辑") {
@@ -192,7 +197,7 @@ struct LearningExplorerView: View {
         }
     }
     private func navigate(_ next: LearningExplorerRoute) {
-        history.append(current); route = next; page = 0; matchIndex = 0; showAnswer = false; practice = false
+        history.append(.init(route:current,page:page,deck:deck,practice:practice,anchor:rowAnchor)); route = next; page = 0; rowAnchor = nil; matchIndex = 0; showAnswer = false; practice = false
     }
     private func load() async {
         loading = true; error = nil; document = nil

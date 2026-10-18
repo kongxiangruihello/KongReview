@@ -14,6 +14,8 @@ struct CardDuplicateReviewView: View {
                     Text("已整理 \(state.removed) 张")
                         .font(.callout).foregroundStyle(.secondary)
                 }
+                Button("继续上次扫描") { store.resumeSavedSimilarity() }
+                    .disabled(state?.processing == true || state?.scanning == true)
                 Button("重新扫描") { store.findDuplicateCards() }
                     .disabled(state?.processing == true || state?.scanning == true)
             }
@@ -59,13 +61,15 @@ struct CardDuplicateReviewView: View {
                             store.duplicateCardReview?.position = 0
                             store.continueFullSimilarity()
                         }
-                        Text("暂停后可比较和整理；关闭窗口将结束本次扫描。").font(.caption).foregroundStyle(.secondary)
+                        Text("进度自动保存，关闭窗口或重启后可继续。").font(.caption).foregroundStyle(.secondary)
                     }
                 }.disabled(state?.processing == true)
             }
             if state?.scanning == true {
                 VStack(spacing: 12) {
-                    ProgressView()
+                    if state?.mode == .similar, let state, state.scanTotal > 0 {
+                        ProgressView(value: Double(state.scanCompleted), total: Double(state.scanTotal)).frame(maxWidth: 420)
+                    } else { ProgressView() }
                     Text(state?.mode == .similar ? "正在查找高度相似的正反面内容…" : "正在比对全部记忆卡…").foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

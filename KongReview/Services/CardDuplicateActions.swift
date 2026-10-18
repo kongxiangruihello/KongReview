@@ -7,6 +7,9 @@ struct CardDuplicateReview: Identifiable {
     var scanning = true
     var processing = false
     var paused = false
+    var resumeSaved = false
+    var scanCompleted = 0
+    var scanTotal = 0
     var groups: [CardDuplicateGroup] = []
     var position = 0
     var keeper: [String: Int64] = [:]
@@ -32,6 +35,8 @@ extension LibraryStore {
         state.scanID = UUID()
         state.scanning = true
         state.paused = false
+        state.resumeSaved = false
+        state.scanCompleted = 0; state.scanTotal = 0
         fullSimilarityTask?.cancel()
         fullSimilaritySession = nil
         state.backupDone = false
@@ -108,6 +113,9 @@ extension LibraryStore {
                     current.keeper[groupID] = nil
                     current.position = max(0, min(current.position, current.groups.count - 1))
                     self.duplicateCardReview = current
+                    if let session = self.fullSimilaritySession {
+                        Task { try? await session.saveCheckpoint(groups: current.groups) }
+                    }
                     self.recordCardCleanupUndo(snapshot)
                     self.reload()
                     // 预先加载的学习卡若刚被整理，应退出到牌组总览，避免继续回答已删除卡。

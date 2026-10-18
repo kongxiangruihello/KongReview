@@ -12,7 +12,7 @@ extension LibraryStore {
         panel.nameFieldStringValue = "KongReview-\(date).\(FullBackupService.fileExtension)"
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         guard canBeginFullBackup() else { return }
-        do { try draftPersistence?.flush() }
+        do { try flushGrowthReflection?(); try draftPersistence?.flush() }
         catch { report(error); return }
         fullBackupBusy = true
         maintenanceProgress = "正在生成完整备份…"
@@ -69,8 +69,10 @@ extension LibraryStore {
     /// 只能由预览页的明确恢复确认调用。
     func confirmFullBackupRestore() {
         guard let prepared = fullBackupRestore, canBeginFullBackup(allowPrepared: true) else { return }
-        do { try draftPersistence?.flush() }
+        do { try flushGrowthReflection?(); try draftPersistence?.flush() }
         catch { report(error); return }
+        growthGeneration += 1
+        journeyNavigation = JourneyNavigation()
         invalidateDerivedStatistics()
         fullSimilarityTask?.cancel()
         fullSimilaritySession = nil
@@ -127,7 +129,7 @@ extension LibraryStore {
     }
 
     private var hasBlockingFullBackupPanel: Bool {
-        learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
+        learningMaterialExport != nil || learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
             || study.cardTagEdit != nil || study.renamingDeck != nil || duplicateCardReview != nil || duplicateReview != nil
             || newNotebookRequest != nil || addArticleDraft != nil || articleSourceDraft != nil || clozeDraft != nil
             || backupList != nil || tagEditor != nil || showTagManager || bibliographyRequest != nil
@@ -140,6 +142,7 @@ extension LibraryStore {
     }
 
     private func finishFullBackupRestore() {
+        flushGrowthReflection = nil
         undoManager?.removeAllActions()
         do { try draftPersistence?.reloadFromDisk(); draftSaveError = nil }
         catch { draftSaveError = "完整资料已恢复，但草稿暂未能读取：" + error.localizedDescription }

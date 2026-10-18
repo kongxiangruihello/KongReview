@@ -831,7 +831,11 @@ struct CardEditorView: View {
         let draft = store.cardEditor
         let decks = (try? store.db.deckNames()) ?? []
         return VStack(alignment: .leading, spacing: 10) {
-            Text(draft?.isNew == true ? "新建记忆卡" : "编辑记忆卡").font(.title2.bold())
+            Text(draft?.isNew == true ? (draft?.card.highlightId != nil ? "预览并编辑新记忆卡" : "新建记忆卡") : "编辑记忆卡").font(.title2.bold())
+            if draft?.isNew == true, let id = draft?.card.highlightId {
+                Text("确认问题、答案、牌组和标签后保存。已有相关卡片可展开核对，关闭时可保留草稿。").font(.caption).foregroundStyle(.secondary)
+                RelatedCardsInline(highlightID: id)
+            }
             if let notice = store.draftRecoveryNotice {
                 Label(notice, systemImage: "info.circle").font(.callout).foregroundStyle(.orange)
             }

@@ -23,7 +23,7 @@ struct FullBackupRestoreView: View {
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
             Label("文件校验和、数据库结构与完整性、草稿及设置均已校验。", systemImage: "checkmark.shield")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("恢复会替换当前数据库、编辑草稿和学习设置，包括今日回顾进度。已保存到应用的图片、音频、封面及网页缓存随数据库恢复。恢复前会先保存一份完整备份；若恢复失败，会自动回滚。")
+            Text("恢复会替换当前数据库、编辑草稿和学习设置，包括今日回顾进度。已保存到应用的图片、音频、封面、网页缓存、个人成长复盘和扫描进度随数据库恢复。恢复前会先保存一份完整备份；若恢复失败，会自动回滚。")
                 .font(.callout).fixedSize(horizontal: false, vertical: true)
             Text("外部同步文件夹、收件箱、尚未存档的远程资源及系统权限不随备份迁移。旧的自动数据库备份保持保留。")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

@@ -19,9 +19,14 @@ extension AppDatabase {
     @discardableResult
     func save(_ card: Card) throws -> Card {
         try writer.write { db in
+            let before = try card.id.flatMap { try Card.fetchOne(db, key: $0) }
             var c = card
             c.updatedAt = Date()
             try c.save(db)
+            if let before {
+                try Self.recordCareAdjustment(before: before, after: c, in: db)
+                try Self.recordTopicCardEdit(before: before, after: c, in: db)
+            }
             return c
         }
     }

@@ -39,7 +39,7 @@ struct CardDuplicateSignature: Codable, Hashable, Sendable {
     }
 }
 
-struct CardDuplicateGroup: Identifiable, Sendable {
+struct CardDuplicateGroup: Identifiable, Sendable, Codable {
     var signature: CardDuplicateSignature
     /// 保存完整扫描快照；确认前连学习进度也要重读校验。
     var cards: [Card]

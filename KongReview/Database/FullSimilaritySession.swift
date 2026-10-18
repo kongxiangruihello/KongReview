@@ -14,6 +14,9 @@ actor FullSimilaritySession {
     private let db: AppDatabase
     private let ids: [Int64]
     private let deck: String?
+    private var fingerprint = ""
+    private var restoredGroups: [CardDuplicateGroup] = []
+    private var restartNotice: String?
     private var leftIndex = 0
     private var rightID: Int64 = 0
     private var compared = 0
@@ -23,11 +26,31 @@ actor FullSimilaritySession {
     init(db: AppDatabase, ids: [Int64], deck: String?) {
         self.db = db; self.ids = ids; self.deck = deck
     }
-    static func create(db: AppDatabase, deck: String?) async throws -> FullSimilaritySession {
-        let ids = try await db.writer.read { connection in
-            try Int64.fetchAll(connection, sql: "SELECT id FROM card WHERE deletedAt IS NULL" + (deck == nil ? "" : " AND deck=?") + " ORDER BY id", arguments: StatementArguments(deck.map { [$0] } ?? []))
+    static func create(db: AppDatabase, deck: String?, resume: Bool = false) async throws -> FullSimilaritySession {
+        let inventory = try await db.similarityInventory(deck: deck)
+        let saved = resume ? try db.progressValue(SimilarityCheckpoint.self,key:SimilarityCheckpoint.key) : nil
+        let session = FullSimilaritySession(db:db,ids:inventory.ids,deck:deck)
+        await session.restoreCheckpoint(saved, fingerprint:inventory.fingerprint)
+        return session
+    }
+    private func restoreCheckpoint(_ saved: SimilarityCheckpoint?, fingerprint: String) {
+        self.fingerprint = fingerprint
+        guard let saved else { return }
+        guard saved.fingerprint == fingerprint, saved.deck == deck, saved.ids == ids,
+              saved.leftIndex >= 0, saved.leftIndex <= ids.count, saved.compared >= 0,
+              saved.rightID >= 0, saved.rightID <= (ids.last ?? 0),
+              saved.compared <= ids.count * max(0,ids.count-1) / 2 else {
+            restartNotice = "资料或学习状态已变化，已安全重新扫描，避免遗漏新增、修改或删除的卡片。"
+            return
         }
-        return FullSimilaritySession(db: db, ids: ids, deck: deck)
+        leftIndex = saved.leftIndex; rightID = saved.rightID; compared = saved.compared
+        restoredGroups = saved.groups
+    }
+    func inventoryUnchanged() async throws -> Bool { try await db.similarityInventory(deck: deck).fingerprint == fingerprint }
+    func restoredResult() -> (groups: [CardDuplicateGroup], notice: String?) { (restoredGroups,restartNotice) }
+    func saveCheckpoint(groups: [CardDuplicateGroup]) throws {
+        try db.saveProgress(SimilarityCheckpoint(ids:ids,deck:deck,leftIndex:leftIndex,rightID:rightID,compared:compared,
+            fingerprint:fingerprint,groups:groups,finished:leftIndex == ids.count),key:SimilarityCheckpoint.key)
     }
     func nextBatch() throws -> Progress {
         try Task.checkCancellation()
@@ -37,10 +60,10 @@ actor FullSimilaritySession {
             let card = try db.writer.read { connection in try Card.fetchOne(connection, key: id) }
             left = card.flatMap { $0.deletedAt == nil && (deck == nil || $0.deck == deck) ? CardSimilarity.candidate($0, includeLongText: true) : nil }
             leftLoaded = true
-            rightID = id
+            rightID = max(rightID, id)
         }
         guard let left else {
-            leftIndex += 1; leftLoaded = false
+            leftIndex += 1; rightID = 0; leftLoaded = false
             return .init(completed: leftIndex, total: ids.count, compared: compared, groups: [], finished: leftIndex == ids.count)
         }
         let cursor = rightID, maximum = ids.last ?? 0, deck = self.deck
@@ -58,7 +81,7 @@ actor FullSimilaritySession {
         }
         compared += cards.count
         if let last = cards.last?.id { rightID = last }
-        if cards.count < 32 { leftIndex += 1; leftLoaded = false; self.left = nil }
+        if cards.count < 32 { leftIndex += 1; rightID = 0; leftLoaded = false; self.left = nil }
         return .init(completed: leftIndex, total: ids.count, compared: compared, groups: groups, finished: leftIndex == ids.count)
     }
 }
@@ -73,18 +96,30 @@ extension LibraryStore {
     func continueFullSimilarity() {
         guard let state = duplicateCardReview, state.mode == .similar, !state.processing else { return }
         let token = state.scanID, deck = state.scopeDeck
+        let startingRevision = revision
         let runID = UUID()
         fullSimilarityRunID = runID
         duplicateCardReview?.scanning = true
         duplicateCardReview?.paused = false
+        let previousTask = fullSimilarityTask
         fullSimilarityTask?.cancel()
         fullSimilarityTask = Task { @MainActor in
             do {
+                await previousTask?.value
+                try Task.checkCancellation()
+                var shouldResume = state.resumeSaved
+                if let existing = fullSimilaritySession, !(try await existing.inventoryUnchanged()) {
+                    fullSimilaritySession = nil
+                    shouldResume = true
+                }
                 if fullSimilaritySession == nil {
-                    let session = try await FullSimilaritySession.create(db: db, deck: deck)
+                    let session = try await FullSimilaritySession.create(db: db, deck: deck, resume: shouldResume)
                     try Task.checkCancellation()
                     guard duplicateCardReview?.scanID == token else { return }
                     fullSimilaritySession = session
+                    let restored = await session.restoredResult()
+                    duplicateCardReview?.groups = restored.groups
+                    duplicateCardReview?.error = restored.notice
                 }
                 guard let session = fullSimilaritySession else { return }
                 while !Task.isCancelled {
@@ -92,8 +127,20 @@ extension LibraryStore {
                     // 一批成功提交的结果即使恰逢暂停也保留，避免游标前移却漏掉建议。
                     guard duplicateCardReview?.scanID == token else { return }
                     duplicateCardReview?.groups += progress.groups
+                    try await session.saveCheckpoint(groups: duplicateCardReview?.groups ?? [])
                     guard fullSimilarityRunID == runID else { return }
-                    duplicateCardReview?.scanNote = "已检查 \(progress.completed) / \(progress.total) 张起始卡，完成 \(progress.compared) 对比较。包含长卡片；相似不代表重复。新增或修改内容后请重新扫描。"
+                    duplicateCardReview?.scanCompleted = progress.completed
+                    duplicateCardReview?.scanTotal = progress.total
+                    duplicateCardReview?.scanNote = "剩余 \(max(0,progress.total-progress.completed)) 张待检查；已检查 \(progress.completed) / \(progress.total) 张起始卡，完成 \(progress.compared) 对比较。包含长卡片；相似不代表重复。进度自动保存，关闭窗口或重启后可继续；恢复时自动检查资料变化。"
+                    let inventoryChanged = progress.finished ? !(try await session.inventoryUnchanged()) : false
+                    if revision != startingRevision || inventoryChanged {
+                        duplicateCardReview?.scanning = false
+                        duplicateCardReview?.paused = true
+                        duplicateCardReview?.resumeSaved = true
+                        duplicateCardReview?.error = "扫描期间资料有变化。点击继续将核对并安全重扫，避免漏项。"
+                        fullSimilaritySession = nil
+                        return
+                    }
                     if progress.finished {
                         duplicateCardReview?.scanning = false
                         duplicateCardReview?.paused = false
