@@ -23,7 +23,7 @@ struct LearningPlanForm: View {
     var body: some View {
         GroupBox("学习计划 · 保存后加入待办") {
             VStack(alignment: .leading, spacing: 12) {
-                TextField("准备完成什么？多条计划请每行写一条", text: $plan.title, axis: .vertical).lineLimit(2...12).textFieldStyle(.roundedBorder)
+                RichEditor(text:$plan.title,placeholder:"学习计划，多条请用独立段落",autoHeight:true,minHeight:90,slot:"plan-title").richEditorFrame()
                 if original == nil {
                     Toggle("逐行拆分为独立计划", isOn: $splitLines)
                     if splitLines { Text("将创建 \(LearningPlanDraft.lines(plan.title).count) 条计划，共用以下日期与关联资料；保存后可以分别调整。").font(.caption).foregroundStyle(.secondary) }
@@ -138,7 +138,7 @@ struct LearningPlansView: View {
                     if drafts.total > 0 && editing == nil {
                         DisclosureGroup("未保存草稿 · \(drafts.total)") {
                             ForEach(drafts.items) { draft in
-                                Button { editing = draft } label: { Text(draft.plan.title).lineLimit(3).frame(maxWidth:.infinity,alignment:.leading).padding(6) }.buttonStyle(.plain).handCursor()
+                                Button { editing = draft } label: { Text(RichText.attributed(draft.plan.title)).lineLimit(3).frame(maxWidth:.infinity,alignment:.leading).padding(6) }.buttonStyle(.plain).handCursor()
                             }
                             JourneyPager(page:$draftPage,total:drafts.total)
                         }
@@ -147,7 +147,7 @@ struct LearningPlansView: View {
                     ForEach(result.items) { plan in
                         GroupBox {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(plan.title).textSelection(.enabled)
+                                Text(RichText.attributed(plan.title)).textSelection(.enabled)
                                 Text("计划日期：\(plan.dueDate.formatted(date: .abbreviated, time: .omitted))" + (status == .pending && Calendar.current.startOfDay(for: plan.dueDate) < Calendar.current.startOfDay(for: Date()) ? " · 已逾期" : "")).font(.caption).foregroundStyle(.secondary)
                                 if let outcome = plan.outcome, plan.completedAt != nil { PlanOutcomeSummary(outcome:outcome) }
                                 if let at = plan.completedAt { Text("完成于 \(at.formatted(date: .abbreviated, time: .shortened))").font(.caption) }
@@ -211,7 +211,7 @@ struct HomeTodayPlans: View {
                     HStack(alignment:.top) {
                         Button { completing = plan } label: { Image(systemName:"circle") }.help("标为完成").accessibilityLabel("完成计划：\(plan.title)").disabled(store.fullBackupBusy)
                         VStack(alignment:.leading,spacing:4) {
-                            Button { if let link = plan.link { store.openLearningPlanLink(link) } else { store.openLearningPlans() } } label: { Text(plan.title).lineLimit(3).frame(maxWidth:.infinity,alignment:.leading) }.buttonStyle(.plain).handCursor()
+                            Button { if let link = plan.link { store.openLearningPlanLink(link) } else { store.openLearningPlans() } } label: { Text(RichText.attributed(plan.title)).lineLimit(3).frame(maxWidth:.infinity,alignment:.leading) }.buttonStyle(.plain).handCursor()
                             Text(plan.dueDate.formatted(date:.abbreviated,time:.omitted)).font(.caption).foregroundStyle(.secondary)
                         }
                     }

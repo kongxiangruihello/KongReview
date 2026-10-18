@@ -22,7 +22,8 @@ struct LearningPlanDraft: Codable, Equatable, Identifiable, Sendable {
         }
     }
     static func lines(_ text: String) -> [String] {
-        text.components(separatedBy: .newlines).compactMap { raw in
+        let plain = Markdown.containsHTMLTag(text) ? Markdown.plainText(fromHTML: text) : text
+        return plain.components(separatedBy: .newlines).compactMap { raw in
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             let clean = trimmed.replacingOccurrences(of: #"^(?:[-*•]\s*(?:\[[ xX]\]\s*)?|\d+[.、)）]\s*)"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
             return clean.isEmpty ? nil : clean
@@ -70,7 +71,7 @@ extension AppDatabase {
     }
     func commitPlanDraft(_ draft: LearningPlanDraft) throws {
         let plans = draft.plansToSave()
-        guard !plans.isEmpty, plans.allSatisfy({ !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { throw JourneyError.emptyPlan }
+        guard !plans.isEmpty, plans.allSatisfy({ HTMLSourceCodec.hasContent($0.title) }) else { throw JourneyError.emptyPlan }
         try writer.write { db in
             let existing = try Self.readProgress(LearningPlan.self, key: draft.plan.key, in: db)
             guard existing == draft.original else { throw JourneyError.changedPlan }

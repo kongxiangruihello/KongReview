@@ -30,7 +30,7 @@ struct LearningMaterialExportRequest: Identifiable {
                 let outcomes = plans.map { plan in
                     "### " + plan.title + "\n\n" + (plan.outcome?.gains ?? "") + (plan.outcome?.evidence.map { "\n\n关联成果：" + $0.title } ?? "")
                 }.joined(separator:"\n\n")
-                try (text + guide + "\n\n## 完成的计划与收获\n\n" + outcomes).write(to:url,atomically:true,encoding:.utf8)
+                try Markdown.markdown(fromHTMLFragments: text + guide + "\n\n## 完成的计划与收获\n\n" + outcomes).write(to:url,atomically:true,encoding:.utf8)
             } catch { store.report(error) }
         }
     }

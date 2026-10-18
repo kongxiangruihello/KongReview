@@ -1,232 +1,224 @@
 import SwiftUI
-import WebKit
+import AppKit
 import KongReviewCore
 
-// MARK: - 所见即所得编辑器（1.2）
-
-/// 所见即所得的 Markdown 编辑器：直接显示粗体、标题、列表、引用、图片，看不到 ** # 这些符号；
-/// 快捷键与行首 Markdown 自动转换见 EditorPage；粘贴时保留格式。保存的仍是 Markdown（记忆卡必要时为 HTML）。
-///
-/// - autoHeight 为 true 时高度随内容增减（放在 ScrollView 里用，如记忆卡编辑面板）；
-///   为 false 时由外面给定高度，内容多了在编辑器里滚动（如摘录编辑面板）。
-/// - onSubmit：⌘↩；onCancel：Esc。
+/// All body editors expose literal HTML source. Legacy Markdown is converted for display only;
+/// opening/cancelling an editor never rewrites the stored content.
 struct RichEditor: View {
     @Binding var text: String
     var mode: RichEditorMode = .markdown
     var font: RichEditorFont = .body
     var placeholder: String = ""
-    var toolbar: Bool = true
-    var autoHeight: Bool = false
+    var toolbar = true
+    var autoHeight = false
     var minHeight: CGFloat = 70
-    var focus: Bool = false
-    /// 记录自动高度用的标识（同一界面里多个编辑器要不同）
-    var slot: String = "editor"
+    var focus = false
+    var slot = "editor"
     var onSubmit: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
-    /// 1.3：Tab / ⇧Tab 跳出编辑器（快速录入浮窗用）；nil 时 Tab 照常
     var onTab: ((Bool) -> Void)? = nil
-    /// 1.3：外部控制焦点、全选
     var handle: RichEditorHandle? = nil
     var formatting: CardFormattingState? = nil
-    var fieldName: String = ""
-    @Environment(LibraryStore.self) private var store
-
+    var fieldName = ""
+    @State private var localHandle = RichEditorHandle()
+    @State private var measuredHeight: CGFloat = 70
     var body: some View {
-        let rep = RichEditorRep(text: $text, mode: mode, font: font, placeholder: placeholder, toolbar: toolbar,
-                                autoHeight: autoHeight, focus: focus, slot: "rich-editor-" + slot,
-                                onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle,
-                                formatting: formatting, fieldName: fieldName, store: store)
-        if autoHeight {
-            rep.frame(height: max(minHeight, WebHeights.shared.values["rich-editor-" + slot] ?? minHeight))
-        } else {
-            rep.frame(minHeight: minHeight)
+        VStack(alignment:.leading,spacing:0) {
+            if toolbar {
+                ScrollView(.horizontal,showsIndicators:false) {
+                    HStack(spacing:6) {
+                        Text("HTML 源码").font(.caption).foregroundStyle(.secondary)
+                        ForEach(["p","strong","em","h2","ul","blockquote","a","br"],id:\.self) { tag in
+                            Button("<\(tag)>") { (handle ?? localHandle).textView?.applyHTML(tag) }.help("插入 \(tag) 标签")
+                        }
+                    }.controlSize(.small).padding(5)
+                }.fixedSize(horizontal:false,vertical:true)
+            }
+            HTMLSourceEditorRep(text:$text,measuredHeight:$measuredHeight,autoHeight:autoHeight,minHeight:minHeight,
+                focus:focus,placeholder:placeholder,slot:slot,handle:handle ?? localHandle,formatting:formatting,fieldName:fieldName,
+                onSubmit:onSubmit,onCancel:onCancel,onTab:onTab)
+                .frame(minHeight:minHeight)
+                .frame(height:autoHeight ? max(minHeight,measuredHeight) : nil)
         }
     }
 }
 
-/// 编辑器的外框（圆角、细边），与应用的纸色设计一致
 struct RichEditorFrame: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(ReviewPalette.hair))
+        content.background(ReviewPalette.card,in:RoundedRectangle(cornerRadius:8))
+            .clipShape(RoundedRectangle(cornerRadius:8))
+            .overlay(RoundedRectangle(cornerRadius:8).stroke(ReviewPalette.hair))
+    }
+}
+extension View { func richEditorFrame() -> some View { modifier(RichEditorFrame()) } }
+
+@MainActor @Observable final class RichEditorHandle {
+    weak var textView: HTMLSourceTextView?
+    func focus(selectAll: Bool = false) {
+        guard let textView else { return }
+        textView.window?.makeFirstResponder(textView)
+        if selectAll { textView.selectAll(nil) }
     }
 }
 
-extension View {
-    func richEditorFrame() -> some View { modifier(RichEditorFrame()) }
-}
-
-/// 编辑器用的网页视图：自动高度时把滚轮交给外面的 ScrollView
-final class EditorWebView: WKWebView {
-    var passScroll = false
-    override func scrollWheel(with event: NSEvent) {
-        if passScroll { nextResponder?.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
-    }
-}
-
-struct RichEditorRep: NSViewRepresentable {
+struct HTMLSourceEditorRep: NSViewRepresentable {
     @Binding var text: String
-    let mode: RichEditorMode
-    let font: RichEditorFont
-    let placeholder: String
-    let toolbar: Bool
+    @Binding var measuredHeight: CGFloat
     let autoHeight: Bool
+    let minHeight: CGFloat
     let focus: Bool
+    let placeholder: String
     let slot: String
+    let handle: RichEditorHandle
+    let formatting: CardFormattingState?
+    let fieldName: String
     let onSubmit: (() -> Void)?
     let onCancel: (() -> Void)?
     let onTab: ((Bool) -> Void)?
-    let handle: RichEditorHandle?
-    let formatting: CardFormattingState?
-    let fieldName: String
-    let store: LibraryStore
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> EditorWebView {
+    @Environment(\.isEnabled) private var enabled
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> SourceScrollView {
+        let scroll = SourceScrollView()
+        scroll.drawsBackground = false; scroll.hasVerticalScroller = !autoHeight; scroll.hasHorizontalScroller = false
+        scroll.borderType = .noBorder; scroll.passScroll = autoHeight
+        let view = HTMLSourceTextView(frame:NSRect(x:0,y:0,width:400,height:minHeight))
+        view.isRichText = false; view.isEditable = enabled; view.isSelectable = true; view.allowsUndo = true
+        view.font = .monospacedSystemFont(ofSize:13,weight:.regular); view.textColor = .textColor; view.drawsBackground = false
+        view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false; view.isAutomaticSpellingCorrectionEnabled = false
+        view.isAutomaticLinkDetectionEnabled = false
+        view.textContainerInset = NSSize(width:10,height:10)
+        view.isHorizontallyResizable = false; view.isVerticallyResizable = true
+        view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
+        view.textContainer?.containerSize = NSSize(width:400,height:CGFloat.greatestFiniteMagnitude)
+        view.minSize = NSSize(width:0,height:minHeight); view.maxSize = NSSize(width:CGFloat.greatestFiniteMagnitude,height:CGFloat.greatestFiniteMagnitude)
+        view.setAccessibilityLabel((fieldName.isEmpty ? placeholder : fieldName) + " HTML 源码")
+        view.setAccessibilityHelp("直接编辑 HTML 标签和正文，命令回车保存；粘贴保留源码。")
+        context.coordinator.lastStored = text
+        view.string = HTMLSourceCodec.editable(text)
+        scroll.documentView = view
+        handle.textView = view
+        formatting?.attach(slot:slot,name:fieldName,textView:view)
         let c = context.coordinator
-        c.parent = self
-        let config = WKWebViewConfiguration()
-        config.userContentController.add(WeakScriptHandler(c), name: "krEditor")
-        if formatting != nil {
-            config.userContentController.addUserScript(WKUserScript(source: CardFormattingScript.source,
-                injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        view.changed = { [weak c, weak view] value in
+            guard let c, let view else { return }; c.lastStored = value; c.parent.text = value; c.measure(view)
         }
-        LocalSchemeHandler.register(on: config, store: store)
-        let wv = EditorWebView(frame: .zero, configuration: config)
-        c.webView = wv
-        formatting?.attach(slot: slot, name: fieldName, webView: wv)
-        wv.passScroll = autoHeight
-        // 1.8：同一个位置上次留下的高度（可能是另一张卡的长内容）不沿用，等网页量好再定
-        if autoHeight {
-            let key = slot
-            DispatchQueue.main.async { [weak c] in
-                // 网页已经报过高度就不要再清掉（否则高度不变时不会再报，编辑器会缩回最小高度）
-                if c?.gotHeight != true { WebHeights.shared.values[key] = nil }
-            }
+        view.resized = { [weak c,weak view] in if let view { c?.measure(view) } }
+        view.focused = { [weak c] in guard let c else { return }; c.parent.formatting?.activate(c.parent.slot) }
+        configure(view)
+        DispatchQueue.main.async { [weak c,weak view] in
+            guard let view else { return }; c?.measure(view)
+            if c?.parent.focus == true { view.window?.makeFirstResponder(view) }
         }
-        wv.setValue(false, forKey: "drawsBackground")
-        wv.navigationDelegate = c
-        c.lastValue = text
-        c.wantsFocus = focus
-        handle?.webView = wv
-        handle?.coordinator = c
-        wv.loadHTMLString(EditorPage.page(text: text, mode: mode, font: font, placeholder: placeholder,
-                                          toolbar: toolbar, autoHeight: autoHeight, tabOut: onTab != nil), baseURL: nil)
-        return wv
+        return scroll
     }
-
-    func updateNSView(_ wv: EditorWebView, context: Context) {
-        let c = context.coordinator
-        c.parent = self
-        formatting?.attach(slot: slot, name: fieldName, webView: wv)
-        // 外部换了内容（如打开另一条摘录）：整体替换编辑区；自己刚发出的改动不重复载入
-        if text != c.lastValue {
-            c.lastValue = text
-            let (html, isHTML) = EditorPage.displayHTML(for: text, mode: mode)
-            let arg = EditorPage.jsonString(html)
-            if c.ready { wv.evaluateJavaScript("krSetContent(\(arg), \(isHTML));", completionHandler: nil) }
-            else { c.pending = "krSetContent(\(arg), \(isHTML));" }
+    func updateNSView(_ scroll: SourceScrollView, context: Context) {
+        let c = context.coordinator; c.parent = self
+        guard let view = scroll.documentView as? HTMLSourceTextView else { return }
+        view.isEditable = enabled; configure(view)
+        if text != c.lastStored {
+            c.lastStored = text; view.string = HTMLSourceCodec.editable(text); view.undoManager?.removeAllActions()
         }
+        handle.textView = view; formatting?.attach(slot:slot,name:fieldName,textView:view)
+        c.measure(view)
     }
-
-    static func dismantleNSView(_ wv: EditorWebView, coordinator: Coordinator) {
-        if let parent = coordinator.parent { parent.formatting?.detach(slot: parent.slot, webView: wv) }
-        wv.configuration.userContentController.removeScriptMessageHandler(forName: "krEditor")
+    private func configure(_ view: HTMLSourceTextView) { view.submit = onSubmit; view.cancel = onCancel; view.tabOut = onTab }
+    static func dismantleNSView(_ scroll: SourceScrollView, coordinator: Coordinator) {
+        guard let view = scroll.documentView as? HTMLSourceTextView else { return }
+        coordinator.parent.formatting?.detach(slot:coordinator.parent.slot,textView:view)
+        view.changed = nil; view.resized = nil; view.focused = nil
     }
-
-    @MainActor
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-        var parent: RichEditorRep?
-        weak var webView: WKWebView?
-        var lastValue = ""
-        var ready = false
-        var wantsFocus = false
-        var pendingSelectAll = false
-        var pending: String?
-        /// 1.8：网页是否已经报过内容高度
-        var gotHeight = false
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            editorReady(in: webView)
-        }
-
-        /// 编辑器脚本完成初始化就可以同步原文；didFinish 可能还在等远程图片。
-        private func editorReady(in webView: WKWebView) {
-            guard !ready else { return }
-            ready = true
-            if let js = pending { webView.evaluateJavaScript(js, completionHandler: nil); pending = nil }
-            if wantsFocus {
-                wantsFocus = false
-                if let parent { parent.formatting?.activate(parent.slot) }
-                webView.window?.makeFirstResponder(webView)
-                webView.evaluateJavaScript(pendingSelectAll ? "krSelectAll();" : "krFocus();", completionHandler: nil)
-                pendingSelectAll = false
-            }
-        }
-
-        /// 只允许载入编辑器页面本身；拖进来的文件、点到的链接都不在编辑器里打开
-        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-            if !ready, action.navigationType == .other { return .allow }
-            if action.targetFrame?.isMainFrame == false { return .allow }
-            return .cancel
-        }
-
-        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let body = message.body as? [String: Any], let type = body["type"] as? String, let p = parent else { return }
-            switch type {
-            case "focus":
-                p.formatting?.activate(p.slot)
-            case "external-link":
-                p.formatting?.activate(p.slot)
-                p.formatting?.linkURL = ""
-                p.formatting?.linkError = nil
-                p.formatting?.showsLink = true
-            case "ready":
-                if let webView { editorReady(in: webView) }
-            case "change":
-                guard ready else { return }
-                guard let v = body["value"] as? String else { return }
-                lastValue = v
-                if p.text != v { p.text = v }
-            case "height":
-                guard let h = (body["value"] as? NSNumber).map({ CGFloat($0.doubleValue) }), h > 0 else { return }
-                gotHeight = true
-                if WebHeights.shared.values[p.slot] != h { WebHeights.shared.values[p.slot] = h }
-            case "submit":
-                p.onSubmit?()
-            case "cancel":
-                p.onCancel?()
-            case "tab", "backtab":
-                p.onTab?(type == "backtab")
-            case "open":
-                if let s = body["value"] as? String, let url = URL(string: s) { NSWorkspace.shared.open(url) }
-            default:
-                break
-            }
+    @MainActor final class Coordinator {
+        var parent: HTMLSourceEditorRep
+        var lastStored = ""
+        init(_ parent: HTMLSourceEditorRep) { self.parent = parent }
+        func measure(_ view: NSTextView) {
+            guard parent.autoHeight,let layout = view.layoutManager,let container = view.textContainer else { return }
+            layout.ensureLayout(for:container)
+            let height = max(parent.minHeight,ceil(layout.usedRect(for:container).height + view.textContainerInset.height*2 + 4))
+            guard abs(parent.measuredHeight-height)>1 else { return }
+            DispatchQueue.main.async { [weak self] in self?.parent.measuredHeight = height }
         }
     }
 }
-
-/// 1.3：从外面（AppKit 浮窗）控制编辑器：设焦点、全选
-@MainActor
-final class RichEditorHandle {
-    weak var webView: WKWebView?
-    weak var coordinator: RichEditorRep.Coordinator?
-
-    /// 让编辑器成为键盘焦点；selectAll 为 true 时全选内容（直接打字即替换）
-    func focus(selectAll: Bool = false) {
-        guard let wv = webView else { return }
-        wv.window?.makeFirstResponder(wv)
-        let js = selectAll ? "krSelectAll();" : "krFocus();"
-        if coordinator?.ready == true {
-            wv.evaluateJavaScript(js, completionHandler: nil)
-        } else {
-            // 页面还没载入完：载入后再做
-            coordinator?.wantsFocus = true
-            coordinator?.pendingSelectAll = selectAll
+final class SourceScrollView: NSScrollView {
+    var passScroll = false
+    override func scrollWheel(with event: NSEvent) { if passScroll { nextResponder?.scrollWheel(with:event) } else { super.scrollWheel(with:event) } }
+}
+final class HTMLSourceTextView: NSTextView {
+    var changed: ((String)->Void)?
+    var resized: (()->Void)?
+    var focused: (()->Void)?
+    var submit: (()->Void)?
+    var cancel: (()->Void)?
+    var tabOut: ((Bool)->Void)?
+    override func didChangeText() { super.didChangeText(); changed?(string) }
+    override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); resized?() }
+    override func becomeFirstResponder() -> Bool { let ok = super.becomeFirstResponder(); if ok { focused?() }; return ok }
+    override func paste(_ sender: Any?) {
+        if let value = NSPasteboard.general.string(forType:.string) ?? NSPasteboard.general.string(forType:.html) { insertText(value,replacementRange:selectedRange()) }
+    }
+    override func keyDown(with event: NSEvent) {
+        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if event.modifierFlags.contains(.command) {
+            if key == "\r", let submit { submit(); return }
+            let tags = ["b":"strong","i":"em","u":"u","1":"h1","2":"h2","3":"h3","e":"code","k":"a"]
+            if let tag = tags[key] { applyHTML(tag); return }
         }
+        if event.keyCode == 53, let cancel { cancel(); return }
+        if event.keyCode == 48,let tabOut { tabOut(event.modifierFlags.contains(.shift)); return }
+        super.keyDown(with:event)
+    }
+    func applyHTML(_ command: String) {
+        guard isEditable else { return }
+        let map = ["bold":"strong","italic":"em","strike":"s","quote":"blockquote","code":"code"]
+        let tag = map[command] ?? command
+        let range = selectedRange(), ns = string as NSString
+        guard range.location != NSNotFound, NSMaxRange(range)<=ns.length else { return }
+        let selected = ns.substring(with:range)
+        let prefix: String, suffix: String
+        switch tag {
+        case "br","hr": prefix = "<\(tag)>"; suffix = ""
+        case "ul","ol": prefix = "<\(tag)>\n<li>"; suffix = "</li>\n</\(tag)>"
+        case "a": prefix = "<a href=\"https://\">"; suffix = "</a>"
+        case "clear":
+            insertText(Markdown.plainText(fromHTML:selected),replacementRange:range); return
+        default: prefix = "<\(tag)>"; suffix = "</\(tag)>"
+        }
+        window?.makeFirstResponder(self)
+        insertText(prefix+selected+suffix,replacementRange:range)
+        setSelectedRange(NSRange(location:range.location+(prefix as NSString).length,length:(selected as NSString).length))
+    }
+    func insertHTMLLink(_ url: String) {
+        guard isEditable else { return }
+        let range = selectedRange(), selected = (string as NSString).substring(with:range)
+        let value = url.isEmpty ? Markdown.plainText(fromHTML:selected) : "<a href=\"" + HTMLSourceCodec.attribute(url) + "\">" + (selected.isEmpty ? HTMLSourceCodec.attribute(url) : selected) + "</a>"
+        window?.makeFirstResponder(self); insertText(value,replacementRange:range)
+    }
+}
+
+enum HTMLSourceCodec {
+    static func hasContent(_ text: String) -> Bool {
+        !Markdown.plainText(fromHTML:text).trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ||
+        text.range(of:#"<(?:img|audio|video)\b"#,options:[.regularExpression,.caseInsensitive]) != nil
+    }
+    static func editable(_ text: String) -> String {
+        guard !text.isEmpty else { return "" }
+        if Markdown.looksLikeHTML(text) || Markdown.containsHTMLTag(text) { return text }
+        return Markdown.html(text)
+    }
+    static func canWrapCloze(_ source: String, range: NSRange) -> Bool {
+        let ns = source as NSString
+        guard range.location != NSNotFound, range.length > 0, NSMaxRange(range)<=ns.length else { return false }
+        let pattern = #"<[^>]*>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z]+);"#
+        let matches = (try? NSRegularExpression(pattern:pattern))?.matches(in:source,range:NSRange(location:0,length:ns.length)) ?? []
+        for match in matches where NSIntersectionRange(range,match.range).length > 0 {
+            if ns.substring(with:match.range).hasPrefix("<") { return false }
+            if NSIntersectionRange(range,match.range) != match.range { return false }
+        }
+        return true
+    }
+    static func attribute(_ text: String) -> String {
+        text.replacingOccurrences(of:"&",with:"&amp;").replacingOccurrences(of:"\"",with:"&quot;").replacingOccurrences(of:"<",with:"&lt;").replacingOccurrences(of:">",with:"&gt;")
     }
 }

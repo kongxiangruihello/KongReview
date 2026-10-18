@@ -83,7 +83,7 @@ extension AppDatabase {
         }
     }
 
-    private static let globalSearchPlainFunction = DatabaseFunction("kr_search_plain", argumentCount: 1, pure: true) { values in
+    static let globalSearchPlainFunction = DatabaseFunction("kr_search_plain", argumentCount: 1, pure: true) { values in
         guard let text = String.fromDatabaseValue(values[0]) else { return "" }
         guard Markdown.containsHTMLTag(text) || text.contains("&") else { return text }
         return Markdown.plainText(fromHTML: text)

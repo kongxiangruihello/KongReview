@@ -15,7 +15,7 @@ struct WeeklySchedulesView: View {
                     ForEach(result.items) { item in
                         GroupBox {
                             VStack(alignment:.leading,spacing:8) {
-                                Text(item.title).textSelection(.enabled)
+                                Text(RichText.attributed(item.title)).textSelection(.enabled)
                                 Text("每周" + ["日","一","二","三","四","五","六"][max(0,min(6,item.weekday-1))] + (item.paused ? " · 已暂停" : " · 正在重复")).foregroundStyle(.secondary)
                                 if let link = item.link { Text("关联：" + link.title).lineLimit(2) }
                                 Button(item.paused ? "恢复重复" : "暂停重复") {
@@ -65,11 +65,11 @@ struct LearningOutcomesView: View {
                     ForEach(result.items) { plan in
                         GroupBox {
                             VStack(alignment:.leading,spacing:8) {
-                                Text(plan.title).font(.headline).textSelection(.enabled)
+                                Text(RichText.attributed(plan.title)).font(.headline).textSelection(.enabled)
                                 Text(plan.completedAt?.formatted(date:.abbreviated,time:.omitted) ?? "").font(.caption).foregroundStyle(.secondary)
                                 if let outcome = plan.outcome {
                                     DisclosureGroup("阅读收获") { PlanOutcomeSummary(outcome:outcome) }
-                                    Text(outcome.gains).lineLimit(3)
+                                    Text(RichText.attributed(outcome.gains)).lineLimit(3)
                                 }
                                 HStack {
                                     Button("补充收获") { anchor = plan.id.uuidString; editing = plan }
@@ -174,8 +174,8 @@ struct TopicQuestionForm: View {
         ScrollView {
             VStack(alignment:.leading,spacing:14) {
                 Text("专题问题与解答").font(.title2.bold())
-                TextField("需要解决的问题",text:$draft.value.question,axis:.vertical).lineLimit(2...).textFieldStyle(.roundedBorder)
-                TextField("答案或解释：找到了哪些证据？还有哪些不确定？",text:$draft.value.answer,axis:.vertical).lineLimit(4...).textFieldStyle(.roundedBorder)
+                RichEditor(text:$draft.value.question,placeholder:"需要解决的问题",autoHeight:true,minHeight:90,slot:"topic-question").richEditorFrame()
+                RichEditor(text:$draft.value.answer,placeholder:"答案或解释",autoHeight:true,minHeight:120,slot:"topic-answer").richEditorFrame()
                 Toggle("已解决",isOn:Binding(get:{draft.value.solvedAt != nil},set:{draft.value.solvedAt = $0 ? Date() : nil}))
                 if let evidence = draft.value.evidence { HStack { Text("关联：" + evidence.title).lineLimit(3); Button("移除关联") { draft.value.evidence = nil } } }
                 Button(choosing ? "收起资料选择" : "关联摘录、笔记或记忆卡…") { choosing.toggle() }
@@ -261,8 +261,8 @@ struct TopicQuestionsView: View {
                     ForEach(result.items) { item in
                         GroupBox {
                             VStack(alignment:.leading,spacing:8) {
-                                Text(item.question).font(.headline).textSelection(.enabled)
-                                if !item.answer.isEmpty { DisclosureGroup("阅读答案与解释") { Text(item.answer).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) } }
+                                Text(RichText.attributed(item.question)).font(.headline).textSelection(.enabled)
+                                if !item.answer.isEmpty { DisclosureGroup("阅读答案与解释") { Text(RichText.attributed(item.answer)).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) } }
                                 if let at = item.solvedAt { Text("解决于 " + at.formatted(date:.abbreviated,time:.omitted)).font(.caption).foregroundStyle(.secondary) }
                                 HStack {
                                     Button("编辑／补充解答") { editing = .init(value:item,original:item) }

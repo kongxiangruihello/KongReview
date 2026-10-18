@@ -610,23 +610,15 @@ struct ArticleSourceEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("编辑存档正文").font(.title2.bold())
-            Text("这里是正文的 HTML。也可以整段换成 Markdown（标题 #、**粗体**、列表、> 引用），保存时会自动转成 HTML。已划下的摘录不受影响。")
+            Text("直接编辑存档正文的 HTML 源码；标签、属性和链接按输入保存。已划下的摘录不受影响。")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            TextEditor(text: html)
-                .font(.system(size: 12, design: .monospaced))
-                .border(Color.secondary.opacity(0.3))
+            RichEditor(text:html,mode:.card,placeholder:"存档正文 HTML",minHeight:300,slot:"article-source").richEditorFrame()
             HStack {
-                Button("把全文转成 Markdown 便于修改") {
-                    html.wrappedValue = Markdown.plainText(fromHTML: html.wrappedValue)
-                }
-                .help("会丢掉图片、链接等格式，只保留文字与分段")
                 Spacer()
                 Button("取消", role: .cancel) { store.articleSourceDraft = nil }
                     .keyboardShortcut(.cancelAction)
                 Button("保存") {
-                    let text = html.wrappedValue
-                    if !Markdown.looksLikeHTML(text) { html.wrappedValue = Markdown.html(text) }
                     store.saveArticleSource()
                 }
                 .keyboardShortcut(.return, modifiers: .command)

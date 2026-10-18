@@ -92,7 +92,7 @@ extension AppDatabase {
         let value = "CAST(p.payload AS TEXT)"
         var conditions = ["p.key LIKE 'learning-plan.%'", "json_extract(\(value),'$.completedAt') IS NOT NULL", "json_extract(\(value),'$.cancelledAt') IS NULL", "(trim(coalesce(json_extract(\(value),'$.outcome.gains'),''))!='' OR json_extract(\(value),'$.outcome.evidence') IS NOT NULL)"]
         var args: [any DatabaseValueConvertible] = []
-        if !query.isEmpty { conditions.append("instr(kr_fold(coalesce(json_extract(\(value),'$.title'),'')||char(10)||coalesce(json_extract(\(value),'$.outcome.gains'),'')),kr_fold(?))>0"); args.append(query) }
+        if !query.isEmpty { conditions.append("instr(kr_fold(kr_search_plain(coalesce(json_extract(\(value),'$.title'),'')||char(10)||coalesce(json_extract(\(value),'$.outcome.gains'),''))),kr_fold(?))>0"); args.append(query) }
         if let start { conditions.append("json_extract(\(value),'$.completedAt')>=?"); args.append(start.timeIntervalSinceReferenceDate) }
         if let end { conditions.append("json_extract(\(value),'$.completedAt')<?"); args.append(end.timeIntervalSinceReferenceDate) }
         if let notebookID {
@@ -126,7 +126,7 @@ extension AppDatabase {
     }
     func topicQuestions(notebookID: Int64, solved: Bool, query: String = "", offset: Int = 0) async throws -> GrowthPage<TopicQuestion> {
         try await writer.read { db in
-            let from = " FROM app_progress WHERE key LIKE 'topic-question.%' AND json_extract(CAST(payload AS TEXT),'$.notebookID')=? AND json_extract(CAST(payload AS TEXT),'$.solvedAt') IS " + (solved ? "NOT NULL" : "NULL") + " AND instr(kr_fold(json_extract(CAST(payload AS TEXT),'$.question')||char(10)||json_extract(CAST(payload AS TEXT),'$.answer')),kr_fold(?))>0"
+            let from = " FROM app_progress WHERE key LIKE 'topic-question.%' AND json_extract(CAST(payload AS TEXT),'$.notebookID')=? AND json_extract(CAST(payload AS TEXT),'$.solvedAt') IS " + (solved ? "NOT NULL" : "NULL") + " AND instr(kr_fold(kr_search_plain(json_extract(CAST(payload AS TEXT),'$.question')||char(10)||json_extract(CAST(payload AS TEXT),'$.answer'))),kr_fold(?))>0"
             let total = try Int.fetchOne(db,sql:"SELECT COUNT(*)" + from,arguments:[notebookID,query]) ?? 0
             let rows = try Data.fetchAll(db,sql:"SELECT payload" + from + " ORDER BY updatedAt DESC,key LIMIT 50 OFFSET ?",arguments:[notebookID,query,max(0,offset)])
             return .init(items:try rows.map { try JSONDecoder().decode(TopicQuestion.self,from:$0) },total:total)
@@ -143,8 +143,8 @@ extension AppDatabase {
     func saveTopicQuestion(_ draft: TopicQuestionDraft, now: Date = Date()) throws {
         try writer.write { db in
             var question = draft.value
-            guard !question.question.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw GrowthPracticeError.emptyQuestion }
-            guard question.solvedAt == nil || !question.answer.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw GrowthPracticeError.missingAnswer }
+            guard HTMLSourceCodec.hasContent(question.question) else { throw GrowthPracticeError.emptyQuestion }
+            guard question.solvedAt == nil || HTMLSourceCodec.hasContent(question.answer) else { throw GrowthPracticeError.missingAnswer }
             guard try Int.fetchOne(db,sql:"SELECT COUNT(*) FROM notebook WHERE id=?",arguments:[question.notebookID]) == 1 else { throw GrowthPracticeError.missingNotebook }
             let saved = try Self.readProgress(TopicQuestion.self,key:question.key,in:db)
             guard saved == draft.original else { throw GrowthPracticeError.changed }

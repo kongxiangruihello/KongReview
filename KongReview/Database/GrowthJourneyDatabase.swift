@@ -108,7 +108,7 @@ extension AppDatabase {
                 let reflection = try JSONDecoder().decode(GrowthReflection.self, from: row["payload"] as Data)
                 guard let entry = GrowthHistoryEntry.parse(key: row["key"], reflection: reflection), period == nil || entry.period == period else { return nil }
                 guard !reflection.gains.isEmpty || !reflection.challenges.isEmpty || !reflection.nextSteps.isEmpty || reflection.goalCards > 0 || reflection.goalHighlights > 0 else { return nil }
-                let text = ChineseFold.fold([reflection.gains, reflection.challenges, reflection.nextSteps].joined(separator: "\n")).lowercased()
+                let text = ChineseFold.fold(Markdown.plainText(fromHTML: [reflection.gains, reflection.challenges, reflection.nextSteps].joined(separator: "\n"))).lowercased()
                 return needle.isEmpty || text.contains(needle) ? entry : nil
             }.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date > $1.date }
             return .init(items: Array(entries.dropFirst(max(0,offset)).prefix(50)), total: entries.count)

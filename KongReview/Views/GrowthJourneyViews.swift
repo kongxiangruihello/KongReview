@@ -122,9 +122,9 @@ struct GrowthHistoryView: View {
                         GroupBox {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("\(entry.period.title) · \(entry.date.formatted(date: .abbreviated, time: .omitted))").font(.headline)
-                                Text("收获：\(entry.reflection.gains.isEmpty ? "尚未填写" : entry.reflection.gains)")
-                                Text("困难：\(entry.reflection.challenges.isEmpty ? "尚未填写" : entry.reflection.challenges)")
-                                Text("下一步：\(entry.reflection.nextSteps.isEmpty ? "尚未填写" : entry.reflection.nextSteps)")
+                                Text(RichText.attributed("收获：\(entry.reflection.gains.isEmpty ? "尚未填写" : entry.reflection.gains)"))
+                                Text(RichText.attributed("困难：\(entry.reflection.challenges.isEmpty ? "尚未填写" : entry.reflection.challenges)"))
+                                Text(RichText.attributed("下一步：\(entry.reflection.nextSteps.isEmpty ? "尚未填写" : entry.reflection.nextSteps)"))
                                 Button("打开小结／对照上期计划") { store.journeyNavigation.anchors["history"] = entry.id; onOpen(entry) }.handCursor()
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(6).textSelection(.enabled)
                         }.id(entry.id)
@@ -155,7 +155,7 @@ struct CompletedGrowthPlans: View {
                 if let error { Text(error).foregroundStyle(.red) }
                 if result.items.isEmpty { Text("完成的计划会按完成日期自动归入小结。").foregroundStyle(.secondary) }
                 ForEach(result.items) { plan in
-                    Text("✓ \(plan.title) · \(plan.completedAt?.formatted(date: .abbreviated, time: .omitted) ?? "")").textSelection(.enabled)
+                    Text(RichText.attributed("✓ \(plan.title) · \(plan.completedAt?.formatted(date: .abbreviated, time: .omitted) ?? "")")).textSelection(.enabled)
                     if let outcome = plan.outcome { PlanOutcomeSummary(outcome:outcome) }
                 }
                 if result.total > 50 { JourneyPager(page: $page, total: result.total) }
@@ -183,7 +183,7 @@ struct DifficultCarePanel: View {
             ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Picker("处理原因", selection: $reason) { ForEach(DifficultReason.allCases) { Text($0.title).tag($0) } }.disabled(!loaded)
-                TextField("记录需要拆分的问题、缺少的背景或暂缓原因", text: $note, axis: .vertical).lineLimit(2...6).textFieldStyle(.roundedBorder).disabled(!loaded)
+                RichEditor(text:$note,placeholder:"难卡处理说明",autoHeight:true,minHeight:90,slot:"care-note").richEditorFrame().disabled(!loaded)
                 Text("暂缓只作标记。需要暂停正式学习时，请在记忆卡中设置暂停。处理原因自动保存。打开原卡编辑，保存内容修改后会自动记录前后快照并开始跟踪。").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("保存处理记录") { persist() }

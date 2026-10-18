@@ -11,13 +11,15 @@ final class CardFormattingState {
         weak var webView: WKWebView?
         var name: String
     }
+    struct SourceTarget { weak var textView: HTMLSourceTextView?; var name: String }
+    @ObservationIgnored private var sources: [String:SourceTarget] = [:]
     @ObservationIgnored private var targets: [String: Target] = [:]
     var activeSlot: String?
     var activeName = "先点击要编辑的字段"
     var showsLink = false
     var linkURL = ""
     var linkError: String?
-    var hasTarget: Bool { activeSlot.flatMap { targets[$0]?.webView } != nil }
+    var hasTarget: Bool { activeSlot.flatMap { sources[$0]?.textView } != nil || activeSlot.flatMap { targets[$0]?.webView } != nil }
 
     func attach(slot: String, name: String, webView: WKWebView) {
         targets[slot] = Target(webView: webView, name: name)
@@ -27,12 +29,19 @@ final class CardFormattingState {
         targets[slot] = nil
         if activeSlot == slot { activeSlot = nil; activeName = "先点击要编辑的字段"; showsLink = false }
     }
+    func attach(slot: String, name: String, textView: HTMLSourceTextView) { sources[slot] = .init(textView:textView,name:name) }
+    func detach(slot: String, textView: HTMLSourceTextView) {
+        guard sources[slot]?.textView === textView else { return }; sources[slot] = nil
+        if activeSlot == slot { activeSlot = nil; activeName = "先点击要编辑的字段"; showsLink = false }
+    }
     func activate(_ slot: String) {
+        if let target = sources[slot], target.textView != nil { activeSlot = slot; activeName = "HTML 源码：" + target.name; return }
         guard let target = targets[slot], target.webView != nil else { return }
         activeSlot = slot
         activeName = "正在编辑：" + target.name
     }
     func command(_ command: String) {
+        if let view = activeSlot.flatMap({ sources[$0]?.textView }) { view.applyHTML(command); return }
         guard let view = activeSlot.flatMap({ targets[$0]?.webView }) else { return }
         view.window?.makeFirstResponder(view)
         view.evaluateJavaScript("window.krExternalCommand(\(EditorPage.jsonString(command)));", completionHandler: nil)
@@ -45,6 +54,7 @@ final class CardFormattingState {
                 linkError = "请输入网页地址或邮件地址。"; return
             }
         }
+        if let view = activeSlot.flatMap({ sources[$0]?.textView }) { view.insertHTMLLink(url); showsLink = false; linkError = nil; return }
         guard let view = activeSlot.flatMap({ targets[$0]?.webView }) else { return }
         view.window?.makeFirstResponder(view)
         view.evaluateJavaScript("window.krExternalLink(\(EditorPage.jsonString(url)));", completionHandler: nil)
@@ -60,8 +70,8 @@ struct CardFormattingToolbar: View {
             Text(state.activeName).font(.caption).foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
-                    command("B", "bold", help: "粗体 ⌘B")
-                    command("I", "italic", help: "斜体 ⌘I")
+                    command("B", "bold", help: "插入 <strong> 标签 ⌘B")
+                    command("I", "italic", help: "插入 <em> 标签 ⌘I")
                     command("删除线", "strike", help: "删除线 ⇧⌘X")
                     command("代码", "code", help: "行内代码 ⌘E")
                     Divider().frame(height: 18)

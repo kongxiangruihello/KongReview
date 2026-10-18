@@ -67,8 +67,8 @@ struct PlanOutcomeForm: View {
         ScrollView {
             VStack(alignment:.leading,spacing:14) {
                 Text(plan.completedAt == nil ? "完成计划 · 记录收获" : "补充计划收获").font(.title2.bold())
-                Text(plan.title).textSelection(.enabled)
-                TextField("收获（选填）：理解了什么？留下了什么成果？",text:outcome.gains,axis:.vertical).lineLimit(4...).textFieldStyle(.roundedBorder)
+                Text(RichText.attributed(plan.title)).textSelection(.enabled)
+                RichEditor(text:outcome.gains,placeholder:"收获（选填）",autoHeight:true,minHeight:120,slot:"plan-outcome").richEditorFrame()
                 if let evidence = draft?.outcome.evidence {
                     HStack { Text("关联：\(evidence.title)").lineLimit(3); Button("移除") { draft?.outcome.evidence = nil; persist() } }
                 }
@@ -135,7 +135,7 @@ struct PlanOutcomeSummary: View {
     let outcome: PlanOutcome
     var body: some View {
         VStack(alignment:.leading,spacing:6) {
-            if !outcome.gains.isEmpty { Text("收获：" + outcome.gains).textSelection(.enabled) }
+            if !outcome.gains.isEmpty { Text(RichText.attributed("收获：" + outcome.gains)).textSelection(.enabled) }
             if let evidence = outcome.evidence {
                 Button("查看成果：\(evidence.title)") { store.openPlanEvidence(evidence) }.lineLimit(3)
             }
@@ -166,7 +166,7 @@ struct WeeklyReviewView: View {
                 if loading { ProgressView() }
                 ForEach(result.items) { plan in
                     VStack(alignment:.leading,spacing:8) {
-                        Text(plan.title).textSelection(.enabled)
+                        Text(RichText.attributed(plan.title)).textSelection(.enabled)
                         Text("计划日期 \(plan.dueDate.formatted(date:.abbreviated,time:.omitted))").font(.caption).foregroundStyle(.secondary)
                         if let outcome = plan.outcome, plan.completedAt != nil { PlanOutcomeSummary(outcome:outcome) }
                         if plan.completedAt == nil {

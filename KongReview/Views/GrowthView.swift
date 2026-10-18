@@ -89,9 +89,9 @@ struct GrowthReportView: View {
                         if reflection.goalHighlights > 0 { ProgressView("摘录：\(current[.highlights]) / \(reflection.goalHighlights)", value: Double(min(current[.highlights],reflection.goalHighlights)), total: Double(reflection.goalHighlights)) }
                         if reflection.goalCards > 0 { ProgressView("记忆卡：\(current[.cards]) / \(reflection.goalCards)", value: Double(min(current[.cards],reflection.goalCards)), total: Double(reflection.goalCards)) }
                         Text("目标为0表示暂不设定；各周期独立设定，不改变学习排程。").font(.caption).foregroundStyle(.secondary)
-                        TextField("本期收获：理解了什么、解决了什么问题？", text: $reflection.gains, axis: .vertical).lineLimit(2...6)
-                        TextField("遇到的困难：哪些内容仍不清楚？", text: $reflection.challenges, axis: .vertical).lineLimit(2...6)
-                        TextField("下一步：准备阅读、练习或整理什么？", text: $reflection.nextSteps, axis: .vertical).lineLimit(2...6)
+                        RichEditor(text:$reflection.gains,placeholder:"本期收获",autoHeight:true,minHeight:90,slot:"growth-gains").richEditorFrame()
+                        RichEditor(text:$reflection.challenges,placeholder:"遇到的困难",autoHeight:true,minHeight:90,slot:"growth-challenges").richEditorFrame()
+                        RichEditor(text:$reflection.nextSteps,placeholder:"下一步",autoHeight:true,minHeight:90,slot:"growth-next").richEditorFrame()
                         Button("把下一步转为学习计划…") {
                             save()
                             planDraft = LearningPlan(title: reflection.nextSteps, originKey: window.key)
@@ -102,7 +102,7 @@ struct GrowthReportView: View {
                 if let planDraft { LearningPlanForm(plan: planDraft) { self.planDraft = nil }.id(planDraft.id) }
                 if let previousReflection, !previousReflection.nextSteps.isEmpty {
                     GroupBox("对照上期的下一步") {
-                        Text(previousReflection.nextSteps).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                        Text(RichText.attributed(previousReflection.nextSteps)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(8)
                     }
                 }
                 if window.period == .week { WeeklyReviewView(window:window).id(window.key) }

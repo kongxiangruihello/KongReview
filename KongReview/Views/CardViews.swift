@@ -892,7 +892,7 @@ struct CardEditorView: View {
                     .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("所见即所得：⌘B 粗体、⌘I 斜体、⌘K 链接、⌘1/⌘2 标题、⇧⌘8 列表；也可直接敲 Markdown。从网页、Word、Anki 粘贴时保留格式。⌘↩ 保存。")
+            Text("直接编辑 HTML 源码。⌘B、⌘I、⌘K 插入对应标签；粘贴保留源码文字。⌘↩ 保存。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
