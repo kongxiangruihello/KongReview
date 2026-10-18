@@ -24,6 +24,10 @@ struct RichEditor: View {
     @State private var measuredHeight: CGFloat = 70
     @State private var showsSource = false
     @State private var switching = false
+    @State private var htmlCheckSource: String?
+    @State private var showsHTMLCheck = false
+    @State private var htmlCheckStored = ""
+    @State private var htmlIssueCount = 0
     @Environment(LibraryStore.self) private var store: LibraryStore?
     var body: some View {
         let contentMinimum = max(24,minHeight - 28 - (showsSource && toolbar ? 30 : 0))
@@ -31,6 +35,15 @@ struct RichEditor: View {
             HStack {
                 Text(showsSource ? "HTML 源码" : "文字").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                if showsSource {
+                    Button(htmlIssueCount == 0 ? "检查 HTML" : "HTML 提醒 · \(htmlIssueCount)") {
+                        htmlCheckStored = text
+                        htmlCheckSource = (handle ?? localHandle).textView?.string ?? text
+                        showsHTMLCheck = true
+                    }
+                        .foregroundStyle(htmlIssueCount == 0 ? Color.secondary : Color.red)
+                        .font(.caption).help("检查标签、引号和链接，并预览建议修正")
+                }
                 Button { toggleMode() } label: {
                     Image(systemName:"chevron.left.forwardslash.chevron.right")
                         .foregroundStyle(showsSource ? Color.accentColor : Color.secondary)
@@ -63,6 +76,17 @@ struct RichEditor: View {
                     .frame(minHeight:contentMinimum)
                     .frame(height:autoHeight ? max(contentMinimum,WebHeights.shared.values["visual-" + slot] ?? contentMinimum) : nil)
             }
+        }
+        .task(id:showsSource ? text : "") {
+            guard showsSource else { return }
+            do { try await Task.sleep(for:.milliseconds(350)) } catch { return }
+            let source = (handle ?? localHandle).textView?.string ?? text
+            let report = await Task.detached(priority:.utility) { HTMLDiagnostics.inspect(source) }.value
+            guard !Task.isCancelled else { return }
+            htmlIssueCount = report.issues.count
+        }
+        .sheet(isPresented:$showsHTMLCheck) {
+            HTMLCheckView(text:$text,original:htmlCheckSource ?? text,storedOriginal:htmlCheckStored)
         }
     }
     private func toggleMode() {
@@ -248,6 +272,8 @@ final class HTMLSourceTextView: NSTextView {
         if let value = NSPasteboard.general.string(forType:.string) ?? NSPasteboard.general.string(forType:.html) { insertText(value,replacementRange:selectedRange()) }
     }
     override func keyDown(with event: NSEvent) {
+        // Candidate selection/cancellation belongs to the input method until composition ends.
+        if hasMarkedText() { super.keyDown(with:event); return }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if event.modifierFlags.contains(.command) {
             if key == "\r", let submit { submit(); return }

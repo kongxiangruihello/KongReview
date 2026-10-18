@@ -12,7 +12,7 @@ struct CardInputDuplicateNotice: View {
         VStack(alignment:.leading,spacing:6) {
             Text("相同正面 · 牌组：" + card.deck).font(.caption)
             HStack {
-                Button("查看已有卡片") {
+                Button(store.cardEditor == nil ? "查看已有卡片" : "并排对照已有卡片") {
                     do { preview = try card.id.flatMap { try store.db.card(id:$0) } ?? card }
                     catch { message = error.localizedDescription }
                 }
@@ -30,12 +30,16 @@ struct CardInputDuplicateNotice: View {
             if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
         }
         .sheet(item:$preview) { value in
-            VStack(alignment:.leading,spacing:12) {
-                Text("已有卡片 · " + value.deck).font(.headline)
-                let faces = store.faces(of:value)
-                CardWebView(front:faces.front,back:faces.back,store:store).frame(minHeight:300)
-                HStack { Spacer(); Button("关闭") { preview = nil } }
-            }.padding(20).frame(minWidth:600,minHeight:400)
+            if let draft = store.cardEditor {
+                CardComparisonView(incoming:draft.card,existing:value,draftID:draft.id)
+            } else {
+                VStack(alignment:.leading,spacing:12) {
+                    Text("已有卡片 · " + value.deck).font(.headline)
+                    let faces = store.faces(of:value)
+                    CardWebView(front:faces.front,back:faces.back,store:store).frame(minHeight:300)
+                    Button("关闭") { preview = nil }
+                }.padding(20).frame(minWidth:600,minHeight:400)
+            }
         }
     }
 }

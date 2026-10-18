@@ -14,6 +14,10 @@ struct KongReviewApp: App {
     private let store: LibraryStore
 
     init() {
+        if EditorValidation.isEnabled {
+            self.store = EditorValidation.makeStore()
+            return
+        }
         LegacyMigration.migrateSettings()
         let db: AppDatabase
         do {
@@ -34,8 +38,8 @@ struct KongReviewApp: App {
 
     var body: some Scene {
         Window("KongReview", id: "main") {
-            ContentView()
-                .environment(store)
+            if EditorValidation.isEnabled { EditorValidationView().environment(store) }
+            else { ContentView().environment(store) }
         }
         .defaultSize(width: 1100, height: 720)
         .commands {

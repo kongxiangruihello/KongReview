@@ -810,6 +810,9 @@ extension Card {
 
 struct CardEditorView: View {
     @Environment(LibraryStore.self) private var store
+    @State private var comparison: Card?
+    @State private var showsHistory = false
+    @State private var checkingDuplicate = false
 
     private func binding<T>(_ kp: WritableKeyPath<CardDraft, T>, _ fallback: T) -> Binding<T> {
         Binding(get: { store.cardEditor?[keyPath: kp] ?? fallback },
@@ -865,14 +868,14 @@ struct CardEditorView: View {
                         Text("笔记类型：\(type)（正反面怎么排由“记忆卡 → 卡片模板”决定）")
                             .font(.caption).foregroundStyle(.secondary)
                         ForEach(Array(c.fields.indices), id: \.self) { i in
-                            Text(i < names.count ? names[i] : "字段\(i + 1)").font(.headline)
+                            editorFieldHeading(i < names.count ? names[i] : "字段\(i + 1)",isFront:store.noteTemplates[type]?.front.first == i || (store.noteTemplates[type] == nil && i == 0))
                             RichEditor(text: fieldBinding(i), mode: .card, toolbar: false, autoHeight: true,
                                        slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel,
                                        formatting: store.cardFormatting, fieldName: i < names.count ? names[i] : "字段\(i + 1)")
                                 .richEditorFrame()
                         }
                     } else {
-                        Text("正面").font(.headline)
+                        editorFieldHeading("正面",isFront:true)
                         RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: "问题、字词或章句",
                                    toolbar: false, autoHeight: true, focus: draft?.isNew == true, slot: "card-front",
                                    onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "正面")
@@ -887,7 +890,7 @@ struct CardEditorView: View {
                 }
                 .padding(.trailing, 6)
             }
-            if let error = draft?.error {
+            if let error = draft?.error, draft?.duplicate == nil {
                 Label(error, systemImage: "exclamationmark.circle")
                     .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
@@ -913,6 +916,12 @@ struct CardEditorView: View {
                     }
                 }
                 Spacer()
+                if let id = draft?.card.id {
+                    Button("修改对照") {
+                        do { comparison = try store.db.card(id:id) } catch { store.cardEditor?.error = error.localizedDescription }
+                    }
+                    Button("修改历史") { showsHistory = true }
+                }
                 Button("取消", role: .cancel) { store.requestCloseCardEditor() }
                     .keyboardShortcut(.cancelAction)
                 Button("保存") { store.commitCardEditor() }
@@ -924,6 +933,38 @@ struct CardEditorView: View {
         }
         .padding(20)
         .frame(minWidth: 680, idealWidth: 720, minHeight: 600, idealHeight: 720)
+        .task(id:store.cardEditor?.card) { await checkDuplicate() }
+        .sheet(item:$comparison) { original in
+            if let current = store.cardEditor?.card { CardComparisonView(incoming:current,existing:original) }
+        }
+        .sheet(isPresented:$showsHistory) { if let id = store.cardEditor?.card.id { CardHistoryView(cardID:id) } }
+    }
+    private func editorFieldHeading(_ title: String,isFront: Bool) -> some View {
+        HStack(alignment:.firstTextBaseline,spacing:12) {
+            Text(title).font(.headline)
+            if isFront, let duplicate = store.cardEditor?.duplicate {
+                Label(duplicate.deletedAt == nil ? "正面重复 · \(duplicate.deck)" : "最近删除中有相同正面 · \(duplicate.deck)",systemImage:"exclamationmark.circle.fill")
+                    .font(.callout).foregroundStyle(.red).fixedSize(horizontal:false,vertical:true)
+                    .accessibilityIdentifier("card-front-duplicate-warning")
+            } else if isFront && checkingDuplicate { Text("正在检查…").font(.caption).foregroundStyle(.secondary) }
+            Spacer(minLength:0)
+        }
+    }
+    private func checkDuplicate() async {
+        guard let draft = store.cardEditor, !store.fullBackupBusy else { return }
+        checkingDuplicate = true
+        do {
+            try await Task.sleep(for:.milliseconds(450))
+            let duplicate = try await store.db.liveCardDuplicate(draft.card)
+            try Task.checkCancellation()
+            guard store.cardEditor?.id == draft.id, store.cardEditor?.card == draft.card, !store.fullBackupBusy else { return }
+            store.cardEditor?.duplicate = duplicate
+            checkingDuplicate = false
+        } catch is CancellationError { } catch {
+            if store.cardEditor?.id == draft.id && store.cardEditor?.card == draft.card {
+                checkingDuplicate = false; store.cardEditor?.error = "实时查重未完成，保存时会重新检查：" + error.localizedDescription
+            }
+        }
     }
 
     // MARK: 背面栏目（1.2）

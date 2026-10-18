@@ -134,6 +134,7 @@ extension AppDatabase {
     }
     /// Capture content changes only; scheduling and deck moves do not create adjustment records.
     static func recordCareAdjustment(before: Card, after: Card, in db: Database) throws {
+        try recordCardContentHistory(before:before,after:after,in:db)
         guard let id = before.id, before.deletedAt == nil, after.deletedAt == nil,
               before.front != after.front || before.back != after.back || before.fields != after.fields || before.sections != after.sections || before.noteType != after.noteType,
               var care = try readProgress(DifficultCardCare.self, key: "difficult-care.\(id)", in: db) else { return }
