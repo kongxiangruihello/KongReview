@@ -16,7 +16,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
 
     private var panel: QuickCapturePanel?
     /// 系统配置好的可滚动文本视图（自动换行、随宽度伸缩）
-    /// 1.3：正文改为所见即所得编辑器（与主窗口同一套，粘贴保留格式）
+    /// 正文与按语均使用统一文字／HTML 双模式编辑器。
     private let editorModel = QuickCaptureText()
     private let editorHandle = RichEditorHandle()
     private var editorHost: NSView?
@@ -24,7 +24,8 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
     private let authorField = NSTextField()
     private let locationField = NSTextField()
     private let tagsField = NSTextField()
-    private let noteField = NSTextField()
+    private let noteModel = QuickCaptureText()
+    private let noteHandle = RichEditorHandle()
     private let statusLabel = NSTextField(labelWithString: "")
 
     private var pendingURL: String?
@@ -73,7 +74,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
             authorField.stringValue = p.author ?? ""
             locationField.stringValue = p.location ?? ""
             tagsField.stringValue = TagParser.format(p.tags)
-            noteField.stringValue = p.note ?? ""
+            noteModel.text = p.note ?? ""
             pendingURL = p.url
             lastChangeCount = NSPasteboard.general.changeCount
             selectAllOnShow = false
@@ -85,13 +86,13 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         authorField.stringValue = defaults.string(forKey: Self.lastAuthorKey) ?? ""
         locationField.stringValue = ""
         tagsField.stringValue = ""
-        noteField.stringValue = ""
+        noteModel.text = ""
         editorModel.text = ""
         selectAllOnShow = false
 
         let pb = NSPasteboard.general
         if pb.changeCount != lastChangeCount,
-           let clip = RichClipboard.markdown(pb)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let clip = (pb.string(forType: .string) ?? pb.string(forType: .html))?.trimmingCharacters(in: .whitespacesAndNewlines),
            !clip.isEmpty, clip.count <= 20_000 {
             editorModel.text = clip
             selectAllOnShow = true
@@ -105,7 +106,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         // ⌘↩ 可能同时由编辑器和“保存”按钮触发：浮窗已收起就不再保存
         guard panel?.isVisible == true else { return }
         let text = editorModel.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        guard HTMLSourceCodec.hasContent(text) else {
             NSSound.beep()
             return
         }
@@ -116,7 +117,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
 
         var draft = HighlightDraft(highlight: Highlight(
             text: text,
-            note: noteField.stringValue.nilIfBlank,
+            note: noteModel.text.nilIfBlank,
             location: locationField.stringValue.nilIfBlank
         ))
         draft.tagsText = tagsField.stringValue
@@ -147,8 +148,8 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
     // MARK: Tab 切换栏目：最后一栏（按语）按 Tab 回到正文，第一栏（出处）按 ⇧Tab 回到正文
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        if selector == #selector(NSResponder.insertTab(_:)), control === noteField {
-            editorHandle.focus()
+        if selector == #selector(NSResponder.insertTab(_:)), control === tagsField {
+            noteHandle.focus()
             return true
         }
         if selector == #selector(NSResponder.insertBacktab(_:)), control === sourceField {
@@ -162,7 +163,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
 
     private func makePanel() -> QuickCapturePanel {
         let panel = QuickCapturePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 540),
             styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -176,14 +177,14 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.onCancel = { [weak self] in self?.close() }
 
-        // 正文：所见即所得编辑器
+        // 正文：文字／HTML 双模式编辑器
         let editorView = QuickCaptureEditor(
             model: editorModel, handle: editorHandle,
             onSubmit: { [weak self] in self?.save() },
             onCancel: { [weak self] in self?.close() },
             onTab: { [weak self] back in
                 guard let self, let panel = self.panel else { return }
-                panel.makeFirstResponder(back ? self.noteField : self.sourceField)
+                if back { self.noteHandle.focus() } else { panel.makeFirstResponder(self.sourceField) }
             })
         let host: NSView
         if let store {
@@ -210,14 +211,25 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         authorField.placeholderString = "可留空"
         locationField.placeholderString = "页码、卷次、章节"
         tagsField.placeholderString = "用逗号或空格分隔"
-        noteField.placeholderString = "个人按语，可留空"
+        let noteEditor = RichEditor(text: Bindable(noteModel).text,
+            placeholder: "个人按语，可留空", minHeight: 75, slot: "quick-note",
+            onSubmit: { [weak self] in self?.save() }, onCancel: { [weak self] in self?.close() },
+            onTab: { [weak self] back in
+                guard let self else { return }
+                if back { self.panel?.makeFirstResponder(self.tagsField) } else { self.editorHandle.focus() }
+            }, handle: noteHandle)
+        let noteView = NSHostingView(rootView: Group {
+            if let store { noteEditor.environment(store) } else { noteEditor }
+        })
+        noteView.sizingOptions = []
+        noteView.heightAnchor.constraint(equalToConstant: 110).isActive = true
 
         let grid = NSGridView(views: [
             [label("出处"), sourceField],
             [label("作者"), authorField],
             [label("位置"), locationField],
             [label("标签"), tagsField],
-            [label("按语"), noteField],
+            [label("按语"), noteView],
         ])
         grid.rowSpacing = 8
         grid.columnSpacing = 10
@@ -258,12 +270,11 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
 
         // Tab 顺序
         sourceField.delegate = self
-        noteField.delegate = self
+        tagsField.delegate = self
         sourceField.nextKeyView = authorField
         authorField.nextKeyView = locationField
         locationField.nextKeyView = tagsField
-        tagsField.nextKeyView = noteField
-        noteField.nextKeyView = sourceField
+        tagsField.nextKeyView = noteView
         return panel
     }
 
@@ -343,8 +354,8 @@ struct QuickCaptureEditor: View {
     let onTab: (Bool) -> Void
 
     var body: some View {
-        RichEditor(text: Bindable(model).text, font: .highlight, placeholder: "摘录原文（粘贴时保留粗体、标题、列表等格式）",
-                   toolbar: false, minHeight: 170, slot: "quick-capture",
+        RichEditor(text: Bindable(model).text, font: .highlight, placeholder: "摘录原文",
+                   toolbar: true, minHeight: 135, slot: "quick-capture",
                    onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle)
     }
 }

@@ -19,9 +19,14 @@ extension AppDatabase {
     @discardableResult
     func save(_ card: Card) throws -> Card {
         try writer.write { db in
+            let before = try card.id.flatMap { try Card.fetchOne(db, key: $0) }
             var c = card
             c.updatedAt = Date()
             try c.save(db)
+            if let before {
+                try Self.recordCareAdjustment(before: before, after: c, in: db)
+                try Self.recordTopicCardEdit(before: before, after: c, in: db)
+            }
             return c
         }
     }
@@ -34,29 +39,9 @@ extension AppDatabase {
         try writer.read { db in try Card.fetchOne(db, key: id) }
     }
 
-    /// 正反面相同即为重复，跨牌组检查；编辑原卡以及已删除的卡片不参与比较。
+    /// Compare the visible front across decks, excluding the edited card and trash.
     func duplicateCard(for card: Card) throws -> Card? {
-        func normalized(_ value: String) -> String {
-            value.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
-        }
-        func sectionContents(_ card: Card) -> [String] {
-            (card.sections ?? []).filter { !normalized($0.name).isEmpty || !normalized($0.text).isEmpty }
-                .flatMap { [normalized($0.name), normalized($0.text)] }
-        }
-        let front = normalized(card.front), back = normalized(card.back)
-        let sections = sectionContents(card)
-        return try writer.read { db in
-            let rows = try Row.fetchCursor(db, sql: "SELECT id, front, back FROM card WHERE deletedAt IS NULL ORDER BY id")
-            while let row = try rows.next() {
-                let id: Int64 = row["id"]
-                if id != card.id, normalized(row["front"]) == front, normalized(row["back"]) == back {
-                    if let existing = try Card.fetchOne(db, key: id), sectionContents(existing) == sections {
-                        return existing
-                    }
-                }
-            }
-            return nil
-        }
+        try writer.read { db in try Self.matchingFront(card,deleted:false,in:db) }
     }
 
     /// 牌组内全部卡片（不含已删除）
@@ -69,9 +54,10 @@ extension AppDatabase {
     }
 
     /// 浏览列表的计数和当前页在同一读取快照内完成，不限制学习队列使用的全部卡片查询。
-    func cardPage(deck: String, query: String, limit: Int, offset: Int) async throws -> (items: [Card], total: Int) {
+    func cardPage(deck: String, query: String, limit: Int, offset: Int,
+                  tag: String = "", state: CardBrowseStateFilter = .all) async throws -> (items: [Card], total: Int) {
         try await writer.read { db in
-            let (filter, args) = Self.cardFilter(deck: deck, query: query)
+            let (filter, args) = Self.cardFilter(deck: deck, query: query, tag: tag, state: state)
             let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM card" + filter,
                                          arguments: StatementArguments(args)) ?? 0
             let items = try Card.fetchAll(db,
@@ -81,10 +67,22 @@ extension AppDatabase {
         }
     }
 
-    private static func cardFilter(deck: String?, query: String) -> (String, [(any DatabaseValueConvertible)?]) {
+    private static func cardFilter(deck: String?, query: String, tag: String = "",
+                                   state: CardBrowseStateFilter = .all) -> (String, [(any DatabaseValueConvertible)?]) {
         var filter = " WHERE deletedAt IS NULL"
         var args: [(any DatabaseValueConvertible)?] = []
         if let deck { filter += " AND deck = ?"; args.append(deck) }
+        if !tag.isEmpty {
+            filter += " AND EXISTS (SELECT 1 FROM json_each(card.tags) WHERE value = ?)"
+            args.append(tag)
+        }
+        switch state {
+        case .all: break
+        case .new: filter += " AND isSuspended = 0 AND state = 'new'"
+        case .learning: filter += " AND isSuspended = 0 AND state IN ('learning', 'relearning')"
+        case .review: filter += " AND isSuspended = 0 AND state = 'review'"
+        case .suspended: filter += " AND isSuspended = 1"
+        }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty {
             let pattern = SearchQuery.likePattern(ChineseFold.fold(q))

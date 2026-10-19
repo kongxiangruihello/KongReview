@@ -60,11 +60,12 @@ extension Highlight: @retroactive FetchableRecord, @retroactive MutablePersistab
 final class AppDatabase {
     let writer: any DatabaseWriter
 
-    init(_ writer: any DatabaseWriter) throws {
+    init(_ writer: any DatabaseWriter, upTo migration: String? = nil) throws {
         self.writer = writer
         // 1.2：繁简归一函数。索引触发器在写连接上调用它，所以必须在迁移之前注册。
         try writer.writeWithoutTransaction { db in AppDatabase.registerFunctions(db) }
-        try migrator.migrate(writer)
+        if let migration { try migrator.migrate(writer, upTo: migration) }
+        else { try migrator.migrate(writer) }
     }
 
     /// kr_fold(文本)：繁体转简体、全角转半角、英文转小写（见 ChineseFold），供繁简通搜的索引使用
@@ -72,6 +73,7 @@ final class AppDatabase {
     static func registerFunctions(_ db: Database) {
         db.add(function: foldFunction)
         db.add(function: pageFunction)
+        db.add(function: globalSearchPlainFunction)
     }
 
     /// kr_page(位置)：位置文字里的第一个数字（页码），没有数字时为 NULL（1.6，书页排序与“页:”搜索用）
@@ -384,6 +386,13 @@ final class AppDatabase {
         // 2.2：记忆卡回答记录写上回答前的卡片状态（导入的旧卡第一次复习不再被算成新卡）
         m.registerMigration("v13-event-card-state") { db in
             try db.alter(table: "review_event") { t in t.add(column: "cardState", .text) }
+        }
+        m.registerMigration("v14-growth-progress") { db in
+            try db.create(table: "app_progress") { t in
+                t.column("key", .text).primaryKey()
+                t.column("payload", .blob).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
         }
         return m
     }
@@ -812,7 +821,12 @@ struct HighlightQuery: Hashable, Sendable {
             let inner = SearchQuery.usesFullText(fq)
                 ? "SELECT rowid FROM highlight_fold_ft WHERE highlight_fold_ft MATCH ?"
                 : "SELECT rowid FROM highlight_fold_ft WHERE body LIKE ? ESCAPE '\\'"
-            clauses.append("highlight.id \(negate ? "NOT IN" : "IN") (\(inner))")
+            // HTML rows search visible text, including phrases crossing inline tags.
+            // Existing plain/Markdown rows retain their indexed path.
+            let body = "coalesce(highlight.text,'')||char(10)||coalesce(highlight.translation,'')||char(10)||coalesce(highlight.note,'')"
+            let match = "CASE WHEN instr(\(body),'<')>0 OR instr(\(body),'&')>0 THEN kr_fold(kr_search_plain(\(body))) LIKE ? ESCAPE '\\' ELSE highlight.id IN (\(inner)) END"
+            clauses.append(negate ? "NOT (\(match))" : "(\(match))")
+            args.append(SearchQuery.likePattern(fq))
             args.append(SearchQuery.usesFullText(fq) ? SearchQuery.fts5Phrase(fq) : SearchQuery.likePattern(fq))
         }
         for t in parsed.terms { termClause(t, negate: false) }

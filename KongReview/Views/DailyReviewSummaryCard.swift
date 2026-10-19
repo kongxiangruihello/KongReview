@@ -1,7 +1,7 @@
 import SwiftUI
 import KongReviewCore
 
-/// 首页与今日回顾完成页共用的日课卡：统计、近七天、今日一句和下一步。
+/// 今日回顾完成页的日课卡：统计、近七天、今日一句和下一步。
 struct DailyReviewSummaryCard<Actions: View>: View {
     @Environment(LibraryStore.self) private var store
     let title: String
@@ -10,9 +10,12 @@ struct DailyReviewSummaryCard<Actions: View>: View {
 
     var body: some View {
         let _ = store.revision
-        let s = store.stats
+        let s = store.learningActivitySummary
+        let home = store.homeLearningSummary
+        let groupCount = store.review.theme == nil ? home.reviewCompletedCount
+            : Set(store.review.cards.prefix(max(0, store.review.position)).map(\.id)).count
         let due = store.dueCardCount()
-        let week = Array(s.lastDays.suffix(7))
+        let week = Array(s.recentDays.suffix(7))
         let peak = max(1, week.map(\.total).max() ?? 1)
         let quote = quoteOverride ?? store.dailyReviewQuote()
 
@@ -28,15 +31,20 @@ struct DailyReviewSummaryCard<Actions: View>: View {
                 .padding(.bottom, 26)
 
             HStack(spacing: 0) {
-                bigStat("\(s.today.highlights)", unit: "条", label: s.today.cards > 0 ? "今日回顾 · 记忆卡 \(s.today.cards) 次" : "今日回顾摘录")
+                bigStat("\(groupCount)", unit: "条", label: "本组已回顾")
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                bigStat("\(s.currentStreak)", unit: "天", label: "连续回顾 · 最长 \(s.longestStreak) 天")
+                bigStat("\(s.today.cards)", unit: "张", label: "全库今日已学 · 评分 \(s.today.cardRatings) 次")
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                bigStat("\(due)", unit: "张", label: due > 0 ? "记忆卡待学" : "记忆卡今天学完了", accent: due > 0)
+                bigStat("\(due)", unit: "张", label: due > 0 ? "全库当前待学" : "当前没有待学卡片", accent: due > 0)
             }
             .frame(height: 104)
             .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
             .overlay(alignment: .bottom) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
+
+            Text("全库今日回顾 \(s.today.highlights) 条 · 连续学习 \(s.currentStreak) 天 · 最长 \(s.longestStreak) 天")
+                .font(.system(size: 12))
+                .foregroundStyle(ReviewPalette.sub)
+                .padding(.top, 16)
 
             HStack(alignment: .bottom, spacing: 14) {
                 ForEach(Array(week.enumerated()), id: \.offset) { i, day in
@@ -49,7 +57,7 @@ struct DailyReviewSummaryCard<Actions: View>: View {
                             .font(.system(size: 11))
                             .foregroundStyle(isToday ? ReviewPalette.ink : ReviewPalette.sub)
                     }
-                    .help("\(day.key)：摘录 \(day.highlights) 条，记忆卡 \(day.cards) 次")
+                    .help("\(day.key)：回顾 \(day.highlights) 条摘录，已学 \(day.cards) 张卡片，评分 \(day.cardRatings) 次")
                 }
             }
             .frame(height: 82, alignment: .bottom)
@@ -84,6 +92,7 @@ struct DailyReviewSummaryCard<Actions: View>: View {
         .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ReviewPalette.hair))
         .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.08), radius: 20, y: 10)
+        .onAppear { store.refreshDerived() }
     }
 
     private func bigStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {

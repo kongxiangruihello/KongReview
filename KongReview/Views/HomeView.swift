@@ -2,17 +2,39 @@ import SwiftUI
 import AppKit
 import KongReviewCore
 
-/// 启动页：日课概览与今日的两个入口。
+/// 启动页：分开呈现今日回顾与记忆卡的进度，再引导到各自的学习入口。
 struct HomeView: View {
     @Environment(LibraryStore.self) private var store
 
     var body: some View {
         ScrollView {
-            DailyReviewSummaryCard(title: store.todayReviewIsComplete ? "今日回顾完成" : "今日功课") {
-                HomeActionsView()
+            VStack(alignment: .leading, spacing: 24) {
+                if store.learningActivitySummary.recentDays.isEmpty && store.derivedIsLoading {
+                    ProgressView("正在读取学习统计…").frame(maxWidth: .infinity, minHeight: 280)
+                } else if store.learningActivitySummary.recentDays.isEmpty, let error = store.derivedStatisticsError {
+                    VStack(spacing: 16) {
+                        Text(error).foregroundStyle(.secondary)
+                        Button("重新读取") { store.refreshDerived() }
+                    }.frame(maxWidth: .infinity, minHeight: 280)
+                } else {
+                Button("查看个人成长 · 日／周／月／年小结") { store.selection = .growth }.handCursor()
+                HomeLearningHeader(summary: store.homeLearningSummary, day: store.today)
+
+                DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
+                                    onOpen: { store.showsDraftRecovery = true })
+
+                HomeLearningDashboard(summary: store.homeLearningSummary,
+                                      quote: store.dailyReviewQuote(),
+                                      onReview: { store.openTodayReview() },
+                                      onCards: { store.openCardsHome() })
+                }
+                DailyArrangementView().id("\(store.today)|\(store.growthGeneration)")
+                HomeTodayPlans().id(store.growthGeneration)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 48)
+            .frame(maxWidth: 960)
+            .padding(.horizontal, 28)
+            .padding(.top, 36)
+            .padding(.bottom, 40)
             .frame(maxWidth: .infinity)
         }
         .background(ReviewPalette.page)
@@ -30,32 +52,6 @@ struct HomeView: View {
                 store.refreshDerived()
             }
         }
-    }
-}
-
-struct HomeActionsView: View {
-    @Environment(LibraryStore.self) private var store
-
-    var body: some View {
-        let _ = store.revision
-        let _ = store.today
-        let counts = store.todayCounts()
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { actions(counts: counts) }
-            VStack(spacing: 12) { actions(counts: counts) }
-        }
-    }
-
-    @ViewBuilder
-    private func actions(counts: (highlights: Int, cards: Int)) -> some View {
-        PillButton(icon: "brain", title: "去学习记忆卡 · \(counts.cards)", style: counts.cards > 0 ? .primary : .normal) {
-            store.openCardsHome()
-        }
-        .help("打开记忆卡首页，选择牌组后开始学习")
-        PillButton(icon: "sun.max", title: "去今日回顾 · \(counts.highlights)", style: counts.cards == 0 && counts.highlights > 0 ? .primary : .normal) {
-            store.openTodayReview()
-        }
-        .help(counts.highlights > 0 ? "继续今天的摘录回顾" : "查看今天的回顾统计")
     }
 }
 

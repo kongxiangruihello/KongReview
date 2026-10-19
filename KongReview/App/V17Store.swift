@@ -87,6 +87,7 @@ extension LibraryStore {
 
     /// 学习由笔记本里的摘录做成的卡片（不论在哪个牌组）；新卡、复习按“设置 → 记忆卡”的全局每日上限
     func startNotebookStudy(_ id: Int64) {
+        clearCardRatingUndo()
         flushNotebookSaves()
         study.notebookId = id
         study.deck = "《\(notebookTitle(id))》"
@@ -100,6 +101,7 @@ extension LibraryStore {
             study.finished = false
             infoMessage = "这本笔记本里的摘录还没有做成记忆卡。先点“做成问答卡”或“逐条做填空卡”。"
         }
+        refreshDerived()
     }
 
     /// 出处被删除或合并后，指向它的“按书回顾”范围回到全部摘录

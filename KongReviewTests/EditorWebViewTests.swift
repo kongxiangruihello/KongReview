@@ -3,6 +3,7 @@ import CoreGraphics
 import WebKit
 import XCTest
 import KongReviewCore
+@testable import KongReview
 
 /// 使用真正的 WebKit 检查初始化和长文布局；没有图形会话的 CI 明确跳过。
 @MainActor
@@ -13,6 +14,70 @@ final class EditorWebViewTests: XCTestCase {
             throw XCTSkip("WebKit 编辑器回归需要已登录的 macOS 图形会话。")
         }
         _ = NSApplication.shared
+    }
+
+    func testFieldSearchReplacementPreservesHTMLAndUndo() async throws {
+        try requireDesktopSession()
+        let ready = expectation(description:"查找编辑器就绪")
+        let messages = EditorMessageRecorder(ready:ready)
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(messages,name:"krEditor")
+        config.userContentController.addUserScript(WKUserScript(source:EditorTextScript.source,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
+        let view = WKWebView(frame:NSRect(x:0,y:0,width:560,height:240),configuration:config)
+        defer { view.stopLoading(); config.userContentController.removeScriptMessageHandler(forName:"krEditor") }
+        view.loadHTMLString(EditorPage.page(text:"<p>Alpha <strong>Beta</strong> Alpha</p>",mode:.card),baseURL:nil)
+        await fulfillment(of:[ready],timeout:10)
+        guard messages.receivedReady else { return }
+        let before = try await view.evaluateJavaScript("krFlush()") as? String
+        let matches = try await view.evaluateJavaScript("krEditorFind('Alpha',false,0)") as? [String:Any]
+        XCTAssertEqual(matches?["count"] as? Int,2)
+        let highlighted = try await view.evaluateJavaScript("krFlush()") as? String
+        XCTAssertEqual(highlighted,before,"查找高亮不能写入正文")
+        let preview = try await view.evaluateJavaScript("krEditorReplacementPreview('Alpha',false,'Gamma')") as? [String:Any]
+        let original = try XCTUnwrap(preview?["original"] as? String), proposed = try XCTUnwrap(preview?["proposed"] as? String)
+        XCTAssertTrue(proposed.contains("<strong>Beta</strong>"))
+        let applied = try await view.evaluateJavaScript("krEditorApply(\(EditorPage.jsonString(proposed)),\(EditorPage.jsonString(original)))") as? Bool
+        XCTAssertEqual(applied,true)
+        let replaced = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertTrue(replaced?.contains("Gamma <strong>Beta</strong> Gamma") == true)
+        _ = try await view.evaluateJavaScript("document.execCommand('undo'); krFlush();")
+        let undone = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertEqual(undone,before)
+        let rejected = try await view.evaluateJavaScript("krEditorApply('<p>不应覆盖</p>','stale')") as? Bool
+        XCTAssertEqual(rejected,false)
+    }
+
+    func testVisualSourceRoundTripFlushAndCloze() async throws {
+        try requireDesktopSession()
+        let ready = expectation(description:"文字编辑器就绪")
+        let messages = EditorMessageRecorder(ready:ready)
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(messages,name:"krEditor")
+        let view = WKWebView(frame:NSRect(x:0,y:0,width:560,height:240),configuration:config)
+        defer { view.stopLoading(); config.userContentController.removeScriptMessageHandler(forName:"krEditor") }
+        let source = "<p>原文<strong>需要记忆</strong>末尾</p>"
+        view.loadHTMLString(EditorPage.page(text:HTMLSourceCodec.editable(source),mode:.card),baseURL:nil)
+        await fulfillment(of:[ready],timeout:10)
+        guard messages.receivedReady else { return }
+        _ = try await view.evaluateJavaScript("krFlush();")
+        XCTAssertTrue(messages.changes.isEmpty,"仅查看或切换不能改写原始 HTML")
+        _ = try await view.evaluateJavaScript("""
+          var ed=document.getElementById('ed'); ed.focus();
+          var r=document.createRange();r.selectNodeContents(ed.querySelector('strong'));
+          var s=window.getSelection();s.removeAllRanges();s.addRange(r);
+        """)
+        let wrapped = try await view.evaluateJavaScript(VisualClozeScript.wrap(number:1)) as? Bool
+        XCTAssertEqual(wrapped,true)
+        let flushed = try await view.evaluateJavaScript("krFlush()")
+        let edited = try XCTUnwrap(flushed as? String)
+        XCTAssertTrue(edited.contains("{{c1::需要记忆}}"))
+        XCTAssertTrue(edited.contains("<strong>"))
+        let replacement = "<p>源码新增<em>最后几个字</em></p>"
+        _ = try await view.evaluateJavaScript("krSetContent(\(EditorPage.jsonString(replacement)),true)")
+        let rendered = try await view.evaluateJavaScript("document.getElementById('ed').textContent") as? String
+        XCTAssertEqual(rendered,"源码新增最后几个字")
+        let result = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertEqual(result,replacement)
     }
 
     func testLongOriginalTextStaysCompleteAndToolbarStaysVisible() async throws {
@@ -74,15 +139,60 @@ final class EditorWebViewTests: XCTestCase {
         let value = try await view.evaluateJavaScript("krGetValue()") as? String
         XCTAssertEqual(value, original)
     }
+
+    func testCardEditorHeightGrowsAndShrinksIndependentlyOfViewport() async throws {
+        try requireDesktopSession()
+        let ready = expectation(description: "自动高度编辑器就绪")
+        let messages = EditorMessageRecorder(ready: ready)
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(messages, name: "krEditor")
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 560, height: 280), configuration: config)
+        defer {
+            view.stopLoading()
+            config.userContentController.removeScriptMessageHandler(forName: "krEditor")
+        }
+        let short = "简短问题"
+        view.loadHTMLString(EditorPage.page(text: short, mode: .card, autoHeight: true), baseURL: nil)
+        await fulfillment(of: [ready], timeout: 10)
+        guard messages.receivedReady else { return }
+
+        func contentHeight() async throws -> Double {
+            let result = try await view.evaluateJavaScript("document.body.getBoundingClientRect().height")
+            return try XCTUnwrap(result as? NSNumber).doubleValue
+        }
+        func replace(_ text: String) async throws {
+            let html = EditorPage.displayHTML(for: text, mode: .card).html
+            _ = try await view.evaluateJavaScript("krSetContent(\(EditorPage.jsonString(html)), false)")
+        }
+
+        let shortHeight = try await contentHeight()
+        XCTAssertLessThan(shortHeight, 160)
+        let long = (1...40).map { "第\($0)段：" + String(repeating: "记忆卡的编辑区域应当随着内容增减。", count: 5) }.joined(separator: "\n\n")
+        try await replace(long)
+        let longHeight = try await contentHeight()
+        XCTAssertGreaterThan(longHeight, 280)
+
+        // SwiftUI 会把网页视图拉高；删减内容仍应量出实际短内容高度。
+        view.setFrameSize(NSSize(width: 560, height: longHeight))
+        try await replace(short)
+        let shrunkHeight = try await contentHeight()
+        XCTAssertEqual(shrunkHeight, shortHeight, accuracy: 1)
+        XCTAssertLessThan(shrunkHeight, longHeight)
+        let finalValue = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertEqual(finalValue, short)
+    }
 }
 
 @MainActor
 private final class EditorMessageRecorder: NSObject, WKScriptMessageHandler {
     private let ready: XCTestExpectation
     private(set) var receivedReady = false
+    private(set) var changes: [String] = []
     init(ready: XCTestExpectation) { self.ready = ready }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any], body["type"] as? String == "ready", !receivedReady else { return }
+        guard let body = message.body as? [String: Any] else { return }
+        if body["type"] as? String == "change", let value = body["value"] as? String { changes.append(value) }
+        guard body["type"] as? String == "ready", !receivedReady else { return }
         receivedReady = true
         ready.fulfill()
     }

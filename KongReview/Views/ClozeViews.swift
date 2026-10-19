@@ -4,77 +4,9 @@ import KongReviewCore
 
 // MARK: - 填空卡制作
 
-/// 让按钮能拿到文本框里当前选中的范围
-@MainActor
-final class ClozeTextController {
-    static let shared = ClozeTextController()
-    weak var textView: NSTextView?
-
-    var selectedRange: NSRange? {
-        guard let r = textView?.selectedRange(), r.length > 0 else { return nil }
-        return r
-    }
-}
-
-/// 可取得选区的纯文本编辑框（SwiftUI 的 TextEditor 在 macOS 14 上拿不到选区）
-struct ClozeTextView: NSViewRepresentable {
-    @Binding var text: String
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
-        guard let tv = scroll.documentView as? NSTextView else { return scroll }
-        tv.isRichText = false
-        tv.allowsUndo = true
-        tv.font = NSFont(name: "Songti SC", size: 18) ?? .systemFont(ofSize: 18)
-        tv.textContainerInset = NSSize(width: 10, height: 10)
-        tv.delegate = context.coordinator
-        tv.string = text
-        ClozeTextController.shared.textView = tv
-        return scroll
-    }
-
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let tv = scroll.documentView as? NSTextView else { return }
-        ClozeTextController.shared.textView = tv
-        if tv.string != text {
-            let sel = tv.selectedRange()
-            tv.string = text
-            tv.setSelectedRange(NSRange(location: min(sel.location, (text as NSString).length), length: 0))
-        }
-        context.coordinator.highlight(tv)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
-
-        func textDidChange(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView else { return }
-            text.wrappedValue = tv.string
-            highlight(tv)
-        }
-
-        /// 把 {{c1::…}} 染成蓝色，一眼看出挖了哪些地方
-        func highlight(_ tv: NSTextView) {
-            guard let storage = tv.textStorage else { return }
-            let full = NSRange(location: 0, length: storage.length)
-            storage.removeAttribute(.foregroundColor, range: full)
-            storage.removeAttribute(.backgroundColor, range: full)
-            storage.addAttribute(.foregroundColor, value: NSColor.textColor, range: full)
-            guard let re = try? NSRegularExpression(pattern: #"\{\{c\d+::.*?\}\}"#, options: [.dotMatchesLineSeparators]) else { return }
-            for m in re.matches(in: storage.string, range: full) {
-                storage.addAttribute(.foregroundColor, value: NSColor(hex: 0x3B73EF), range: m.range)
-                storage.addAttribute(.backgroundColor, value: NSColor(hex: 0x3B73EF, alpha: 0.10), range: m.range)
-            }
-        }
-    }
-}
-
 struct ClozeEditorView: View {
     @Environment(LibraryStore.self) private var store
+    @State private var sourceHandle = RichEditorHandle()
 
     private var text: Binding<String> {
         Binding(get: { store.clozeDraft?.text ?? "" }, set: { store.clozeDraft?.text = $0 })
@@ -96,7 +28,7 @@ struct ClozeEditorView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    ClozeTextView(text: text)
+                    RichEditor(text:text,mode:.card,placeholder:"选中正文中的字词挖空",minHeight:200,slot:"cloze-source",handle:sourceHandle)
                         .frame(minHeight: 200)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(ReviewPalette.hair))
                     HStack {
@@ -146,6 +78,9 @@ struct ClozeEditorView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+            if let duplicate = store.clozeInputDuplicate {
+                CardInputDuplicateNotice(card:duplicate) { store.commitCloze(allowDeleted:true) }.id(duplicate.id)
+            }
             HStack {
                 Spacer()
                 if d?.progress != nil {
@@ -169,10 +104,39 @@ struct ClozeEditorView: View {
     }
 
     private func wrap(sameNumber: Bool) {
-        guard let r = ClozeTextController.shared.selectedRange else {
+        if let web = sourceHandle.webView {
+            let largest = store.clozeDraft?.numbers.max() ?? 0
+            let number = sameNumber ? max(1,largest) : largest + 1
+            web.evaluateJavaScript(VisualClozeScript.wrap(number:number)) { result, error in
+                if error != nil || (result as? Bool) != true { store.infoMessage = "先在文本框里选中要挖空的字词。" }
+            }
+            return
+        }
+        guard let view = sourceHandle.textView, view.selectedRange().length > 0 else {
             store.infoMessage = "先在文本框里选中要挖空的字词。"
             return
         }
-        text.wrappedValue = AnkiContent.wrapCloze(text.wrappedValue, range: r, sameNumber: sameNumber)
+        let r = view.selectedRange()
+        guard HTMLSourceCodec.canWrapCloze(view.string,range:r) else { store.infoMessage = "请选择标签外的完整正文，不要选中 HTML 标签或截断实体。"; return }
+        let updated = AnkiContent.wrapCloze(view.string,range:r,sameNumber:sameNumber)
+        view.insertText(updated,replacementRange:NSRange(location:0,length:(view.string as NSString).length))
+    }
+}
+
+/// Use the browser editing command so a visual cloze remains undoable and keeps inline markup.
+enum VisualClozeScript {
+    static func wrap(number: Int) -> String {
+        """
+        (function(){
+          var ed=document.getElementById('ed'), s=window.getSelection();
+          if(!ed || !s || !s.rangeCount || s.isCollapsed) return false;
+          var r=s.getRangeAt(0);
+          if(!ed.contains(r.commonAncestorContainer)) return false;
+          var box=document.createElement('div'); box.appendChild(r.cloneContents());
+          ed.focus();
+          document.execCommand('insertHTML',false,'{{c\(number)::'+box.innerHTML+'}}');
+          ed.dispatchEvent(new Event('input',{bubbles:true})); krFlush(); return true;
+        })();
+        """
     }
 }

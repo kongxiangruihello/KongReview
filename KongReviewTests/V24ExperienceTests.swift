@@ -59,18 +59,19 @@ final class V24ExperienceTests: XCTestCase {
             XCTAssertEqual(try db.cardCount(), 1)
             store.cardEditor = CardDraft(card: Card(front: "问题", back: "不同答案"))
             store.commitCardEditor()
-            XCTAssertEqual(try db.cardCount(), 2)
+            XCTAssertEqual(try db.cardCount(), 1)
+            XCTAssertNotNil(store.cardEditor?.duplicate)
         }
     }
 
-    func testDifferentBackSectionsAreNotDuplicateAnswers() throws {
+    func testDifferentBackSectionsStillHaveDuplicateFront() throws {
         let db = try AppDatabase(DatabaseQueue())
         var first = Card(front: "行", back: "")
         first.sections = [CardSection(name: "释义", text: "xíng：走")]
         first = try db.save(first)
         var second = Card(front: "行", back: "")
         second.sections = [CardSection(name: "释义", text: "háng：行列")]
-        XCTAssertNil(try db.duplicateCard(for: second))
+        XCTAssertEqual(try db.duplicateCard(for: second)?.id, first.id)
         second.sections = [CardSection(name: "释义", text: "xíng：走")]
         XCTAssertEqual(try db.duplicateCard(for: second)?.id, first.id, "栏目 UUID 不应妨碍查重")
     }

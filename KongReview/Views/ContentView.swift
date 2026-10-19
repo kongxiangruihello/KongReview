@@ -15,8 +15,31 @@ struct ContentView: View {
         } detail: {
             detail
         }
+        .disabled(store.fullBackupBusy)
+        .overlay {
+            if store.fullBackupBusy {
+                ZStack {
+                    Color.black.opacity(0.08)
+                    ProgressView(store.maintenanceProgress ?? "正在处理完整备份…")
+                        .padding(24)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { store.showGlobalSearch() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
+                    .disabled(!store.canShowGlobalSearch)
+                    .handCursor()
+                    .help("查找摘录、记忆卡、网页和出处（⌘⇧F）")
+            }
+        }
+        .modifier(GlobalSearchPresentation())
+        .modifier(LearningExplorerPresentation())
+        .modifier(LearningMaterialExportPresentation())
+        .modifier(FullBackupPresentation())
         .sheet(item: $store.editorDraft) { _ in
-            HighlightEditorView()
+            HighlightEditorView().modifier(EditorDraftCloseConfirmation(kind: .highlight))
         }
         .sheet(item: $store.editingSource) { _ in
             SourceEditorView()
@@ -85,12 +108,13 @@ struct ContentView: View {
             CardImportPreviewView()
         }
         .sheet(item: $store.cardEditor) { _ in
-            CardEditorView()
+            CardEditorView().modifier(EditorDraftCloseConfirmation(kind: .card))
         }
         .sheet(item: $store.articleSourceDraft) { _ in
             ArticleSourceEditorView()
         }
         .modifier(CardSheets())
+        .modifier(EditorDraftRecoverySheets())
         .modifier(TagSheets())
         .modifier(WritingSheets())
         .modifier(NotebookSheets())
@@ -149,6 +173,8 @@ struct ContentView: View {
             HighlightListView(title: "收藏", filter: .init(favoritesOnly: true))
         case .cards:
             CardsHomeView()
+        case .growth:
+            GrowthView()
         case .stats:
             StatsView()
         case .unsorted:
@@ -195,7 +221,9 @@ struct SidebarView: View {
             }
         )) {
             Section {
-                Label("首页", systemImage: "house").tag(SidebarItem.home)
+                Label("首页", systemImage: "house")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.home)
                 // 已选中时再点，也要从主题范围回到全库今日队列。
                 Button { store.openTodayReview() } label: {
                     Label("今日回顾", systemImage: "sun.max")
@@ -203,9 +231,14 @@ struct SidebarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .sidebarMenuRow()
                 .tag(SidebarItem.review)
-                Label("全部摘录", systemImage: "text.quote").tag(SidebarItem.all)
-                Label("收藏", systemImage: "star").tag(SidebarItem.favorites)
+                Label("全部摘录", systemImage: "text.quote")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.all)
+                Label("收藏", systemImage: "star")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.favorites)
                 Button { store.openCardsHome() } label: {
                     HStack {
                         Label("记忆卡", systemImage: "brain")
@@ -218,9 +251,16 @@ struct SidebarView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .sidebarMenuRow()
                 .tag(SidebarItem.cards)
-                Label("回顾统计", systemImage: "chart.bar.xaxis").tag(SidebarItem.stats)
-                Label("未归类", systemImage: "tray").tag(SidebarItem.unsorted)
+                Label("个人成长", systemImage: "leaf")
+                    .tag(SidebarItem.growth)
+                Label("回顾统计", systemImage: "chart.bar.xaxis")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.stats)
+                Label("未归类", systemImage: "tray")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.unsorted)
                 HStack {
                     Label("网页存档", systemImage: "globe")
                     Spacer()
@@ -228,8 +268,11 @@ struct SidebarView: View {
                         SidebarCount(store.articleCount)
                     }
                 }
+                .sidebarMenuRow()
                 .tag(SidebarItem.articles)
-                Label("出处管理", systemImage: "books.vertical").tag(SidebarItem.sourceManager)
+                Label("出处管理", systemImage: "books.vertical")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.sourceManager)
                 HStack {
                     Label("最近删除", systemImage: "trash")
                     Spacer()
@@ -237,8 +280,11 @@ struct SidebarView: View {
                         SidebarCount(store.trashCount)
                     }
                 }
+                .sidebarMenuRow()
                 .tag(SidebarItem.trash)
-                Label("使用说明", systemImage: "questionmark.circle").tag(SidebarItem.help)
+                Label("使用说明", systemImage: "questionmark.circle")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.help)
             }
 
             // 出处默认折叠（点“出处”标题旁的箭头展开；记住上次状态）
@@ -251,6 +297,7 @@ struct SidebarView: View {
                             Spacer()
                             SidebarCount(store.highlightCounts[id] ?? 0)
                         }
+                        .sidebarMenuRow()
                         .tag(SidebarItem.source(id))
                         .contextMenu {
                             Button("编辑出处…") { store.editingSource = source }
@@ -292,6 +339,7 @@ struct SidebarView: View {
                             Spacer()
                             SidebarCount(store.notebookQuoteCounts[id] ?? 0)
                         }
+                        .sidebarMenuRow()
                         .tag(SidebarItem.notebook(id))
                         .contextMenu {
                             Button("删除笔记本…", role: .destructive) { store.notebookPendingDeletion = n }
@@ -306,7 +354,7 @@ struct SidebarView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .handCursor()
+                    .sidebarMenuRow()
                 }
             } header: {
                 HStack {
@@ -326,7 +374,9 @@ struct SidebarView: View {
             if !store.savedSearches.isEmpty {
                 Section("已存搜索") {
                     ForEach(store.savedSearches) { s in
-                        Label(s.name, systemImage: "bookmark").tag(SidebarItem.saved(s.id))
+                        Label(s.name, systemImage: "bookmark")
+                            .sidebarMenuRow()
+                            .tag(SidebarItem.saved(s.id))
                             .contextMenu {
                                 Button("删除已存搜索", role: .destructive) { store.deleteSavedSearch(s.id) }
                             }
@@ -339,6 +389,7 @@ struct SidebarView: View {
                 Section(isExpanded: Bindable(store).tagsExpanded) {
                     OutlineGroup(store.tagTree, children: \.childrenOrNil) { node in
                         TagSidebarRow(node: node)
+                            .sidebarMenuRow()
                     }
                 } header: {
                     HStack {
@@ -387,6 +438,15 @@ struct SidebarView: View {
     }
 }
 
+private extension View {
+    /// 仅在可点击的侧栏行内显示手形，空白区域也与菜单文字保持一致。
+    func sidebarMenuRow() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .handCursor()
+    }
+}
+
 /// 侧边栏行尾的计数：小号灰色等宽数字
 struct SidebarCount: View {
     let value: Int
@@ -406,6 +466,7 @@ struct CardSheets: ViewModifier {
     func body(content: Content) -> some View {
         @Bindable var store = store
         return content
+            .sheet(item: $store.duplicateCardReview) { _ in CardDuplicateReviewView() }
             .sheet(item: $store.deckOptionsEditor) { _ in
                 DeckOptionsView()
             }

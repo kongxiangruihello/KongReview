@@ -181,6 +181,8 @@ struct CardsHomeView: View {
                     Label("卡片模板", systemImage: "rectangle.split.2x1")
                 }
                 .help("多字段卡片：设置正面、背面各显示哪些字段，哪些折叠")
+                Button { store.findDuplicateCards() } label: { Label("查重", systemImage: "square.on.square") }
+                    .help("比较已有的重复记忆卡，选择保留的卡片和学习进度")
             }
         }
         .alert("重命名牌组", isPresented: Binding(
@@ -302,11 +304,23 @@ struct StudyView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle("学习 · \(study.deck ?? "")")
+        .disabled(store.learningExplorer != nil)
         .onAppear { if study.current == nil && !study.finished { store.nextCard() } }
+        .task {
+            store.refreshDerived()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { break }
+                store.checkDayChange()
+                store.refreshDerived()
+            }
+        }
     }
 
     private var counts: StudyQueue.Counts {
         _ = store.revision
+        if store.cardLearningSummaryScope == store.currentCardLearningScope,
+           let summary = store.cardLearningSummary { return summary.pending }
         if study.notebookId != nil { return study.notebookCounts }
         guard let deck = study.deck,
               let s = store.deckSummaryCache.first(where: { $0.name == deck }) else { return .init() }
@@ -316,12 +330,10 @@ struct StudyView: View {
     private var header: some View {
         HStack {
             Button {
-                study.deck = nil
-                study.notebookId = nil
-                study.current = nil
-                study.finished = false
+                store.openCardsHome()
             } label: { Label("牌组", systemImage: "chevron.left") }
                 .keyboardShortcut(.escape, modifiers: [])
+                .handCursor()
             Spacer()
             let c = counts
             HStack(spacing: 16) {
@@ -330,8 +342,14 @@ struct StudyView: View {
                 headerCount(DeckColors.reviewColor, "待复习", c.review)
             }
             Spacer()
-            // 与左边的返回按钮对称，让计数居中
-            Label("牌组", systemImage: "chevron.left").hidden()
+            Button { store.undoLastCardRating() } label: {
+                Label("撤销评分", systemImage: "arrow.uturn.backward")
+            }
+            .keyboardShortcut(store.cardRatingShortcutIsAvailable
+                              ? KeyboardShortcut("z", modifiers: .command) : nil)
+            .disabled(!store.canUndoLastCardRating)
+            .handCursor()
+            .help("撤销上一笔评分，恢复这张卡原来的学习安排（⌘Z）")
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -443,83 +461,25 @@ struct StudyView: View {
         }
     }
 
-    /// 学完：页面中部的总结卡——今日复习次数、正确率、明天到期
+    /// 当前范围的学习总结：张数去重、评分次数独立，待学状态随排程更新。
     private var finished: some View {
-        let _ = store.revision
-        let start = Calendar.current.startOfDay(for: Date())
-        let answers = (try? store.db.cardAnswersToday()) ?? (total: 0, correct: 0)
-        let accuracy = answers.total == 0 ? "—" : "\(Int((Double(answers.correct) / Double(answers.total) * 100).rounded()))"
-        let tomorrowEnd = Calendar.current.date(byAdding: .day, value: 2, to: start) ?? start
-        let deckCards: [Card] = {
-            if let nid = study.notebookId {
-                let ids = ((try? store.db.notebookHighlights(nid)) ?? []).compactMap(\.id)
-                return (try? store.db.cards(highlightIds: ids)) ?? []
+        ScrollView {
+            if store.cardLearningSummaryScope == store.currentCardLearningScope,
+               let summary = store.cardLearningSummary {
+                CardLearningCompletionView(summary: summary,
+                                           globalStudiedCards: store.learningActivitySummary.today.cards,
+                                           globalRatingCount: store.learningActivitySummary.today.cardRatings,
+                                           onReturn: { store.openCardsHome() },
+                                           onResume: { store.nextCard(); store.refreshDerived() })
+                    .padding(24)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ProgressView("正在更新学习统计…").padding(40)
             }
-            return study.deck.flatMap { try? store.db.cards(deck: $0) } ?? []
-        }()
-        let dueTomorrow = deckCards.filter { $0.state != .new && !$0.isSuspended && $0.due < tomorrowEnd }.count
-        return VStack(spacing: 0) {
-            // 1.8：学完盖一枚“日课已毕”
-            SealStamp(text: "日课已毕", size: 20)
-                .padding(.bottom, 4)
-            Text(study.notebookId != nil ? "这本笔记本的卡片今天学完了" : "这个牌组今天学完了")
-                .font(.system(size: 26, weight: .semibold, design: .serif))
-                .foregroundStyle(ReviewPalette.ink)
-                .padding(.top, 12)
-            Text(study.deck ?? "")
-                .font(.system(size: 13))
-                .foregroundStyle(ReviewPalette.sub)
-                .padding(.top, 6)
-                .padding(.bottom, 24)
-            HStack(spacing: 0) {
-                summaryStat("\(answers.total)", unit: "次", label: "今日复习（全部牌组）")
-                Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                summaryStat(accuracy, unit: answers.total == 0 ? "" : "%", label: "答对率（非“重来”）")
-                Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                summaryStat("\(dueTomorrow)", unit: "张", label: "明天到期", accent: true)
-            }
-            .frame(height: 100)
-            .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
-            .overlay(alignment: .bottom) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
-            Text("学习中的卡片到时间会再出现；新卡与复习数量受每日上限约束。")
-                .font(.system(size: 12.5))
-                .foregroundStyle(ReviewPalette.sub)
-                .padding(.top, 18)
-            Text("温故而知新，可以为师矣。——《论语·为政》")
-                .font(.custom("Kaiti SC", size: 13))
-                .foregroundStyle(ReviewPalette.sub.opacity(0.9))
-                .padding(.top, 10)
-            HStack(spacing: 8) {
-                PillButton(icon: "chevron.left", title: "返回牌组", style: .primary) {
-                    study.deck = nil
-                    study.notebookId = nil
-                    study.finished = false
-                }
-                PillButton(icon: "arrow.clockwise", title: "再查一次") { store.nextCard() }
-            }
-            .padding(.top, 22)
         }
-        .padding(.horizontal, 48)
-        .padding(.vertical, 36)
-        .frame(width: 600)
-        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ReviewPalette.hair))
-        .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.08), radius: 20, y: 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func summaryStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(number)
-                    .font(.system(size: 36, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
-                Text(unit).font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.sub)
-            }
-            Text(label).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity)
-    }
 }
 
 // MARK: - 浏览牌组
@@ -532,7 +492,10 @@ struct CardBrowseView: View {
     private struct LoadKey: Hashable {
         var deck: String
         var query: String
+        var tag: String
+        var state: CardBrowseStateFilter
         var page: Int
+        var pageSize: Int
         var revision: Int
     }
 
@@ -543,9 +506,7 @@ struct CardBrowseView: View {
         return VStack(spacing: 0) {
             HStack {
                 Button {
-                    study.browsingDeck = nil
-                    study.browseQuery = ""
-                    study.browseSelection = []
+                    store.openCardsHome()
                 } label: { Label("牌组", systemImage: "chevron.left") }
                 TextField("搜索正面、背面、标签", text: Bindable(store.study).browseQuery)
                     .textFieldStyle(.roundedBorder)
@@ -555,14 +516,22 @@ struct CardBrowseView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { browseFilters; Spacer(); selectionControls }
+                VStack(alignment: .leading, spacing: 8) { browseFilters; selectionControls }
+            }
+            .controlSize(.small)
+            .padding(.horizontal)
+            .padding(.bottom, 10)
             Divider()
             if study.browseIsLoading && list.isEmpty {
                 ProgressView("正在载入记忆卡…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if list.isEmpty {
-                ContentUnavailableView(study.browseQuery.isEmpty ? "这个牌组还没有卡片" : "没有找到记忆卡",
+                ContentUnavailableView(study.browseQuery.isEmpty && study.browseTag.isEmpty && study.browseStateFilter == .all ? "这个牌组还没有卡片" : "没有符合条件的记忆卡",
                                        systemImage: "rectangle.on.rectangle")
             } else {
+            ScrollViewReader { proxy in
             List(list, id: \.rowID, selection: Bindable(store.study).browseSelection) { c in
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -571,6 +540,10 @@ struct CardBrowseView: View {
                         if !c.back.isEmpty {
                             Text(preview(c.back, limit: 600))
                                 .lineLimit(1).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if !c.tags.isEmpty {
+                            Text(c.tags.map { "#" + $0 }.joined(separator: " "))
+                                .font(.caption).foregroundStyle(ReviewPalette.accent).lineLimit(1)
                         }
                     }
                     Spacer()
@@ -581,19 +554,27 @@ struct CardBrowseView: View {
                     Text(stateLabel(c)).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .trailing)
                 }
                 .padding(.vertical, 2)
+                .id(c.rowID)
                 .contextMenu { menu(for: study.browseSelection.contains(c.rowID) ? selected : [c.rowID], deckNames: deckNames) }
                 .onTapGesture(count: 2) { store.editCard(c) }
             }
-            .id("\(deck)|\(study.browsePage)|\(study.browseLoadedQuery)")
+            .id("\(deck)|\(study.browsePage)|\(study.browseLoadedQuery)|\(study.browseLoadedTag)|\(study.browseLoadedState.rawValue)")
             .disabled(study.browseIsLoading)
+            .onAppear { restoreBrowseAnchor(proxy) }
+            .onChange(of: study.browseItems) { _, _ in restoreBrowseAnchor(proxy) }
+            }
             }
             Divider()
             pageControls
         }
         .navigationTitle("浏览 · \(deck)")
-        .task(id: LoadKey(deck: deck, query: study.browseQuery, page: study.browsePage, revision: store.revision)) {
+        .task(id: LoadKey(deck: deck, query: study.browseQuery, tag: study.browseTag,
+                          state: study.browseStateFilter, page: study.browsePage,
+                          pageSize: study.browsePageSize, revision: store.revision)) {
             await loadPage()
         }
+        .onDisappear { study.persistBrowsePosition() }
+        .sheet(item: Bindable(store.study).cardTagEdit) { _ in CardTagBatchEditView() }
         .toolbar {
             ToolbarItemGroup {
                 Button { store.newCard(deck: deck) } label: { Label("新建卡片", systemImage: "plus") }
@@ -604,6 +585,38 @@ struct CardBrowseView: View {
                 }
                 .disabled(selected.isEmpty || study.browseIsLoading)
                 Button("学习") { store.startStudy(deck: deck) }
+            }
+        }
+    }
+
+    private var browseFilters: some View {
+        HStack(spacing: 10) {
+            Picker("标签", selection: Bindable(store.study).browseTag) {
+                Text("全部标签").tag("")
+                ForEach(Array(Set(study.browseTagOptions + (study.browseTag.isEmpty ? [] : [study.browseTag]))).sorted(), id: \.self) { tag in
+                    Text("#" + tag).tag(tag)
+                }
+            }.frame(maxWidth: 220)
+            Picker("状态", selection: Bindable(store.study).browseStateFilter) {
+                ForEach(CardBrowseStateFilter.allCases, id: \.self) { Text($0.title).tag($0) }
+            }.frame(width: 160)
+            if !study.browseTag.isEmpty || study.browseStateFilter != .all {
+                Button("清除筛选") { study.browseTag = ""; study.browseStateFilter = .all }
+            }
+        }
+    }
+
+    private var selectionControls: some View {
+        HStack(spacing: 10) {
+            Text("本页已选 \(study.browseSelection.count) 张").font(.caption).foregroundStyle(.secondary)
+            Button("选中本页") { study.browseSelection = Set(study.browseItems.compactMap(\.id)) }
+                .disabled(study.browseItems.isEmpty || study.browseIsLoading)
+            if !study.browseSelection.isEmpty {
+                Button("取消选择") { study.browseSelection = [] }
+                Menu("标签操作") {
+                    Button("添加标签…") { store.editCardTags(.add, ids: Array(study.browseSelection), deck: deck) }
+                    Button("移除标签…") { store.editCardTags(.remove, ids: Array(study.browseSelection), deck: deck) }
+                }.disabled(study.browseIsLoading)
             }
         }
     }
@@ -629,8 +642,11 @@ struct CardBrowseView: View {
     private var pageStatus: some View {
         HStack(spacing: 8) {
             if study.browseIsLoading { ProgressView().controlSize(.small) }
-            Text(study.browseTotal == 0 ? "共 0 张 · 每页 \(StudyState.browsePageSize) 张" :
-                "第 \((study.browsePage - 1) * StudyState.browsePageSize + 1)–\(min(study.browsePage * StudyState.browsePageSize, study.browseTotal)) 张，共 \(study.browseTotal) 张")
+            Picker("每页", selection: Binding(get: { study.browsePageSize }, set: { study.changeBrowsePageSize($0) })) {
+                ForEach(ListPositionPersistence.pageSizes, id: \.self) { Text("每页 \($0) 张").tag($0) }
+            }.labelsHidden().frame(width: 115)
+            Text(study.browseTotal == 0 ? "共 0 张" :
+                "第 \((study.browsePage - 1) * study.browsePageSize + 1)–\(min(study.browsePage * study.browsePageSize, study.browseTotal)) 张，共 \(study.browseTotal) 张")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize()
         }
@@ -663,22 +679,37 @@ struct CardBrowseView: View {
         goToPage(Int(study.browsePageInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? study.browsePage)
     }
 
+    private func restoreBrowseAnchor(_ proxy: ScrollViewProxy) {
+        if let anchor = study.browseAnchorID, study.browseItems.contains(where: { $0.id == anchor }) {
+            DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .center) }
+        }
+    }
+
     private func goToPage(_ page: Int) {
         let target = min(max(1, page), study.browsePageCount)
         study.browsePageInput = String(target)
         guard target != study.browsePage else { return }
+        study.browseLoadID = UUID()
         study.browseSelection = []
+        study.browseItems = []
+        study.browseAnchorID = nil
+        study.browseIsLoading = true
         study.browsePage = target
     }
 
     @MainActor
     private func loadPage() async {
+        guard !Task.isCancelled, study.browsingDeck == deck else { return }
         let requestID = UUID()
         let query = study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tag = study.browseTag
+        let state = study.browseStateFilter
         study.browseLoadID = requestID
-        if study.browseOwnerDeck != deck || study.browseLoadedQuery != query {
+        if study.browseOwnerDeck != deck || study.browseLoadedQuery != query || study.browseLoadedTag != tag || study.browseLoadedState != state {
             study.browseOwnerDeck = deck
             study.browseLoadedQuery = query
+            study.browseLoadedTag = tag
+            study.browseLoadedState = state
             study.browseSelection = []
             study.browseItems = []
             study.browseTotal = 0
@@ -689,24 +720,40 @@ struct CardBrowseView: View {
             }
         }
         let page = study.browsePage
+        let size = study.browsePageSize
+        let revision = store.revision
         study.browseIsLoading = true
         defer { if study.browseLoadID == requestID { study.browseIsLoading = false } }
         do {
-            let result = try await store.db.cardPage(deck: deck, query: query, limit: StudyState.browsePageSize,
-                                                    offset: (page - 1) * StudyState.browsePageSize)
-            guard !Task.isCancelled, study.browseLoadID == requestID else { return }
+            let result = try await store.db.cardPage(deck: deck, query: query, limit: size,
+                                                    offset: (page - 1) * size, tag: tag, state: state)
+            let tags: [String]
+            if study.browseTagOptionsDeck == deck, study.browseTagOptionsRevision == revision {
+                tags = study.browseTagOptions
+            } else {
+                tags = try await store.db.cardTagOptions(deck: deck)
+            }
+            guard !Task.isCancelled, study.browseLoadID == requestID, study.browsingDeck == deck,
+                  study.browsePage == page, study.browsePageSize == size, store.revision == revision,
+                  study.browseQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query,
+                  study.browseTag == tag, study.browseStateFilter == state else { return }
+            study.browseTagOptions = tags
+            study.browseTagOptionsDeck = deck
+            study.browseTagOptionsRevision = revision
             study.browseTotal = result.total
             if page > study.browsePageCount {
                 study.browsePage = study.browsePageCount
                 study.browsePageInput = String(study.browsePage)
                 study.browseItems = []
                 study.browseSelection = []
+                study.browseAnchorID = nil
                 return
             }
             study.browseItems = result.items
             study.browsePageInput = String(page)
             let visible = Set(result.items.compactMap(\.id))
             study.browseSelection.formIntersection(visible)
+            study.persistBrowsePosition()
         } catch {
             if !Task.isCancelled, study.browseLoadID == requestID { store.report(error) }
         }
@@ -734,6 +781,8 @@ struct CardBrowseView: View {
                 }
             }
         }
+        Button("添加标签…") { store.editCardTags(.add, ids: ids, deck: deck) }
+        Button("移除标签…") { store.editCardTags(.remove, ids: ids, deck: deck) }
         Divider()
         Button("删除 \(ids.count) 张卡片", role: .destructive) {
             store.deleteCards(ids)
@@ -761,6 +810,9 @@ extension Card {
 
 struct CardEditorView: View {
     @Environment(LibraryStore.self) private var store
+    @State private var comparison: Card?
+    @State private var showsHistory = false
+    @State private var checkingDuplicate = false
 
     private func binding<T>(_ kp: WritableKeyPath<CardDraft, T>, _ fallback: T) -> Binding<T> {
         Binding(get: { store.cardEditor?[keyPath: kp] ?? fallback },
@@ -782,7 +834,16 @@ struct CardEditorView: View {
         let draft = store.cardEditor
         let decks = (try? store.db.deckNames()) ?? []
         return VStack(alignment: .leading, spacing: 10) {
-            Text(draft?.isNew == true ? "新建记忆卡" : "编辑记忆卡").font(.title2.bold())
+            Text(draft?.isNew == true ? (draft?.card.highlightId != nil ? "预览并编辑新记忆卡" : "新建记忆卡") : "编辑记忆卡").font(.title2.bold())
+            if draft?.isNew == true, let id = draft?.card.highlightId {
+                Text("确认问题、答案、牌组和标签后保存。已有相关卡片可展开核对，关闭时可保留草稿。").font(.caption).foregroundStyle(.secondary)
+                RelatedCardsInline(highlightID: id)
+            }
+            if let notice = store.draftRecoveryNotice {
+                Label(notice, systemImage: "info.circle").font(.callout).foregroundStyle(.orange)
+            }
+            if let error = store.draftSaveError { Text(error).font(.caption).foregroundStyle(.red) }
+            else if store.draftPersistence != nil { Text("草稿自动保存在本机").font(.caption).foregroundStyle(.secondary) }
             HStack {
                 Text("牌组")
                 TextField("牌组", text: binding(\.card.deck, ""))
@@ -797,6 +858,7 @@ struct CardEditorView: View {
                 TextField("用逗号或空格分隔", text: binding(\.tagsText, ""))
                     .textFieldStyle(.roundedBorder)
             }
+            CardFormattingToolbar(state: store.cardFormatting)
             // 1.2：所见即所得编辑（去掉右侧预览）；背面可加多个自定义栏目
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
@@ -806,36 +868,38 @@ struct CardEditorView: View {
                         Text("笔记类型：\(type)（正反面怎么排由“记忆卡 → 卡片模板”决定）")
                             .font(.caption).foregroundStyle(.secondary)
                         ForEach(Array(c.fields.indices), id: \.self) { i in
-                            Text(i < names.count ? names[i] : "字段\(i + 1)").font(.headline)
-                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: true, autoHeight: false, minHeight: 160,
-                                       slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel)
-                                .frame(height: 180)
+                            editorFieldHeading(i < names.count ? names[i] : "字段\(i + 1)",isFront:store.noteTemplates[type]?.front.first == i || (store.noteTemplates[type] == nil && i == 0))
+                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: false, autoHeight: true,
+                                       slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel,
+                                       formatting: store.cardFormatting, fieldName: i < names.count ? names[i] : "字段\(i + 1)")
                                 .richEditorFrame()
                         }
                     } else {
-                        Text("正面").font(.headline)
+                        editorFieldHeading("正面",isFront:true)
                         RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: "问题、字词或章句",
-                                   autoHeight: false, minHeight: 180, focus: draft?.isNew == true, slot: "card-front",
-                                   onSubmit: submit, onCancel: cancel)
-                            .frame(height: 220)
+                                   toolbar: false, autoHeight: true, focus: draft?.isNew == true, slot: "card-front",
+                                   onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "正面")
                             .richEditorFrame()
                         Text("背面").font(.headline).padding(.top, 6)
                         RichEditor(text: binding(\.card.back, ""), mode: .card, placeholder: "答案",
-                                   autoHeight: false, minHeight: 180, slot: "card-back",
-                                   onSubmit: submit, onCancel: cancel)
-                            .frame(height: 220)
+                                   toolbar: false, autoHeight: true, slot: "card-back",
+                                   onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "背面")
                             .richEditorFrame()
                         sectionsEditor
                     }
                 }
                 .padding(.trailing, 6)
             }
-            if let error = draft?.error {
+            if let error = draft?.error, draft?.duplicate == nil {
                 Label(error, systemImage: "exclamationmark.circle")
                     .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("所见即所得：⌘B 粗体、⌘I 斜体、⌘K 链接、⌘1/⌘2 标题、⇧⌘8 列表；也可直接敲 Markdown。从网页、Word、Anki 粘贴时保留格式。⌘↩ 保存。")
+            if let duplicate = draft?.duplicate {
+                CardInputDuplicateNotice(card:duplicate) { store.commitCardEditor(allowDeleted:true) }
+                    .id(duplicate.id)
+            }
+            Text("默认编辑文字；点击各字段右上角 <> 切换 HTML 源码。⌘B、⌘I、⌘K 设置格式；⌘↩ 保存。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -852,7 +916,13 @@ struct CardEditorView: View {
                     }
                 }
                 Spacer()
-                Button("取消", role: .cancel) { store.cardEditor = nil }
+                if let id = draft?.card.id {
+                    Button("修改对照") {
+                        do { comparison = try store.db.card(id:id) } catch { store.cardEditor?.error = error.localizedDescription }
+                    }
+                    Button("修改历史") { showsHistory = true }
+                }
+                Button("取消", role: .cancel) { store.requestCloseCardEditor() }
                     .keyboardShortcut(.cancelAction)
                 Button("保存") { store.commitCardEditor() }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -863,6 +933,38 @@ struct CardEditorView: View {
         }
         .padding(20)
         .frame(minWidth: 680, idealWidth: 720, minHeight: 600, idealHeight: 720)
+        .task(id:store.cardEditor?.card) { await checkDuplicate() }
+        .sheet(item:$comparison) { original in
+            if let current = store.cardEditor?.card { CardComparisonView(incoming:current,existing:original) }
+        }
+        .sheet(isPresented:$showsHistory) { if let id = store.cardEditor?.card.id { CardHistoryView(cardID:id) } }
+    }
+    private func editorFieldHeading(_ title: String,isFront: Bool) -> some View {
+        HStack(alignment:.firstTextBaseline,spacing:12) {
+            Text(title).font(.headline)
+            if isFront, let duplicate = store.cardEditor?.duplicate {
+                Label(duplicate.deletedAt == nil ? "正面重复 · \(duplicate.deck)" : "最近删除中有相同正面 · \(duplicate.deck)",systemImage:"exclamationmark.circle.fill")
+                    .font(.callout).foregroundStyle(.red).fixedSize(horizontal:false,vertical:true)
+                    .accessibilityIdentifier("card-front-duplicate-warning")
+            } else if isFront && checkingDuplicate { Text("正在检查…").font(.caption).foregroundStyle(.secondary) }
+            Spacer(minLength:0)
+        }
+    }
+    private func checkDuplicate() async {
+        guard let draft = store.cardEditor, !store.fullBackupBusy else { return }
+        checkingDuplicate = true
+        do {
+            try await Task.sleep(for:.milliseconds(450))
+            let duplicate = try await store.db.liveCardDuplicate(draft.card)
+            try Task.checkCancellation()
+            guard store.cardEditor?.id == draft.id, store.cardEditor?.card == draft.card, !store.fullBackupBusy else { return }
+            store.cardEditor?.duplicate = duplicate
+            checkingDuplicate = false
+        } catch is CancellationError { } catch {
+            if store.cardEditor?.id == draft.id && store.cardEditor?.card == draft.card {
+                checkingDuplicate = false; store.cardEditor?.error = "实时查重未完成，保存时会重新检查：" + error.localizedDescription
+            }
+        }
     }
 
     // MARK: 背面栏目（1.2）
@@ -898,9 +1000,9 @@ struct CardEditorView: View {
                         .buttonStyle(.borderless).help("删除这个栏目")
                 }
                 RichEditor(text: sectionBinding(sec.id, \.text, ""), mode: .card, placeholder: "栏目内容",
-                           toolbar: true, autoHeight: false, minHeight: 130, slot: "card-section-" + sec.id,
-                           onSubmit: submit, onCancel: cancel)
-                    .frame(height: 160)
+                           toolbar: false, autoHeight: true, slot: "card-section-" + sec.id,
+                           onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting,
+                           fieldName: sec.name.isEmpty ? "背面栏目" : sec.name)
                     .richEditorFrame()
             }
             .padding(.top, 8)
@@ -961,7 +1063,7 @@ struct CardEditorView: View {
         store.commitCardEditor()
     }
 
-    private func cancel() { store.cardEditor = nil }
+    private func cancel() { store.requestCloseCardEditor() }
 }
 
 // MARK: - Anki 导入预览

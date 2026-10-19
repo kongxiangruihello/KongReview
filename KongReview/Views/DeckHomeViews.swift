@@ -58,30 +58,26 @@ struct SealStamp: View {
     }
 }
 
-/// 今日进度环
+/// 今日已学张数；学习步骤中已学和待学可能重叠，因此不计算百分比。
 struct DailyRing: View {
     let done: Int
     let remaining: Int
 
     var body: some View {
-        let total = done + remaining
-        let p = total == 0 ? 0 : Double(done) / Double(total)
         ZStack {
             Circle().stroke(ReviewPalette.hair, lineWidth: 9)
             Circle()
-                .trim(from: 0, to: max(0.001, p))
                 .stroke(DeckColors.reviewColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .opacity(total == 0 ? 0 : 1)
+                .opacity(done > 0 ? 0.7 : 0)
             VStack(spacing: 2) {
                 Text("\(done)")
                     .font(.system(size: 30, weight: .medium, design: .serif).monospacedDigit())
                     .foregroundStyle(ReviewPalette.ink)
-                Text("今天已复习").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+                Text("今天已学").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
             }
         }
         .frame(width: 118, height: 118)
-        .help(total == 0 ? "今天还没有到期的卡片" : "今天完成 \(Int((p * 100).rounded()))%（已复习 \(done) 张，还剩 \(remaining) 张）")
+        .help("今天已学 \(done) 张，当前可学 \(remaining) 张。同一卡片反复评分只计 1 张，学习步骤中的卡片可能再次待学。")
     }
 }
 
@@ -93,6 +89,10 @@ struct DeckHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 hero
+                HStack {
+                    Button("难卡集中练习") { store.learningExplorer = .init(route: .difficult) }
+                    Button("学习记录日历") { store.learningExplorer = .init(route: .day(Date())) }
+                }
                 VStack(alignment: .leading, spacing: 14) {
                     sectionHeader
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 320, maximum: 560), spacing: 18, alignment: .top)],
@@ -145,13 +145,16 @@ struct DeckHomeView: View {
     private var hero: some View {
         let t = totals
         let remaining = t.due.total
+        let summary = store.globalCardLearningSummary
+        let done = summary?.studiedCards ?? t.done
+        let status = summary?.availability
         return HStack(alignment: .center, spacing: 24) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(DeckOverview.chineseDate(Date()))
                     .font(.system(size: 12, weight: .medium))
                     .tracking(2)
                     .foregroundStyle(ReviewPalette.sub)
-                headline(remaining: remaining, done: t.done)
+                headline(remaining: remaining, done: done, status: status)
                     .padding(.top, 10)
                 HStack(spacing: 18) {
                     dot(DeckColors.newColor, "新卡", t.due.new)
@@ -164,6 +167,13 @@ struct DeckHomeView: View {
                     }
                 }
                 .padding(.top, 12)
+                if remaining == 0, let status {
+                    Text(status.detail)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(ReviewPalette.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                }
                 HStack(spacing: 10) {
                     if let d = suggestedDeck {
                         PillButton(icon: "play.fill", title: "开始复习：\(DeckOverview.split(d.name).leaf)", style: .primary) {
@@ -181,9 +191,9 @@ struct DeckHomeView: View {
             }
             Spacer(minLength: 12)
             ZStack(alignment: .topTrailing) {
-                DailyRing(done: t.done, remaining: remaining)
+                DailyRing(done: done, remaining: remaining)
                     .padding(8)
-                if remaining == 0 && t.done > 0 {
+                if status?.kind == .complete {
                     SealStamp(text: "日课已毕", size: 14)
                         .offset(x: 14, y: -10)
                 }
@@ -211,14 +221,16 @@ struct DeckHomeView: View {
     }
 
     @ViewBuilder
-    private func headline(remaining: Int, done: Int) -> some View {
+    private func headline(remaining: Int, done: Int, status: CardStudyAvailability?) -> some View {
         let font = Font.system(size: 30, weight: .semibold, design: .serif)
         if remaining > 0 {
             Text("今天还有 \(Text("\(remaining)").foregroundStyle(ReviewPalette.accent)) 张卡片等你")
                 .font(font)
                 .foregroundStyle(ReviewPalette.ink)
+        } else if let status {
+            Text(status.title).font(font).foregroundStyle(ReviewPalette.ink)
         } else if done > 0 {
-            Text("今日功课已毕").font(font).foregroundStyle(ReviewPalette.ink)
+            Text("当前待学已完成").font(font).foregroundStyle(ReviewPalette.ink)
         } else {
             Text("今天没有到期的卡片").font(font).foregroundStyle(ReviewPalette.ink)
         }
@@ -283,7 +295,8 @@ struct DeckTile: View {
         let tint = DeckColors.color(for: deck.name)
         let parts = DeckOverview.split(deck.name)
         let o = store.options(for: deck.name)
-        let finishedToday = deck.counts.total == 0 && deck.maturity.active > 0 && deck.doneToday > 0
+        let availability = store.globalCardLearningSummary?.deckAvailability[deck.name]
+        let finishedToday = availability?.kind == .complete
         return HStack(spacing: 0) {
             Rectangle().fill(tint).frame(width: 5)
             VStack(alignment: .leading, spacing: 14) {
@@ -318,6 +331,14 @@ struct DeckTile: View {
                     }
                     .font(.system(size: 11.5).monospacedDigit())
                     .foregroundStyle(ReviewPalette.sub)
+                }
+                if deck.counts.total == 0, let availability {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(availability.title).font(.system(size: 12, weight: .medium))
+                        Text(availability.detail).font(.system(size: 11.5))
+                    }
+                    .foregroundStyle(ReviewPalette.sub)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 8) {
                     Text(o.algorithm == .fsrs ? "FSRS \(Int((o.desiredRetention * 100).rounded()))%" : "SM-2")
@@ -524,6 +545,9 @@ struct ReviewHeatmapView: View {
                 .frame(width: Self.cell, height: Self.cell)
                 .overlay(RoundedRectangle(cornerRadius: 2.5).stroke(isToday ? ReviewPalette.ink.opacity(0.5) : .clear, lineWidth: 1))
                 .help(Self.tooltip(date, n: n, deck: day?.topDeck, calendar: calendar))
+                .onTapGesture { store.learningExplorer = .init(route: .day(date)) }
+                .handCursor()
+                .accessibilityAddTraits(.isButton)
         } else {
             Color.clear.frame(width: Self.cell, height: Self.cell)
         }

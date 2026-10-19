@@ -10,6 +10,7 @@ enum SidebarItem: Hashable {
     case favorites
     case cards
     case stats
+    case growth
     case unsorted
     case trash
     case articles
@@ -26,6 +27,26 @@ enum SidebarItem: Hashable {
 @Observable
 final class LibraryStore {
     let db: AppDatabase
+    let usesBackgroundStatistics: Bool
+    @ObservationIgnored var derivedRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var derivedRefreshGeneration = 0
+    @ObservationIgnored var derivedPendingKey: String?
+    @ObservationIgnored var derivedSnapshotLoader: (@Sendable (DerivedLibraryRequest) async throws -> DerivedLibrarySnapshot)?
+    var derivedIsLoading = false
+    var derivedStatisticsError: String?
+    var cardLearningSummaryScope: CardLearningScope = .all
+    let globalSearch = GlobalSearchState()
+    var learningExplorer: LearningExplorerRequest?
+    var learningExplorerPendingTarget: GlobalSearchTarget?
+    @ObservationIgnored var fullSimilaritySession: FullSimilaritySession?
+    @ObservationIgnored var fullSimilarityTask: Task<Void, Never>?
+    @ObservationIgnored var fullSimilarityRunID = UUID()
+    var learningMaterialExport: LearningMaterialExportRequest?
+    @ObservationIgnored var flushGrowthReflection: (() throws -> Void)?
+    var growthGeneration = 0
+    var growthFlushKey: String?
+    var fullBackupBusy = false
+    var fullBackupRestore: PreparedFullBackup?
 
     var sources: [Source] = []
     var highlightCounts: [Int64: Int] = [:]
@@ -59,7 +80,19 @@ final class LibraryStore {
 
     var selection: SidebarItem? = .home
     /// 正在编辑/新建的摘录草稿；非空时弹出编辑面板
-    var editorDraft: HighlightDraft?
+    var editorDraft: HighlightDraft? { didSet { persistHighlightEditorDraft() } }
+    let draftPersistence: EditorDraftPersistence?
+    @ObservationIgnored var highlightDraftSessionID: UUID?
+    @ObservationIgnored var cardDraftSessionID: UUID?
+    var draftRevision = 0
+    var draftSaveError: String?
+    var draftRecoveryNotice: String?
+    var showsDraftRecovery = false
+    var closingHighlightEditor = false
+    var closingCardEditor = false
+    var draftPendingDiscard: EditorDraftSelection?
+    var pendingDraftRecovery: EditorDraftSelection?
+    var duplicateCardReview: CardDuplicateReview?
     var editingSource: Source?
     /// 等待确认删除的出处
     var sourcePendingDeletion: Source?
@@ -98,9 +131,17 @@ final class LibraryStore {
     var errorMessage: String?
 
     /// 各界面的局部状态放在这里（见 ViewState.swift），避免使用 @State
-    let review = ReviewState()
-    let list = ListState()
-    let study = StudyState()
+    let review: ReviewState
+    let list: ListState
+    let articleList: ArticleListState
+    let sourceManager: SourceManagerState
+    let articleReading: ArticleReadingState
+    let cardFormatting = CardFormattingState()
+    let study: StudyState
+    var lastCardRating: CardRatingUndoToken?
+    var lastCardRatingScope: CardLearningScope?
+    var cardLearningSummary: CardLearningSummary?
+    var globalCardLearningSummary: CardLearningSummary?
 
     /// 侧边栏“出处”分组是否展开（默认折叠，记住上次状态）
     var sourcesExpanded: Bool = UserDefaults.standard.bool(forKey: "sidebar.sourcesExpanded") {
@@ -116,7 +157,10 @@ final class LibraryStore {
     var cardHighlightIDs: Set<Int64> = []
     var cardCount = 0
     var cardImport: CardImportPreview?
-    var cardEditor: CardDraft?
+    var cardEditor: CardDraft? { didSet {
+        if oldValue?.card != cardEditor?.card { cardEditor?.duplicate = nil; cardEditor?.error = nil }
+        persistCardEditorDraft()
+    } }
     var articleSourceDraft: ArticleSourceDraft?
     /// 今天是否已回顾（决定是否还要提醒）
     var reviewedToday = false
@@ -135,7 +179,8 @@ final class LibraryStore {
     /// 封面变化计数（界面据此重新加载图片）
     var coverRevision = 0
     /// 填空卡制作面板
-    var clozeDraft: ClozeDraft?
+    var clozeInputDuplicate: Card?
+    var clozeDraft: ClozeDraft? { didSet { clozeInputDuplicate = nil } }
     /// 1.7：逐条做填空卡的队列（笔记本里的摘录）
     var clozeQueue: [Int64] = []
     var clozeQueueTotal = 0
@@ -160,9 +205,26 @@ final class LibraryStore {
 
     /// 每次写入后递增，列表视图据此重新查询
     private(set) var revision = 0
+    var journeyRevision = 0
+    var journeyNavigation = JourneyNavigation()
 
-    init(db: AppDatabase) {
+    init(db: AppDatabase, draftPersistence: EditorDraftPersistence? = nil, positionDefaults: UserDefaults? = nil,
+         backgroundStatistics: Bool = false,
+         derivedSnapshotLoader: (@Sendable (DerivedLibraryRequest) async throws -> DerivedLibrarySnapshot)? = nil) {
         self.db = db
+        self.usesBackgroundStatistics = backgroundStatistics
+        self.derivedSnapshotLoader = derivedSnapshotLoader
+        self.draftPersistence = draftPersistence
+        self.list = ListState(defaults: positionDefaults)
+        self.articleList = ArticleListState(persistence: ListPositionPersistence(defaults: positionDefaults))
+        self.sourceManager = SourceManagerState(defaults: positionDefaults)
+        self.articleReading = ArticleReadingState(defaults: positionDefaults)
+        self.study = StudyState(defaults: positionDefaults)
+        self.review = ReviewState(db: db, persistence: draftPersistence, defaults: positionDefaults)
+        self.review.onDraftChange = { [weak self] error in
+            self?.draftSaveError = error
+            self?.draftRevision += 1
+        }
         reload()
     }
 
@@ -183,8 +245,8 @@ final class LibraryStore {
             coverIDs = try db.coverSourceIDs()
             notebooks = try db.notebooks()
             notebookQuoteCounts = try db.notebookQuoteCounts()
-            refreshDerived()
             revision += 1
+            refreshDerived()
             onReload?()
             scheduleRelatedRebuild()
             scheduleObsidianSync()
@@ -206,6 +268,7 @@ final class LibraryStore {
     // MARK: 写操作（统一在这里做，写完刷新）
 
     func perform(_ work: () throws -> Void) {
+        guard !fullBackupBusy else { return }
         do {
             try work()
             reload()
@@ -404,6 +467,8 @@ final class LibraryStore {
     // MARK: 网页存档
 
     func open(_ article: Article) {
+        articleList.rememberArticle(article.id)
+        articleReading.open(articleID: article.id)
         selection = .articles
         // 列表里的条目不含正文，打开时取全文
         openArticle = article.id.flatMap { try? db.article(id: $0) } ?? article
@@ -512,8 +577,8 @@ final class LibraryStore {
     }
 
     func revisionBump() {
-        refreshDerived()
         revision += 1
+        refreshDerived()
     }
 
     // MARK: 1.0：撤销（⌘Z / ⇧⌘Z，用窗口的撤销管理器，菜单“编辑”里会显示操作名）
@@ -537,9 +602,19 @@ final class LibraryStore {
         um.setActionName(name)
     }
 
+    func recordCardCleanupUndo(_ snapshot: UndoSnapshot) {
+        registerUndo("整理重复记忆卡", snapshot, reviewPosition: nil)
+    }
+
+    func recordCardTagUndo(_ snapshot: UndoSnapshot) {
+        registerUndo("批量修改记忆卡标签", snapshot, reviewPosition: nil)
+    }
+
     /// 写回快照；同时记下写回前的状态，供“重做”
     private func applyUndo(_ name: String, _ snap: UndoSnapshot, reviewPosition: Int?) {
-        let current = try? db.snapshot(highlightIds: snap.highlightIds, sourceIds: snap.sourceIds, cardIds: snap.cardIds)
+        var current = try? db.snapshot(highlightIds: snap.highlightIds, sourceIds: snap.sourceIds, cardIds: snap.cardIds)
+        current?.cardTagsOnly = snap.cardTagsOnly
+        current?.cardTagUndoChanges = snap.cardTagUndoChanges.mapValues { $0.reversed }
         let currentPosition = review.position
         perform { try db.restore(snap) }
         if let p = reviewPosition { review.position = max(0, min(p, review.cards.count)) }
@@ -563,6 +638,12 @@ final class LibraryStore {
 
     /// 先把当前数据另存一份“恢复前”备份，再用所选备份替换
     func restoreBackup(_ info: BackupInfo) {
+        do { try flushGrowthReflection?() } catch { report(error); return }
+        growthGeneration += 1
+        journeyNavigation = JourneyNavigation()
+        flushGrowthReflection = nil
+        selection = .home
+        fullSimilarityTask?.cancel(); fullSimilaritySession = nil
         let db = self.db
         maintenanceProgress = "正在恢复备份…"
         pendingRestore = nil
@@ -577,6 +658,7 @@ final class LibraryStore {
                 AppLog.write("从备份恢复：\(info.url.lastPathComponent)；恢复前的数据另存为 \(safety.lastPathComponent)")
                 await MainActor.run {
                     self.maintenanceProgress = nil
+                    self.clearCardRatingUndo()
                     self.reload()
                     self.infoMessage = "已恢复到 \(info.date.formatted(date: .abbreviated, time: .shortened)) 的备份（\(info.highlights) 条摘录、\(info.cards) 张卡）。\n恢复前的数据另存为“\(safety.lastPathComponent)”，在备份文件夹里，需要时可以再恢复回来。"
                 }
@@ -592,13 +674,11 @@ final class LibraryStore {
     var stats: ReviewStats.Summary = .empty
     /// 各牌组今天的新卡 / 学习中 / 待复习
     var deckSummaryCache: [DeckSummary] = []
+    /// 首页两项学习任务的进度与去重记录
+    var homeLearningSummary: HomeLearningSummary = .empty
+    var learningActivitySummary: LearningActivitySummary = .empty
 
-    func refreshDerived() {
-        staleSummary = (try? db.staleSummary()) ?? AppDatabase.StaleSummary()
-        stats = (try? db.reviewSummary(now: Date(), days: 30)) ?? .empty
-        deckSummaryCache = (try? db.deckSummaries(now: Date(), newPerDay: CardSettings.newPerDay,
-                                                  reviewsPerDay: CardSettings.reviewsPerDay)) ?? []
-    }
+    func refreshDerived() { refreshDerivedLibrary() }
 
     // MARK: 1.0：相关摘录
 
@@ -648,6 +728,7 @@ final class LibraryStore {
         let key = ReminderPlan.dayKey(Date())
         guard key != today else { return }
         today = key
+        clearCardRatingUndo()
         reload()
         onReviewedToday?()
     }
@@ -655,6 +736,7 @@ final class LibraryStore {
     /// “今日回顾”入口始终打开全库的当天队列，沿用已存进度和完成状态。
     func openTodayReview() {
         checkDayChange()
+        review.leaveCurrentEditor()
         review.theme = nil
         review.noteDraft = nil
         review.inlineDraft = nil
@@ -665,6 +747,8 @@ final class LibraryStore {
     /// 普通记忆卡入口打开牌组总览，保留最近牌组和已保存的学习记录。
     func openCardsHome() {
         checkDayChange()
+        clearCardRatingUndo()
+        study.clearBrowsePositionOwner()
         study.deck = nil
         study.browsingDeck = nil
         study.notebookId = nil
@@ -682,6 +766,7 @@ final class LibraryStore {
         study.browseQuery = ""
         study.browseOwnerDeck = nil
         study.browseLoadedQuery = ""
+        study.browseIsLoading = false
         refreshDerived()
         selection = .cards
     }
@@ -710,7 +795,14 @@ final class LibraryStore {
     /// 单条摘录做成记忆卡（牌组“摘录”）；不弹提示，界面上的脑形图标会变色
     func makeCard(from highlight: Highlight) {
         guard let id = highlight.id else { return }
-        perform { _ = try db.makeCards(fromHighlights: [id], style: CitationSettings.style) }
+        do {
+            guard let current = try db.highlights(ids: [id]).first, current.deletedAt == nil else {
+                errorMessage = "原摘录已删除，请刷新后重试。"; return
+            }
+            let source = sources.first { $0.id == current.sourceId }
+            let card = Card.from(current, source: source, deck: study.lastDeck ?? "摘录", style: CitationSettings.style)
+            cardEditor = CardDraft(card: card, tagsText: TagParser.format(card.tags))
+        } catch { report(error) }
     }
 
     /// 回顾页顶部提示：所有牌组今天待学的卡片数
@@ -725,26 +817,43 @@ final class LibraryStore {
     }
 
     func saveCard(_ card: Card) {
+        guard !fullBackupBusy else { return }
         do {
-            if let duplicate = try db.duplicateCard(for: card) {
-                errorMessage = "已有相同正反面内容的记忆卡（牌组：\(duplicate.deck)），请修改内容后再保存。"
-                return
-            }
-            perform { _ = try db.save(card) }
+            perform { _ = try db.saveInputCards([card]) }
         } catch { report(error) }
     }
 
     func editCard(_ card: Card) {
-        cardEditor = CardDraft(card: card, tagsText: TagParser.format(card.tags))
+        study.rememberBrowsingCard(card.id)
+        do {
+            let full: Card
+            if let id = card.id {
+                guard let current = try db.card(id: id), current.deletedAt == nil else {
+                    errorMessage = "这张记忆卡已删除，请刷新后重试。"
+                    return
+                }
+                full = current
+            } else { full = card }
+            cardEditor = CardDraft(card: full, tagsText: TagParser.format(full.tags))
+        } catch { report(error) }
     }
 
     func newCard(deck: String?) {
+        guard !fullBackupBusy else { return }
         cardEditor = CardDraft(card: Card(deck: deck ?? study.lastDeck ?? "默认", front: ""))
     }
 
     /// 保存卡片编辑面板；若正在学习的就是这张卡，同步刷新
-    func commitCardEditor() {
+    func commitCardEditor(allowDeleted: Bool = false) {
+        guard !fullBackupBusy else { return }
         guard var d = cardEditor else { return }
+        if d.isNew, let hid = d.card.highlightId {
+            do {
+                guard let original = try db.highlights(ids: [hid]).first, original.deletedAt == nil else {
+                    cardEditor?.error = "原摘录已删除，草稿已保留；请先处理原摘录关联。"; return
+                }
+            } catch { report(error); return }
+        }
         d.card.front = d.card.front.trimmingCharacters(in: .whitespacesAndNewlines)
         d.card.back = d.card.back.trimmingCharacters(in: .whitespacesAndNewlines)
         d.card.deck = d.card.deck.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "默认"
@@ -768,15 +877,15 @@ final class LibraryStore {
         }
         guard !d.card.front.isEmpty else { return }
         do {
-            if let duplicate = try db.duplicateCard(for: d.card) {
-                cardEditor?.error = "已有相同正反面内容的记忆卡（牌组：\(duplicate.deck)），请修改内容后再保存。"
-                return
-            }
-            let saved = try db.save(d.card)
+            let saved = try db.saveInputCards([d.card],allowDeleted:allowDeleted)[0]
             study.lastDeck = saved.deck
             if study.current?.id == saved.id { study.current = saved }
+            finishCardEditorDraft(id: d.id)
             cardEditor = nil
             reload()
+        } catch let error as CardInputDuplicateError {
+            cardEditor?.error = error.localizedDescription
+            cardEditor?.duplicate = error.card
         } catch {
             report(error)
         }
@@ -806,11 +915,13 @@ final class LibraryStore {
     }
 
     func startStudy(deck: String) {
+        clearCardRatingUndo()
         study.notebookId = nil
         study.deck = deck
         study.lastDeck = deck
         study.browsingDeck = nil
         nextCard()
+        refreshDerived()
     }
 
     /// 学习：取下一张（按牌组自己的每日上限）
@@ -846,15 +957,73 @@ final class LibraryStore {
     }
 
     func answerCurrent(_ a: CardAnswer) {
+        guard learningExplorer == nil else { return }
+        guard !fullBackupBusy else { return }
+        checkDayChange()
         guard let c = study.current else { return }
         do {
-            _ = try db.answer(c, a, scheduler: scheduler(forDeck: c.deck))
+            lastCardRating = try db.answerRecordingUndo(c, a, scheduler: scheduler(forDeck: c.deck))
+            lastCardRatingScope = currentCardLearningScope
             if !reviewedToday { reviewedToday = true; onReviewedToday?() }
         } catch {
             report(error)
+            return
         }
         nextCard()
         revisionBump()
+    }
+
+    var currentCardLearningScope: CardLearningScope {
+        if let id = study.notebookId { return .notebook(id) }
+        if let deck = study.deck { return .deck(deck) }
+        return .all
+    }
+
+    /// 文字面板和对话框打开时，⌘Z 交给正在编辑的内容。
+    var cardRatingShortcutIsAvailable: Bool {
+        selection == .cards && study.deck != nil && study.browsingDeck == nil
+            && cardEditor == nil && editorDraft == nil && clozeDraft == nil
+            && editingSource == nil && newNotebookRequest == nil && tagEditor == nil
+            && addArticleDraft == nil && articleSourceDraft == nil && batchPrompt == nil
+            && exportRequest == nil && mergeRequest == nil && pendingImport == nil && cardImport == nil
+            && deckOptionsEditor == nil && templateEditor == nil && apkgExport == nil
+            && shareImageHighlight == nil && bibliographyRequest == nil && pageRange == nil
+            && citationCheck == nil && editionImport == nil && chapterProgressRequest == nil
+            && backupList == nil && duplicateCardReview == nil && cardSyncOffer == nil
+            && !showsDraftRecovery && !closingHighlightEditor && !closingCardEditor
+            && learningMaterialExport == nil && learningExplorer == nil && !globalSearch.isPresented && fullBackupRestore == nil && !fullBackupBusy
+    }
+
+    var canUndoLastCardRating: Bool {
+        guard cardRatingShortcutIsAvailable, let token = lastCardRating,
+              Calendar.current.isDateInToday(token.event.at),
+              lastCardRatingScope == currentCardLearningScope else { return false }
+        return (try? db.canUndoCardRating(token)) ?? false
+    }
+
+    func clearCardRatingUndo() {
+        lastCardRating = nil
+        lastCardRatingScope = nil
+    }
+
+    func undoLastCardRating() {
+        checkDayChange()
+        guard cardRatingShortcutIsAvailable, let token = lastCardRating,
+              Calendar.current.isDateInToday(token.event.at),
+              lastCardRatingScope == currentCardLearningScope else { return }
+        do {
+            let restored = try db.undoCardRating(token)
+            clearCardRatingUndo()
+            study.current = restored
+            study.showingAnswer = true
+            study.finished = false
+            reviewedToday = (try? db.reviewedToday()) ?? false
+            onReviewedToday?()
+            revisionBump()
+        } catch {
+            clearCardRatingUndo()
+            report(error)
+        }
     }
 
     // MARK: 0.9：封面、频率、填空卡、已存搜索、Obsidian、收件箱
@@ -873,6 +1042,7 @@ final class LibraryStore {
     }
 
     func startCloze(for highlight: Highlight) {
+        guard !fullBackupBusy else { return }
         let src = source(for: highlight)
         var back: [String] = []
         if let t = highlight.translation, !t.isEmpty { back.append(t) }
@@ -884,22 +1054,25 @@ final class LibraryStore {
     }
 
     /// 按填空编号生成卡片（与 Anki 相同：c1、c2… 各一张）
-    func commitCloze() {
+    func commitCloze(allowDeleted: Bool = false) {
+        guard !fullBackupBusy else { return }
         guard let d = clozeDraft else { return }
         let numbers = AnkiContent.clozeNumbers(d.text)
         guard !numbers.isEmpty else { return }
         let extra = Markdown.html(d.extra)
-        var saved = false
-        perform {
-            for n in numbers {
-                let c = AnkiContent.cloze(Markdown.html(d.text), number: n)
-                let back = extra.isEmpty ? c.back : c.back + "<hr>" + extra
-                _ = try db.save(Card(deck: d.deck.nilIfBlank ?? "填空", front: c.front, back: back, tags: d.tags,
-                                     highlightId: d.highlightId))
-            }
-            saved = true
+        let cards = numbers.map { n in
+            let c = AnkiContent.cloze(Markdown.html(d.text),number:n)
+            let back = extra.isEmpty ? c.back : c.back + "<hr>" + extra
+            return Card(deck:d.deck.nilIfBlank ?? "填空",front:c.front,back:back,tags:d.tags,highlightId:d.highlightId)
         }
-        guard saved else { return }   // 出错时留在面板上（错误已提示）
+        do {
+            _ = try db.saveInputCards(cards,allowDeleted:allowDeleted)
+            reload()
+        } catch let error as CardInputDuplicateError {
+            clozeInputDuplicate = error.card
+            infoMessage = error.localizedDescription
+            return
+        } catch { report(error); return }
         study.lastDeck = d.deck
         clozeDraft = nil
         if d.progress != nil {
@@ -968,6 +1141,7 @@ final class LibraryStore {
 
     /// 1.2：检查 LiquidText 导出文件夹（后台读取与导入，有新摘录时提示）
     func checkLiquidTextFolder(quiet: Bool = true, force: Bool = false) {
+        guard !fullBackupBusy else { return }
         guard LiquidTextFolder.isEnabled || force, LiquidTextFolder.folder != nil, !liquidTextChecking else {
             if !quiet && LiquidTextFolder.folder == nil { infoMessage = "还没有选择 LiquidText 导出文件夹。" }
             return
@@ -994,6 +1168,7 @@ final class LibraryStore {
 
     /// 检查收件箱；有新摘录时提示
     func checkInbox(quiet: Bool = true) {
+        guard !fullBackupBusy else { return }
         checkLiquidTextFolder(quiet: true)
         let r = InboxService.process(db: db)
         guard r.files > 0 else {
@@ -1186,10 +1361,12 @@ final class LibraryStore {
     // MARK: 新建与捕获
 
     func newHighlight(in sourceId: Int64? = nil) {
+        guard !fullBackupBusy else { return }
         editorDraft = HighlightDraft(highlight: Highlight(sourceId: sourceId, text: ""))
     }
 
     func edit(_ highlight: Highlight) {
+        list.rememberEditing(highlight.id)
         do {
             // 列表行可能来自旧缓存；打开时按 id 取完整正文，保留最近删除中的编辑能力。
             let full: Highlight
@@ -1235,12 +1412,14 @@ final class LibraryStore {
     /// 保存编辑面板的内容并关闭面板
     func commit(_ draft: HighlightDraft) {
         guard save(draft: draft) else { return }
+        finishHighlightEditorDraft(id: draft.id)
         editorDraft = nil
         offerCardSync(for: draft.highlight.id)
     }
 
     /// 1.2：回顾卡片上就地编辑后保存（与编辑面板一样，摘录已做成记忆卡时按设置同步或询问）
     func saveEdited(_ highlight: Highlight) {
+        guard !fullBackupBusy else { return }
         save(highlight)
         offerCardSync(for: highlight.id)
     }
@@ -1271,6 +1450,10 @@ final class LibraryStore {
     /// 保存一份草稿（主窗口编辑器与快速录入浮窗共用）；成功返回 true
     @discardableResult
     func save(draft: HighlightDraft) -> Bool {
+        guard !fullBackupBusy else {
+            errorMessage = "正在处理完整备份，请稍后再保存。"
+            return false
+        }
         var ok = false
         perform {
             var h = draft.highlight
@@ -1342,7 +1525,7 @@ struct ImportPreview: Identifiable {
 
 /// 编辑面板的草稿
 struct HighlightDraft: Identifiable {
-    let id = UUID()
+    var id = UUID()
     var highlight: Highlight
     var tagsText: String = ""
     // 新建出处（填写了标题时优先于下拉选择）

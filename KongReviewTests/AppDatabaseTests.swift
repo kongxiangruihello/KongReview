@@ -72,6 +72,7 @@ final class DBTests: XCTestCase {
   func testFileBackedPoolMigrates() throws {
     let path = NSTemporaryDirectory() + "kg-\(UUID().uuidString).sqlite"
     var config = Configuration(); config.foreignKeysEnabled = true
+    config.prepareDatabase { AppDatabase.registerFunctions($0) }
     _ = try AppDatabase(DatabasePool(path: path, configuration: config))
     let again = try AppDatabase(DatabasePool(path: path, configuration: config))
     XCTAssertEqual(try again.highlights().count, 0)
@@ -145,6 +146,7 @@ final class V02DatabaseTests: XCTestCase {
   func testBackupAndPrune() throws {
     let path = NSTemporaryDirectory() + "kg-\(UUID().uuidString).sqlite"
     var config = Configuration(); config.foreignKeysEnabled = true
+    config.prepareDatabase { AppDatabase.registerFunctions($0) }
     let db = try AppDatabase(DatabasePool(path: path, configuration: config))
     _ = try db.save(Highlight(text: "备份测试内容"))
     let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kgb-\(UUID().uuidString)")
@@ -327,6 +329,7 @@ final class RenameMigrationTests: XCTestCase {
     let legacy = dir.appendingPathComponent("glean.sqlite")
     let target = dir.appendingPathComponent("kongreview.sqlite")
     var config = Configuration(); config.foreignKeysEnabled = true
+    config.prepareDatabase { AppDatabase.registerFunctions($0) }
     do {
       let old = try AppDatabase(DatabasePool(path: legacy.path, configuration: config))   // WAL 模式
       _ = try old.save(Highlight(text: "旧库里的摘录一"))
