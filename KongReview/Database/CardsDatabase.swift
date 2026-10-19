@@ -478,12 +478,12 @@ extension AppDatabase {
     }
 
     /// 删除没有卡片、摘录引用的媒体文件，再用 VACUUM 收回空间
-    func compact() throws -> CompactReport {
+    func compact(additionalMedia: Set<String> = []) throws -> CompactReport {
         let before = fileSize()
         let removed: Int = try writer.write { db in
-            var used = Set<String>()
+            var used = additionalMedia
             // 按模型解码字段和栏目，避免 JSON 中的转义引号妨碍 HTML 引用解析。
-            for card in try Card.filter(Column("deletedAt") == nil).fetchAll(db) {
+            for card in try Card.fetchAll(db) {
                 let content = [card.front, card.back] + card.fields + (card.sections ?? []).map(\.text)
                 for text in content { used.formUnion(AnkiPackage.mediaReferences(in: text)) }
             }
@@ -493,6 +493,13 @@ extension AppDatabase {
                     used.formUnion(AnkiPackage.mediaReferences(in: text))
                 }
             }
+            for (table,columns) in [("article",["contentHTML"]),("notebook_block",["text","note"]),("note_template",["front","back","collapsed"])] {
+                let rows = try Row.fetchCursor(db,sql:"SELECT " + columns.joined(separator:",") + " FROM " + table)
+                while let row = try rows.next() { for column in columns { if let text: String = row[column] { used.formUnion(AnkiPackage.mediaReferences(in:text)) } } }
+            }
+            // Growth records, content history and in-database drafts also own media.
+            let payloads = try Data.fetchCursor(db,sql:"SELECT payload FROM app_progress")
+            while let payload = try payloads.next() { used.formUnion(try MediaReferenceInventory.references(inJSON:payload)) }
             var n = 0
             for name in try String.fetchAll(db, sql: "SELECT name FROM card_media") where !used.contains(name) {
                 try db.execute(sql: "DELETE FROM card_media WHERE name = ?", arguments: [name])

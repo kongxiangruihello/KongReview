@@ -43,6 +43,8 @@ final class LibraryStore {
     @ObservationIgnored var fullSimilarityRunID = UUID()
     var learningMaterialExport: LearningMaterialExportRequest?
     @ObservationIgnored var flushGrowthReflection: (() throws -> Void)?
+    let resourceAudit = LibraryResourceAuditState()
+    var showsResourceAudit = false
     var growthGeneration = 0
     var growthFlushKey: String?
     var fullBackupBusy = false
@@ -137,6 +139,7 @@ final class LibraryStore {
     let sourceManager: SourceManagerState
     let articleReading: ArticleReadingState
     let cardFormatting = CardFormattingState()
+    let cardWorkflow = CardEditorWorkflowState()
     let study: StudyState
     var lastCardRating: CardRatingUndoToken?
     var lastCardRatingScope: CardLearningScope?
@@ -158,6 +161,10 @@ final class LibraryStore {
     var cardCount = 0
     var cardImport: CardImportPreview?
     var cardEditor: CardDraft? { didSet {
+        if oldValue?.id != cardEditor?.id {
+            cardWorkflow.generation += 1
+            cardWorkflow.actionBusy = false
+        }
         if oldValue?.card != cardEditor?.card { cardEditor?.duplicate = nil; cardEditor?.error = nil }
         persistCardEditorDraft()
     } }
@@ -639,6 +646,7 @@ final class LibraryStore {
     /// 先把当前数据另存一份“恢复前”备份，再用所选备份替换
     func restoreBackup(_ info: BackupInfo) {
         do { try flushGrowthReflection?() } catch { report(error); return }
+        resourceAudit.reset(); showsResourceAudit = false
         growthGeneration += 1
         journeyNavigation = JourneyNavigation()
         flushGrowthReflection = nil
@@ -801,6 +809,7 @@ final class LibraryStore {
             }
             let source = sources.first { $0.id == current.sourceId }
             let card = Card.from(current, source: source, deck: study.lastDeck ?? "摘录", style: CitationSettings.style)
+            cardWorkflow.startSession()
             cardEditor = CardDraft(card: card, tagsText: TagParser.format(card.tags))
         } catch { report(error) }
     }
@@ -834,25 +843,28 @@ final class LibraryStore {
                 }
                 full = current
             } else { full = card }
+            cardWorkflow.startSession()
             cardEditor = CardDraft(card: full, tagsText: TagParser.format(full.tags))
         } catch { report(error) }
     }
 
     func newCard(deck: String?) {
         guard !fullBackupBusy else { return }
+        cardWorkflow.startSession()
         cardEditor = CardDraft(card: Card(deck: deck ?? study.lastDeck ?? "默认", front: ""))
     }
 
     /// 保存卡片编辑面板；若正在学习的就是这张卡，同步刷新
-    func commitCardEditor(allowDeleted: Bool = false) {
-        guard !fullBackupBusy else { return }
-        guard var d = cardEditor else { return }
+    @discardableResult
+    func commitCardEditor(allowDeleted: Bool = false) -> Card? {
+        guard !fullBackupBusy else { return nil }
+        guard var d = cardEditor else { return nil }
         if d.isNew, let hid = d.card.highlightId {
             do {
                 guard let original = try db.highlights(ids: [hid]).first, original.deletedAt == nil else {
-                    cardEditor?.error = "原摘录已删除，草稿已保留；请先处理原摘录关联。"; return
+                    cardEditor?.error = "原摘录已删除，草稿已保留；请先处理原摘录关联。"; return nil
                 }
-            } catch { report(error); return }
+            } catch { report(error); return nil }
         }
         d.card.front = d.card.front.trimmingCharacters(in: .whitespacesAndNewlines)
         d.card.back = d.card.back.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -875,20 +887,45 @@ final class LibraryStore {
             d.card.front = d.card.fields[0]
             d.card.back = d.card.fields.dropFirst().filter { !$0.isEmpty }.joined(separator: "<hr>")
         }
-        guard !d.card.front.isEmpty else { return }
+        guard CardContinuousEntry.hasFrontContent(d.card, template: d.card.noteType.flatMap { noteTemplates[$0] }) else {
+            cardEditor?.error = "请填写正面内容后再保存。"
+            return nil
+        }
         do {
             let saved = try db.saveInputCards([d.card],allowDeleted:allowDeleted)[0]
             study.lastDeck = saved.deck
             if study.current?.id == saved.id { study.current = saved }
-            finishCardEditorDraft(id: d.id)
+            if d.isNew { cardWorkflow.addedCount += 1 }
+            if cardWorkflow.duplicateReturn?.originalEditorID == d.id {
+                cardWorkflow.duplicateReturn?.originalSaved = true
+            }
+            do {
+                try draftPersistence?.removeCard(id: d.id)
+                draftRevision += 1
+                draftSaveError = nil
+            } catch {
+                // The database write has succeeded. Retain the content as an existing card so
+                // retrying cannot create a second card or lose text when draft cleanup fails.
+                var retained = d
+                retained.card = saved
+                retained.tagsText = TagParser.format(saved.tags)
+                cardEditor = retained
+                let message = "卡片已保存，但旧草稿暂未能清除；当前内容已保留，请稍后重试。"
+                cardEditor?.error = message
+                draftSaveError = message + error.localizedDescription
+                reload()
+                return saved
+            }
             cardEditor = nil
             reload()
+            return saved
         } catch let error as CardInputDuplicateError {
             cardEditor?.error = error.localizedDescription
             cardEditor?.duplicate = error.card
         } catch {
             report(error)
         }
+        return nil
     }
 
     /// 暂停 / 恢复
@@ -1244,18 +1281,22 @@ final class LibraryStore {
 
     /// 整理数据库：先备份，再删掉没有卡片引用的图片、VACUUM 收回空间
     func compactDatabase() {
-        guard maintenanceProgress == nil else { return }
+        guard maintenanceProgress == nil,editorDraft == nil,cardEditor == nil,review.editorSession == nil else {
+            infoMessage = "请先保存或关闭正在编辑的内容，再整理数据库。"; return
+        }
+        let draftMedia: Set<String>
+        do { draftMedia = try draftPersistence?.referencedMedia() ?? [] } catch { report(error); return }
         maintenanceProgress = "正在整理数据库…"
         let db = self.db
         Task.detached(priority: .userInitiated) {
             do {
                 try BackupService.backupNow(db: db)
-                let r = try db.compact()
+                let r = try db.compact(additionalMedia:draftMedia)
                 await MainActor.run {
                     self.maintenanceProgress = nil
                     let f = ByteCountFormatter()
                     self.infoMessage = "整理完成：\(f.string(fromByteCount: r.bytesBefore)) → \(f.string(fromByteCount: r.bytesAfter))。"
-                        + (r.mediaRemoved > 0 ? "删除没有卡片使用的图片 \(r.mediaRemoved) 个。" : "")
+                        + (r.mediaRemoved > 0 ? "删除没有资料引用的媒体 \(r.mediaRemoved) 个。" : "")
                         + "\n整理前已自动备份。"
                     self.reload()
                 }

@@ -22,6 +22,7 @@ struct RichEditor: View {
     var fieldName = ""
     @State private var toolsMode: EditorToolMode?
     @State private var localHandle = RichEditorHandle()
+    var onAttribution: (() -> Void)? = nil
     @State private var measuredHeight: CGFloat = 70
     @State private var showsSource = false
     @State private var switching = false
@@ -38,6 +39,7 @@ struct RichEditor: View {
                 Text(showsSource ? "HTML 源码" : "文字").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button { editor.showsFind.toggle() } label: { Image(systemName:"magnifyingglass") }.help("查找与替换当前字段 ⌘F").accessibilityLabel("查找与替换当前字段").accessibilityIdentifier("editor-find-"+slot)
+                Button { editor.openOutline() } label: { Image(systemName:"list.bullet.indent") }.help("正文目录与快速定位").accessibilityLabel("正文目录与快速定位")
                 Menu {
                     Button("格式清理预览…") { openTools(.cleanup,editor:editor) }
                     Button("检查链接与媒体…") { openTools(.resources,editor:editor) }
@@ -60,6 +62,7 @@ struct RichEditor: View {
                 .accessibilityLabel(showsSource ? "切换为文字编辑" : "编辑 HTML 源码").accessibilityIdentifier("editor-mode-"+slot)
             }.padding(.horizontal,8).padding(.vertical,4)
                 .background(EditorFindPresenter(handle:editor,fieldName:fieldName.isEmpty ? placeholder : fieldName).frame(width:0,height:0))
+                .background(EditorOutlinePresenter(handle:editor,fieldName:fieldName.isEmpty ? placeholder : fieldName).frame(width:0,height:0))
             if showsSource {
             if toolbar {
                 ScrollView(.horizontal,showsIndicators:false) {
@@ -85,17 +88,22 @@ struct RichEditor: View {
                     .frame(height:autoHeight ? max(contentMinimum,WebHeights.shared.values["visual-" + slot] ?? contentMinimum) : nil)
             }
         }
+        .onChange(of:editor.mediaPulse) { _,_ in openTools(.resources,editor:editor) }
+        .onChange(of:editor.attributionPulse) { _,_ in DispatchQueue.main.asyncAfter(deadline:.now()+0.2) { onAttribution?() } }
         .onChange(of:editor.showsFind) { _, visible in if !visible { editor.clearFind() } }
         .task(id:EditorFindRefresh(query:editor.findQuery,sensitive:editor.findCaseSensitive,text:text,source:showsSource,visible:editor.showsFind)) {
             guard editor.showsFind else { return }
             do { try await Task.sleep(for:.milliseconds(200)) } catch { return }
             editor.refreshFind()
         }
+        .sheet(item:$editor.pasteProposal) { proposal in
+            EditorPasteView(proposal:proposal,handle:editor,store:store,didAdopt:onAttribution)
+        }
         .sheet(item:$editor.mutation) { mutation in EditorMutationPreview(mutation:mutation,handle:editor) }
-        .sheet(item:$toolsMode) { mode in
+        .sheet(item:$toolsMode,onDismiss:{ editor.selectedResourceValue = "" }) { mode in
             if let source = editor.toolSnapshot {
                 if mode == .cleanup { EditorCleanupView(original:source,sourceMode:editor.toolSourceMode,handle:editor,store:store,storedBaseline:editor.toolBaseline) }
-                else { EditorResourcesView(original:source,fieldName:fieldName.isEmpty ? placeholder : fieldName,store:store) { range in
+                else { EditorResourcesView(original:source,fieldName:fieldName.isEmpty ? placeholder : fieldName,store:store,handle:editor,baseline:editor.toolBaseline,initialOccurrence:editor.selectedResourceOccurrence,initialMedia:editor.selectedResourceValue) { range in
                     guard editor.toolSnapshot == source, text == editor.toolBaseline else { return }
                     editor.pendingSelection = range; showsSource = true
                     editor.revealSourceSelection(range,in:source)
@@ -154,6 +162,15 @@ struct RichEditorFrame: ViewModifier {
 extension View { func richEditorFrame() -> some View { modifier(RichEditorFrame()) } }
 
 @MainActor @Observable final class RichEditorHandle {
+    var selectedResourceOccurrence = 0
+    var selectedResourceValue = ""
+    var mediaPulse = 0
+    var attributionPulse = 0
+    var pasteProposal: EditorPasteProposal?
+    var showsOutline = false
+    var outlineEntries: [EditorOutlineEntry] = []
+    var outlineBaseline = ""
+    var outlinePosition: NSRange?
     var showsFind = false
     var findQuery = ""
     var findReplacement = ""
@@ -263,7 +280,12 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
         }
     }
     private func configure(_ view: HTMLSourceTextView) { view.submit = onSubmit; view.cancel = onCancel; view.tabOut = onTab
-        view.openFind = { [weak handle] in handle?.showsFind = true } }
+        view.openFind = { [weak handle] in handle?.showsFind = true }
+        view.didPaste = { [weak handle] in handle?.attributionPulse += 1 }
+        view.formattedPaste = { [weak handle,weak view] html,plain in
+            guard let view else { return }
+            handle?.receivePaste(html:html,plain:plain,original:view.string,selection:view.selectedRange(),source:true)
+        } }
     static func dismantleNSView(_ scroll: SourceScrollView, coordinator: Coordinator) {
         guard let view = scroll.documentView as? HTMLSourceTextView else { return }
         coordinator.parent.formatting?.detach(slot:coordinator.parent.slot,textView:view)
@@ -271,7 +293,7 @@ struct HTMLSourceEditorRep: NSViewRepresentable {
             coordinator.parent.handle.textView = nil
             if coordinator.parent.handle.webView == nil { coordinator.parent.handle.valueReader = nil }
         }
-        view.changed = nil; view.resized = nil; view.focused = nil
+        view.changed = nil; view.resized = nil; view.focused = nil; view.formattedPaste = nil; view.didPaste = nil
     }
     @MainActor final class Coordinator {
         var parent: HTMLSourceEditorRep
@@ -337,11 +359,17 @@ final class HTMLSourceTextView: NSTextView {
     var cancel: (()->Void)?
     var tabOut: ((Bool)->Void)?
     var openFind: (()->Void)?
+    var didPaste: (()->Void)?
+    var formattedPaste: ((String,String)->Void)?
     override func didChangeText() { super.didChangeText(); changed?(string) }
     override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); resized?() }
     override func becomeFirstResponder() -> Bool { let ok = super.becomeFirstResponder(); if ok { focused?() }; return ok }
     override func paste(_ sender: Any?) {
-        if let value = NSPasteboard.general.string(forType:.string) ?? NSPasteboard.general.string(forType:.html) { insertText(value,replacementRange:selectedRange()) }
+        guard isEditable else { return }
+        if let formattedPaste,let html = NSPasteboard.general.string(forType:.html),!html.isEmpty {
+            formattedPaste(html,NSPasteboard.general.string(forType:.string) ?? Markdown.plainText(fromHTML:html)); return
+        }
+        if let value = NSPasteboard.general.string(forType:.string) ?? NSPasteboard.general.string(forType:.html) { insertText(value,replacementRange:selectedRange()); didPaste?() }
     }
     override func keyDown(with event: NSEvent) {
         // Candidate selection/cancellation belongs to the input method until composition ends.

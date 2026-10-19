@@ -1,5 +1,6 @@
 import Foundation
 import WebKit
+import UniformTypeIdentifiers
 import KongReviewCore
 
 /// 阅读器与记忆卡里的图片都走这里：
@@ -102,7 +103,16 @@ final class LocalSchemeHandler: NSObject, WKURLSchemeHandler {
         case "webp": return "image/webp"
         case "svg": return "image/svg+xml"
         case "mp3": return "audio/mpeg"
-        default: return "application/octet-stream"
+        case "m4a": return "audio/mp4"
+        case "aac": return "audio/aac"
+        case "wav": return "audio/wav"
+        case "aif","aiff": return "audio/aiff"
+        case "ogg","oga": return "audio/ogg"
+        case "flac": return "audio/flac"
+        case "mp4","m4v": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "webm": return "video/webm"
+        default: return UTType(filenameExtension:(name as NSString).pathExtension.lowercased())?.preferredMIMEType ?? "application/octet-stream"
         }
     }
 }

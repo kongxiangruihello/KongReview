@@ -2,6 +2,7 @@ import SwiftUI
 import KongReviewCore
 import WebKit
 import GRDB
+import UniformTypeIdentifiers
 
 struct EditorCleanupView: View {
     @Environment(\.dismiss) private var dismiss
@@ -42,7 +43,12 @@ struct EditorResourcesView: View {
     let original: String
     let fieldName: String
     let store: LibraryStore?
+    var handle: RichEditorHandle? = nil
+    var baseline = ""
+    var initialOccurrence = 0
+    var initialMedia = ""
     let locate: (NSRange)->Void
+    @State private var selectedMedia: EditorResourceReference?
     @State private var references: [EditorResourceReference] = []
     @State private var error: String?
     @State private var loading = true
@@ -60,7 +66,10 @@ struct EditorResourcesView: View {
                             Label(item.kind + " · " + item.message,systemImage:item.problem ? "exclamationmark.triangle" : "checkmark.circle")
                                 .foregroundStyle(item.problem ? Color.red : Color.secondary)
                             Text(item.value).font(.system(.caption,design:.monospaced)).textSelection(.enabled).lineLimit(4)
-                            Button("定位到源码地址") { locate(item.range); dismiss() }.controlSize(.small)
+                            HStack {
+                                Button("定位到源码地址") { locate(item.range); dismiss() }
+                                if item.kind != "链接",handle != nil { Button("预览／替换媒体…") { selectedMedia = item } }
+                            }.controlSize(.small)
                         }.padding(8).frame(maxWidth:.infinity,alignment:.leading).background(.quaternary,in:RoundedRectangle(cornerRadius:6))
                     }
                     if references.isEmpty && !loading { Text("未找到可识别的链接或媒体引用。HTML 写法不完整时，可先使用“检查 HTML”。").foregroundStyle(.secondary) }
@@ -69,11 +78,17 @@ struct EditorResourcesView: View {
             if let error { Text(error).foregroundStyle(.red) }
             HStack { Spacer(); Button("关闭") { dismiss() } }
         }.padding(20).frame(minWidth:620,minHeight:450)
+        .sheet(item:$selectedMedia) { reference in
+            if let handle,let store {
+                EditorMediaReplacementView(reference:reference,original:original,baseline:baseline,handle:handle,store:store) { dismiss() }
+            }
+        }
         .task {
             do {
                 guard let store else { throw CocoaError(.fileReadUnknown) }
                 let names = try await store.db.editorMediaNames()
                 references = EditorResourceCheck.references(original) { names.contains($0) }
+                if !initialMedia.isEmpty { let matches = references.filter { $0.kind != "链接" && $0.value == initialMedia }; if matches.indices.contains(initialOccurrence) { selectedMedia = matches[initialOccurrence] } }
             } catch { self.error = "部分媒体无法检查：" + error.localizedDescription }
             loading = false
         }
@@ -130,5 +145,60 @@ struct EditorHTMLPreview: NSViewRepresentable {
 extension AppDatabase {
     func editorMediaNames() async throws -> Set<String> {
         try await writer.read { db in Set(try String.fetchAll(db,sql:"SELECT name FROM card_media WHERE length(data)>0")) }
+    }
+}
+
+
+struct EditorMediaReplacementView: View {
+    @Environment(\.dismiss) private var dismiss
+    let reference: EditorResourceReference
+    let original: String
+    let baseline: String
+    let handle: RichEditorHandle
+    let store: LibraryStore
+    let adopted: () -> Void
+    @State private var choosing = false
+    @State private var file: EditorMediaFile?
+    @State private var error: String?
+    @State private var busy = false
+    var body: some View {
+        VStack(alignment:.leading,spacing:12) {
+            Text("预览与替换媒体").font(.title2.bold())
+            Text(reference.value).font(.caption).textSelection(.enabled)
+            Text(reference.message).foregroundStyle(reference.problem ? Color.red : Color.secondary)
+            Text("当前媒体").font(.headline)
+            EditorHTMLPreview(html:currentHTML,store:store).frame(height:130)
+            Button("选择替换文件…") { choosing = true }
+            if let file {
+                Text("替换后（只改这一处引用）").font(.headline)
+                EditorHTMLPreview(html:file.previewHTML,store:store).frame(height:140)
+                Text("媒体将保存进资料库，随完整备份保留。正文其他部分和其他卡片中的同名媒体不变；采用后可撤销。").font(.caption).foregroundStyle(.secondary)
+            }
+            if let error { Text(error).foregroundStyle(.red) }
+            HStack { Spacer(); Button("取消") { dismiss() }; Button("采用替换") {
+                guard let file else { return }; busy = true
+                handle.replaceMedia(reference,in:original,baseline:baseline,file:file,db:store.db) { success in
+                    busy = false
+                    if success { dismiss(); DispatchQueue.main.asyncAfter(deadline:.now()+0.2) { adopted() } }
+                    else { error = handle.findError ?? "正文已变化，请重新检查后替换。" }
+                }
+            }.disabled(file == nil || busy).buttonStyle(.borderedProminent) }
+        }.padding(20).frame(minWidth:570,minHeight:390).disabled(busy)
+        .fileImporter(isPresented:$choosing,allowedContentTypes:reference.kind == "图片" ? [.image] : [.audio,.movie]) { result in
+            guard case .success(let url) = result else { return }
+            busy = true
+            Task { @MainActor in
+                do { let kind = reference.kind; file = try await Task.detached(priority:.userInitiated) { try EditorMediaFile.read(url,for:kind) }.value; error = nil }
+                catch { self.error = error.localizedDescription }
+                busy = false
+            }
+        }
+    }
+    private var currentHTML: String {
+        let source: String
+        if reference.value.contains(":") { source = reference.value }
+        else { source = "kr-media://media/" + (reference.value.addingPercentEncoding(withAllowedCharacters:.urlPathAllowed) ?? reference.value) }
+        let tag = reference.kind == "图片" ? "img" : "audio"
+        return "<"+tag+" controls src=\""+HTMLSourceCodec.attribute(source)+"\">"+(tag == "img" ? "" : "</audio>")
     }
 }

@@ -5,6 +5,10 @@ import KongReviewCore
 struct HighlightEditorView: View {
     @Environment(LibraryStore.self) private var store
 
+    @State private var recognitionNotice: String?
+    @State private var attribution: SourceAttribution?
+    @State private var attributionDraftID: UUID?
+
     /// 直接读写 store.editorDraft（不用 @State，见 ViewState.swift）
     private var draftBinding: Binding<HighlightDraft> {
         Binding(
@@ -24,7 +28,7 @@ struct HighlightEditorView: View {
                 Section {
                     RichEditor(text: draftBinding.highlight.text, font: .highlight, placeholder: "摘录原文",
                                minHeight: 150, focus: draft.isNew, slot: "hl-text",
-                               onSubmit: submit, onCancel: cancel)
+                               onSubmit: submit, onCancel: cancel, onAttribution: recognizeAttribution)
                         .frame(height: 280)
                         .richEditorFrame()
                 } header: {
@@ -35,6 +39,9 @@ struct HighlightEditorView: View {
                 }
 
                 Section("出处") {
+                    Button("识别正文末尾的出处…") { recognizeAttribution(); if attribution == nil { recognitionNotice = "未识别到末尾出处。支持：正文——作者《书名》第12页（或 P.12）。" } }
+                        .help("识别 正文——作者《书名》第12页，先预览再填入")
+                    if let recognitionNotice { Text(recognitionNotice).font(.caption).foregroundStyle(.secondary) }
                     if draft.showNewSource || !draft.newSourceTitle.isEmpty {
                         TextField("标题", text: draftBinding.newSourceTitle)
                         TextField("作者", text: draftBinding.newSourceAuthor)
@@ -133,9 +140,26 @@ struct HighlightEditorView: View {
             }
             .padding()
         }
+        .sheet(item:$attribution) { value in
+            SourceAttributionView(candidate:value) { title,author,location,remove in
+                guard var current = store.editorDraft,current.id == attributionDraftID,current.highlight.text == value.original else { return "正文已变化，请重新识别。" }
+                if let source = store.sources.first(where: { $0.title == title && $0.author == author }) {
+                    current.highlight.sourceId = source.id; current.newSourceTitle = ""; current.newSourceAuthor = ""; current.showNewSource = false
+                } else {
+                    current.highlight.sourceId = nil; current.newSourceTitle = title; current.newSourceAuthor = author; current.newSourceURL = ""; current.newSourceKind = .book; current.showNewSource = true
+                }
+                current.highlight.location = location.nilIfBlank
+                if remove { current.highlight.text = value.body }
+                store.editorDraft = current; return nil
+            }
+        }
         .frame(minWidth: 560, idealWidth: 620, minHeight: 620)
     }
 
+    private func recognizeAttribution() {
+        guard let current = store.editorDraft,let value = SourceAttributionRecognition.recognize(current.highlight.text) else { return }
+        recognitionNotice = nil; attributionDraftID = current.id; attribution = value
+    }
     private func editionLabel(_ s: Source) -> String {
         let info = [s.author, s.publisher ?? "", s.year ?? ""].filter { !$0.isEmpty }.joined(separator: "，")
         return "《\(s.title)》" + (info.isEmpty ? "" : "（\(info)）")

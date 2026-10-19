@@ -16,6 +16,49 @@ final class EditorWebViewTests: XCTestCase {
         _ = NSApplication.shared
     }
 
+    func testPasteChoicePreservesFormattingInEmptyFieldAndOutlineKeepsContent() async throws {
+        try requireDesktopSession()
+        let ready = expectation(description:"录入编辑器就绪")
+        let messages = EditorMessageRecorder(ready:ready)
+        let pasted = expectation(description:"粘贴请求")
+        messages.pasteExpectation = pasted
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(messages,name:"krEditor")
+        config.userContentController.addUserScript(WKUserScript(source:EditorIntakeScript.source,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
+        let view = WKWebView(frame:NSRect(x:0,y:0,width:560,height:240),configuration:config)
+        defer { view.stopLoading(); config.userContentController.removeScriptMessageHandler(forName:"krEditor") }
+        view.loadHTMLString(EditorPage.page(text:"",mode:.card),baseURL:nil)
+        await fulfillment(of:[ready],timeout:10)
+        guard messages.receivedReady else { return }
+        _ = try await view.evaluateJavaScript("""
+            krFocus();var dt=new DataTransfer();
+            dt.setData('text/html','<p style="font-size:28px;color:red" onclick="bad()">格式保留<strong>粗体</strong></p><script>bad()</script>');
+            dt.setData('text/plain','格式保留粗体');
+            document.getElementById('ed').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));
+        """)
+        await fulfillment(of:[pasted],timeout:3)
+        let proposal = try XCTUnwrap(messages.pastes.first)
+        let html = try XCTUnwrap(proposal["html"] as? String),original = try XCTUnwrap(proposal["original"] as? String)
+        XCTAssertFalse(html.contains("onclick"));XCTAssertFalse(html.contains("<script"))
+        let adopted = try await view.evaluateJavaScript("krEditorPasteApply(\(EditorPage.jsonString(html)),\(EditorPage.jsonString(original)))") as? Bool
+        XCTAssertEqual(adopted,true)
+        let storedValue = try await view.evaluateJavaScript("krGetValue()") as? String
+        let stored = try XCTUnwrap(storedValue)
+        XCTAssertTrue(stored.contains("font-size"));XCTAssertTrue(stored.contains("<strong>粗体</strong>"))
+        _ = try await view.evaluateJavaScript("document.execCommand('undo');krFlush()")
+        let undone = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertEqual(undone,"")
+        _ = try await view.evaluateJavaScript("krSetContent('<h1>大标题</h1><p>正文</p><h2>小标题</h2>',true)")
+        let before = try await view.evaluateJavaScript("krGetValue()") as? String
+        let outline = try await view.evaluateJavaScript("krEditorOutline()") as? [String:Any]
+        XCTAssertEqual((outline?["headings"] as? [[String:Any]])?.count,2)
+        let snapshot = try XCTUnwrap(outline?["original"] as? String)
+        let location = try await view.evaluateJavaScript("krEditorOutlineGo(1,\(EditorPage.jsonString(snapshot)))") as? [String:Any]
+        XCTAssertNotNil(location?["y"])
+        let after = try await view.evaluateJavaScript("krGetValue()") as? String
+        XCTAssertEqual(after,before,"目录定位不能修改正文")
+    }
+
     func testFieldSearchReplacementPreservesHTMLAndUndo() async throws {
         try requireDesktopSession()
         let ready = expectation(description:"查找编辑器就绪")
@@ -188,9 +231,12 @@ private final class EditorMessageRecorder: NSObject, WKScriptMessageHandler {
     private let ready: XCTestExpectation
     private(set) var receivedReady = false
     private(set) var changes: [String] = []
+    var pasteExpectation: XCTestExpectation?
+    private(set) var pastes: [[String:Any]] = []
     init(ready: XCTestExpectation) { self.ready = ready }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }
+        if body["type"] as? String == "paste-choice" { pastes.append(body); pasteExpectation?.fulfill() }
         if body["type"] as? String == "change", let value = body["value"] as? String { changes.append(value) }
         guard body["type"] as? String == "ready", !receivedReady else { return }
         receivedReady = true

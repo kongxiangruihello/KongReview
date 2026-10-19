@@ -811,36 +811,46 @@ extension Card {
 struct CardEditorView: View {
     @Environment(LibraryStore.self) private var store
     @State private var comparison: Card?
+    @State private var duplicateComparison: Card?
+    @State private var duplicateAppendReview = false
     @State private var showsHistory = false
     @State private var checkingDuplicate = false
+    @State private var learningPreview: CardEditorPreviewSnapshot?
 
     private func binding<T>(_ kp: WritableKeyPath<CardDraft, T>, _ fallback: T) -> Binding<T> {
-        Binding(get: { store.cardEditor?[keyPath: kp] ?? fallback },
-                set: { store.cardEditor?[keyPath: kp] = $0 })
+        CardEditorSessionBindings.value(store,kp,fallback:fallback)
     }
-
-    private func fieldBinding(_ i: Int) -> Binding<String> {
-        Binding(get: {
-            guard let f = store.cardEditor?.card.fields, i < f.count else { return "" }
-            return f[i]
-        }, set: { v in
-            guard var f = store.cardEditor?.card.fields, i < f.count else { return }
-            f[i] = v
-            store.cardEditor?.card.fields = f
-        })
-    }
+    private func fieldBinding(_ i: Int) -> Binding<String> { CardEditorSessionBindings.field(store,index:i) }
 
     var body: some View {
         let draft = store.cardEditor
         let decks = (try? store.db.deckNames()) ?? []
         return VStack(alignment: .leading, spacing: 10) {
-            Text(draft?.isNew == true ? (draft?.card.highlightId != nil ? "预览并编辑新记忆卡" : "新建记忆卡") : "编辑记忆卡").font(.title2.bold())
+            HStack {
+                Text(draft?.isNew == true ? (draft?.card.highlightId != nil ? "预览并编辑新记忆卡" : "新建记忆卡") : "编辑记忆卡").font(.title2.bold())
+                Spacer()
+                Button { afterFlushing {
+                    if let current = store.cardEditor { learningPreview = CardEditorPreviewSnapshot(draft:current,templates:store.noteTemplates) }
+                } } label: { Label("预览卡片",systemImage:"eye") }
+                    .handCursor().help("按学习时的排版查看当前输入，并翻面检查答案")
+                    .accessibilityIdentifier("card-editor-preview")
+            }
+            if store.cardWorkflow.addedCount > 0 {
+                Text("本次已添加 \(store.cardWorkflow.addedCount) 张").font(.callout).foregroundStyle(.green)
+                    .accessibilityIdentifier("card-editor-added-count")
+            }
             if draft?.isNew == true, let id = draft?.card.highlightId {
                 Text("确认问题、答案、牌组和标签后保存。已有相关卡片可展开核对，关闭时可保留草稿。").font(.caption).foregroundStyle(.secondary)
                 RelatedCardsInline(highlightID: id)
             }
             if let notice = store.draftRecoveryNotice {
                 Label(notice, systemImage: "info.circle").font(.callout).foregroundStyle(.orange)
+            }
+            if store.canReturnToIncomingCardDraft {
+                Button("返回本次草稿") { afterFlushing { store.returnToIncomingCardDraft() } }
+                    .buttonStyle(.link).handCursor()
+                    .help("保留原卡未保存的修改，回到刚才输入的卡片")
+                    .accessibilityIdentifier("card-editor-return-incoming")
             }
             if let error = store.draftSaveError { Text(error).font(.caption).foregroundStyle(.red) }
             else if store.draftPersistence != nil { Text("草稿自动保存在本机").font(.caption).foregroundStyle(.secondary) }
@@ -858,7 +868,23 @@ struct CardEditorView: View {
                 TextField("用逗号或空格分隔", text: binding(\.tagsText, ""))
                     .textFieldStyle(.roundedBorder)
             }
+            if draft?.isNew == true {
+                HStack(spacing:14) {
+                    Text("连续添加时沿用").font(.caption).foregroundStyle(.secondary)
+                    Toggle("牌组",isOn:Bindable(store.cardWorkflow).keepDeck)
+                    Toggle("标签",isOn:Bindable(store.cardWorkflow).keepTags)
+                    Toggle("栏目结构",isOn:Bindable(store.cardWorkflow).keepStructure)
+                    Spacer(minLength:0)
+                }.toggleStyle(.checkbox).controlSize(.small)
+            }
             CardFormattingToolbar(state: store.cardFormatting)
+            if let duplicate = draft?.duplicate {
+                CardInputDuplicateNotice(card:duplicate,heading:"正面",presentPreview:{ target,append in
+                    duplicateAppendReview = append
+                    duplicateComparison = target
+                }) { store.commitCardEditor(allowDeleted:true) }
+                    .id(duplicate.id)
+            }
             // 1.2：所见即所得编辑（去掉右侧预览）；背面可加多个自定义栏目
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
@@ -875,7 +901,7 @@ struct CardEditorView: View {
                                 .richEditorFrame()
                         }
                     } else {
-                        editorFieldHeading("正面",isFront:true)
+                        if draft?.duplicate == nil { editorFieldHeading("正面",isFront:true) }
                         RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: "问题、字词或章句",
                                    toolbar: false, autoHeight: true, focus: draft?.isNew == true, slot: "card-front",
                                    onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "正面")
@@ -895,10 +921,6 @@ struct CardEditorView: View {
                     .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let duplicate = draft?.duplicate {
-                CardInputDuplicateNotice(card:duplicate) { store.commitCardEditor(allowDeleted:true) }
-                    .id(duplicate.id)
-            }
             Text("默认编辑文字；点击各字段右上角 <> 切换 HTML 源码。⌘B、⌘I、⌘K 设置格式；⌘↩ 保存。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -909,8 +931,14 @@ struct CardEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     if c.highlightId != nil {
                         Button("原摘录…") {
-                            store.cardEditor = nil
-                            store.openHighlight(of: c)
+                            afterFlushing {
+                                guard store.draftPersistence != nil else {
+                                    store.cardEditor?.error = "草稿保存暂不可用，请先保存当前修改再打开原摘录。"
+                                    return
+                                }
+                                store.keepAndCloseEditor(.card)
+                                if store.cardEditor == nil { store.openHighlight(of:c) }
+                            }
                         }
                         .controlSize(.small)
                     }
@@ -918,35 +946,71 @@ struct CardEditorView: View {
                 Spacer()
                 if let id = draft?.card.id {
                     Button("修改对照") {
-                        do { comparison = try store.db.card(id:id) } catch { store.cardEditor?.error = error.localizedDescription }
+                        afterFlushing {
+                            do { comparison = try store.db.card(id:id) } catch { store.cardEditor?.error = error.localizedDescription }
+                        }
                     }
                     Button("修改历史") { showsHistory = true }
                 }
-                Button("取消", role: .cancel) { store.requestCloseCardEditor() }
+                Button("取消", role: .cancel) { cancel() }
                     .keyboardShortcut(.cancelAction)
-                Button("保存") { store.commitCardEditor() }
+                if draft?.isNew == true {
+                    Button("保存并新增") { afterFlushing { store.commitCardAndContinue() } }
+                        .handCursor().help("保存成功后继续新建，按上方选项沿用牌组、标签和栏目结构")
+                        .accessibilityIdentifier("card-editor-save-and-new")
+                        .disabled(!hasFrontContent)
+                }
+                Button(store.canReturnToIncomingCardDraft ? "保存并返回草稿" : "保存") { save() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
                     .handCursor()
-                    .disabled((draft?.card.fields.first ?? draft?.card.front ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!hasFrontContent)
             }
         }
         .padding(20)
         .frame(minWidth: 680, idealWidth: 720, minHeight: 600, idealHeight: 720)
+        .disabled(store.cardWorkflow.actionBusy || store.fullBackupBusy)
+        .id(store.cardEditor?.id)
         .task(id:store.cardEditor?.card) { await checkDuplicate() }
         .sheet(item:$comparison) { original in
             if let current = store.cardEditor?.card { CardComparisonView(incoming:current,existing:original) }
         }
+        .sheet(item:$duplicateComparison) { original in
+            if let current = store.cardEditor {
+                CardComparisonView(incoming:current.card,existing:original,draftID:current.id,appendReview:duplicateAppendReview)
+            }
+        }
         .sheet(isPresented:$showsHistory) { if let id = store.cardEditor?.card.id { CardHistoryView(cardID:id) } }
+        .sheet(item:$learningPreview) { CardEditorPreviewView(snapshot:$0) }
+    }
+    private var hasFrontContent: Bool {
+        guard let card = store.cardEditor?.card else { return false }
+        return CardContinuousEntry.hasFrontContent(card,template:card.noteType.flatMap { store.noteTemplates[$0] })
+    }
+    private func afterFlushing(_ action: @escaping () -> Void) {
+        guard let id = store.cardEditor?.id,!store.fullBackupBusy,!store.cardWorkflow.actionBusy else { return }
+        let generation = store.cardWorkflow.generation
+        store.cardWorkflow.actionBusy = true
+        store.cardFormatting.flushEditors { success in
+            guard store.cardWorkflow.generation == generation else { return }
+            store.cardWorkflow.actionBusy = false
+            guard store.cardEditor?.id == id,store.cardWorkflow.generation == generation,!store.fullBackupBusy else { return }
+            guard success else { store.cardEditor?.error = "编辑器尚未完成同步，请稍后再试。当前输入仍保留。"; return }
+            action()
+        }
+    }
+    private func save() {
+        afterFlushing {
+            let returnsToDraft = store.canReturnToIncomingCardDraft
+            if store.commitCardEditor() != nil, store.cardEditor == nil, returnsToDraft {
+                store.returnToIncomingCardDraft()
+            }
+        }
     }
     private func editorFieldHeading(_ title: String,isFront: Bool) -> some View {
         HStack(alignment:.firstTextBaseline,spacing:12) {
             Text(title).font(.headline)
-            if isFront, let duplicate = store.cardEditor?.duplicate {
-                Label(duplicate.deletedAt == nil ? "正面重复 · \(duplicate.deck)" : "最近删除中有相同正面 · \(duplicate.deck)",systemImage:"exclamationmark.circle.fill")
-                    .font(.callout).foregroundStyle(.red).fixedSize(horizontal:false,vertical:true)
-                    .accessibilityIdentifier("card-front-duplicate-warning")
-            } else if isFront && checkingDuplicate { Text("正在检查…").font(.caption).foregroundStyle(.secondary) }
+            if isFront && checkingDuplicate && store.cardEditor?.duplicate == nil { Text("正在检查…").font(.caption).foregroundStyle(.secondary) }
             Spacer(minLength:0)
         }
     }
@@ -1026,13 +1090,7 @@ struct CardEditorView: View {
     }
 
     private func sectionBinding<T>(_ id: String, _ kp: WritableKeyPath<CardSection, T>, _ fallback: T) -> Binding<T> {
-        Binding(get: {
-            store.cardEditor?.card.sections?.first(where: { $0.id == id })?[keyPath: kp] ?? fallback
-        }, set: { v in
-            guard var secs = store.cardEditor?.card.sections, let i = secs.firstIndex(where: { $0.id == id }) else { return }
-            secs[i][keyPath: kp] = v
-            store.cardEditor?.card.sections = secs
-        })
+        CardEditorSessionBindings.section(store,id:id,keyPath:kp,fallback:fallback)
     }
 
     private func addSection(_ name: String) {
@@ -1057,13 +1115,10 @@ struct CardEditorView: View {
 
     /// 编辑器里按 ⌘↩
     private func submit() {
-        let c = store.cardEditor?.card
-        let first = (c?.fields.first ?? c?.front ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !first.isEmpty else { NSSound.beep(); return }
-        store.commitCardEditor()
+        save()
     }
 
-    private func cancel() { store.requestCloseCardEditor() }
+    private func cancel() { afterFlushing { store.requestCloseCardEditor() } }
 }
 
 // MARK: - Anki 导入预览

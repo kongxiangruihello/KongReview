@@ -123,6 +123,7 @@ extension LibraryStore {
                 draftRecoveryNotice = notices.isEmpty ? nil : notices.joined(separator: "\n")
             case .card:
                 guard let saved = savedCardDrafts.first(where: { $0.id == selected.id }) else { return }
+                cardWorkflow.startSession()
                 let current = try saved.card.id.flatMap { try db.card(id: $0) }
                 var recovered = saved.restored(current: current)
                 var notices = recovered.notice.map { [$0] } ?? []
