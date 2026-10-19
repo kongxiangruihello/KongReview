@@ -46,6 +46,7 @@ import KongReviewCore
 
 struct EditorValidationView: View {
     @Environment(LibraryStore.self) private var store
+    @State private var showsStudyCheck = false
     var body: some View {
         VStack(alignment:.leading) {
             Text("KongReview · 独立编辑器验证（示例数据）").font(.headline)
@@ -72,6 +73,12 @@ struct EditorValidationView: View {
                 Button("录入预设") { store.showsCardEntryPresetManager = true }
                 Button("批量粘贴") { store.showsCardBulkEntry = true }
                 Button("录入历史") { store.cardEntryHistory.isPresented = true }
+                Button("自答学习示例") {
+                    if let card = try? store.db.cards(deck:"示例牌组").first {
+                        store.study.current = card;store.study.deck = card.deck;store.study.showingAnswer = false
+                        showsStudyCheck = true
+                    }
+                }
                 if store.cardWorkflow.addedCount > 0 { Button("本次清单") { store.cardWorkflow.showsBatch = true } }
             }
             if store.cardEditor != nil { CardEditorView().modifier(EditorDraftCloseConfirmation(kind:.card)) }
@@ -79,6 +86,15 @@ struct EditorValidationView: View {
         }
         .sheet(item:Bindable(store).editorDraft) { _ in HighlightEditorView().modifier(EditorDraftCloseConfirmation(kind:.highlight)) }
         .sheet(isPresented:Bindable(store).showsResourceAudit) { LibraryResourceAuditView() }
+        .sheet(isPresented:$showsStudyCheck) {
+            VStack(spacing:0) {
+                HStack { Text("独立示例学习");Spacer();Button("关闭学习示例") { showsStudyCheck = false } }.padding(10)
+                StudyView()
+            }.frame(minWidth:720,idealWidth:1000,minHeight:700)
+        }
+        .onChange(of:store.cardEditor?.id) { _,id in
+            if id == nil { DispatchQueue.main.async { store.resumeBulkAfterOriginalEditorDismissed() } }
+        }
         .modifier(EditorDraftRecoverySheets())
         .modifier(CardEntryPresetPresentation(insideEditor:false))
         .modifier(DeckEntryPresetPresentation(host:.main))

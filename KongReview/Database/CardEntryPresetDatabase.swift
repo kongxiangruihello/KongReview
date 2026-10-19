@@ -38,6 +38,33 @@ extension AppDatabase {
         }
     }
 
+    /// Always adds independent copies. A failed item rolls back the entire selection.
+    @discardableResult
+    func importCardEntryPresets(_ presets: [CardEntryPreset]) throws -> [CardEntryPreset] {
+        try writer.write { db in
+            guard !presets.isEmpty, presets.count <= CardEntryPresetTransfer.maximumPresetCount else {
+                throw CardEntryPresetTransferError.invalidCount
+            }
+            var library = try Self.cardEntryPresetLibrary(in: db)
+            let templates = Dictionary(uniqueKeysWithValues: try NoteTemplate.fetchAll(db).map { ($0.name, $0) })
+            var added: [CardEntryPreset] = []
+            for preset in presets {
+                let source = preset.cleaned
+                try CardEntryPresetTransfer.checkLimits(source)
+                try source.validate(templates: templates)
+                let value = source.copied()
+                guard !(library.presets + added).contains(where: { $0.name.caseInsensitiveCompare(value.name) == .orderedSame }) else {
+                    throw CardEntryPresetError.duplicateName
+                }
+                added.append(value)
+            }
+            library.presets.append(contentsOf: added)
+            library.presets.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            try Self.saveCardEntryPresetLibrary(library, in: db)
+            return added
+        }
+    }
+
     func setDeckEntryPreset(deck: String, presetID: UUID?) throws {
         try writer.write { db in
             var library = try Self.cardEntryPresetLibrary(in: db)

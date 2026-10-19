@@ -22,6 +22,28 @@ struct CardEntryPreset: Codable, Equatable, Identifiable, Sendable {
     var backRule: CardEntryInputRule?
     var fieldRules: [CardEntryInputRule]?
 
+    /// Copies input structure and guidance, never card data or deck bindings.
+    func copied(name: String? = nil) -> Self {
+        var value = self
+        value.id = UUID()
+        value.name = name ?? self.name
+        value.sections = sections.map { section in
+            var section = section
+            section.id = UUID()
+            return section
+        }
+        return value
+    }
+
+    /// The entire section moves, so its hint, required rule and folding stay attached.
+    @discardableResult
+    mutating func moveSection(id: UUID, offset: Int) -> Bool {
+        guard let source = sections.firstIndex(where: { $0.id == id }), offset == -1 || offset == 1,
+              sections.indices.contains(source + offset) else { return false }
+        sections.swapAt(source, source + offset)
+        return true
+    }
+
     static func capture(name: String, card: Card, tags: [String], templates: [String: NoteTemplate]) throws -> Self {
         var result = Self(name: name, deck: card.deck, tags: tags,
                           sections: (card.sections ?? []).map { Section(name: $0.name, folded: $0.folded) })

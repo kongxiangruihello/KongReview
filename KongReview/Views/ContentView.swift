@@ -115,7 +115,7 @@ struct ContentView: View {
         .sheet(item: $store.cardImport) { _ in
             CardImportPreviewView()
         }
-        .sheet(item: $store.cardEditor) { _ in
+        .sheet(item: $store.cardEditor,onDismiss:{ store.resumeBulkAfterOriginalEditorDismissed() }) { _ in
             CardEditorView().modifier(EditorDraftCloseConfirmation(kind: .card))
         }
         .sheet(item: $store.articleSourceDraft) { _ in

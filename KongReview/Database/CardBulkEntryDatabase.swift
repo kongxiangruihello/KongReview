@@ -19,8 +19,14 @@ extension AppDatabase {
     /// Recheck exactly the reviewed candidate data against the latest preset, template,
     /// media and active/trash cards in the same transaction as the inserts and entry log.
     /// A duplicate, invalid required field or write failure rolls back every card.
-    func saveCardBulkEntry(_ preview: CardBulkEntryPreview) throws -> [Card] {
+    func saveCardBulkEntry(_ preview: CardBulkEntryPreview, draft: CardBulkEntryDraft? = nil) throws -> [Card] {
         try writer.write { sql in
+            if let draft {
+                guard try !Self.cardBulkEntryWasClosed(draft.id,in:sql) else { throw CardBulkEntryError.alreadySaved }
+                guard try Self.cardBulkEntryDraft(in:sql) == draft,
+                      draft.configuration == preview.configuration,draft.candidates == preview.candidates,
+                      draft.selectedIDs == preview.selectedIDs else { throw CardBulkEntryError.draftChanged }
+            }
             guard !preview.selectedIDs.isEmpty else { throw CardBulkEntryError.emptySelection }
             let templates = Dictionary(uniqueKeysWithValues:try NoteTemplate.fetchAll(sql).map { ($0.name,$0) })
             let template = preview.configuration.preset?.noteType.flatMap { templates[$0] }
@@ -41,6 +47,7 @@ extension AppDatabase {
                 try Self.recordCardEntry(card,at:now,in:sql)
                 saved.append(card)
             }
+            if let draft { try Self.closeCardBulkEntryDraft(draft.id,in:sql) }
             return saved
         }
     }
@@ -62,11 +69,11 @@ extension AppDatabase {
         if let preset = configuration.preset { try preset.validate(templates:templates) }
         // Build the current front index once, using the same normalization/media identity
         // as the single-card input check. No entire-card bodies are copied into the preview.
-        var existing: [CardBulkFrontKey:(deck:String,deleted:Bool)] = [:]
+        var existing: [CardBulkFrontKey:(id:Int64?,deck:String,deleted:Bool)] = [:]
         let cards = try Card.fetchCursor(sql,sql:"SELECT * FROM card ORDER BY deletedAt IS NOT NULL,id")
         while let card = try cards.next() {
             if let key = try cardBulkFrontKey(card,templates:templates,in:sql),existing[key] == nil {
-                existing[key] = (card.deck,card.deletedAt != nil)
+                existing[key] = (card.id,card.deck,card.deletedAt != nil)
             }
         }
         var selectedFronts: [CardBulkFrontKey:Int] = [:]
@@ -78,6 +85,8 @@ extension AppDatabase {
                 item.card = card
                 if let key = try cardBulkFrontKey(card,templates:templates,in:sql) {
                     if let found = existing[key] {
+                        item.duplicateCardID = found.id
+                        item.duplicateIsDeleted = found.deleted
                         item.issues.append(found.deleted
                             ? "最近删除中已有相同正面的卡片（牌组：\(found.deck)）；请恢复原卡，或修改本条正面。"
                             : "已有相同正面的卡片（牌组：\(found.deck)）；请修改本条正面，或取消勾选。")
