@@ -130,7 +130,7 @@ extension LibraryStore {
     }
 
     private var hasBlockingFullBackupPanel: Bool {
-        showsResourceAudit || learningMaterialExport != nil || learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
+        showsCardBulkEntry || cardEntryHistory.isPresented || deckEntryPresetEditor != nil || showsCardEntryPresetManager || cardWorkflow.showsBatch || showsResourceAudit || learningMaterialExport != nil || learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
             || study.cardTagEdit != nil || study.renamingDeck != nil || duplicateCardReview != nil || duplicateReview != nil
             || newNotebookRequest != nil || addArticleDraft != nil || articleSourceDraft != nil || clozeDraft != nil
             || backupList != nil || tagEditor != nil || showTagManager || bibliographyRequest != nil
@@ -143,6 +143,12 @@ extension LibraryStore {
     }
 
     private func finishFullBackupRestore() {
+        cardAppendUndo.clear()
+        cardEntryOrganizationUndo.clear()
+        cardEntryHistory.clear()
+        showsCardBulkEntry = false
+        showsCardEntryPresetManager = false
+        deckEntryPresetEditor = nil
         cardWorkflow.startSession()
         cardWorkflow.actionBusy = false
         flushGrowthReflection = nil

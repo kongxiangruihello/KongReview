@@ -22,6 +22,7 @@ struct CardEditorPreviewView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let snapshot: CardEditorPreviewSnapshot
+    var savedCard = false
     @State private var showingAnswer = false
 
     var body: some View {
@@ -33,7 +34,7 @@ struct CardEditorPreviewView: View {
             }
             Text("牌组：" + snapshot.card.deck + (snapshot.card.noteType.map { " · 模板：" + $0 } ?? ""))
                 .font(.callout).foregroundStyle(.secondary)
-            Text("显示当前未保存内容；折叠栏目、图片和链接可直接查看。预览不计入学习记录。")
+            Text(savedCard ? "显示打开预览时已保存的内容；预览不计入学习记录。" : "显示当前未保存内容；折叠栏目、图片和链接可直接查看。预览不计入学习记录。")
                 .font(.caption).foregroundStyle(.secondary)
             CardWebView(front:snapshot.front,back:showingAnswer ? snapshot.back : nil,store:store)
                 .frame(maxWidth:.infinity,maxHeight:.infinity)

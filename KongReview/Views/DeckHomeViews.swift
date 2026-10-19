@@ -402,6 +402,9 @@ struct DeckTile: View {
                 opt.deck = deck.name
                 store.deckOptionsEditor = opt
             }
+            Button("设置录入模板…") {
+                store.deckEntryPresetEditor = .init(deck:deck.name)
+            }
             Divider()
             Button("导出到 Anki…") { store.apkgExport = ApkgExportRequest(allDecks: all.map(\.name), decks: [deck.name]) }
         }

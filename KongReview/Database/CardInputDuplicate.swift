@@ -94,6 +94,7 @@ extension AppDatabase {
                 if !allowDeleted, let found = try Self.matchingFront(card,deleted:true,in:db) { throw CardInputDuplicateError.deleted(found) }
                 let before = try card.id.flatMap { try Card.fetchOne(db,key:$0) }
                 card.updatedAt = Date(); try card.save(db)
+                if before == nil { try Self.recordCardEntry(card,in:db) }
                 if let before {
                     try Self.recordCareAdjustment(before:before,after:card,in:db)
                     try Self.recordTopicCardEdit(before:before,after:card,in:db)

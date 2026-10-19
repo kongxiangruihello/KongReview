@@ -17,7 +17,9 @@ extension LibraryStore {
                                                 keepTags: cardWorkflow.keepTags,
                                                 keepStructure: cardWorkflow.keepStructure)
         cardWorkflow.duplicateReturn = nil
-        cardEditor = CardDraft(card: next, tagsText: TagParser.format(next.tags))
+        var nextDraft = CardDraft(card:next,tagsText:TagParser.format(next.tags))
+        if cardWorkflow.keepStructure { nextDraft.entryGuidance = draft.entryGuidance?.rebased(from:saved,to:next) }
+        cardEditor = nextDraft
         return true
     }
 }

@@ -242,6 +242,7 @@ extension AppDatabase {
                 try options.insert(db)
             }
             try db.execute(sql: "DELETE FROM deck_options WHERE deck = ?", arguments: [old])
+            try Self.renameDeckEntryPresets(db,from:old,to:new)
         }
     }
 

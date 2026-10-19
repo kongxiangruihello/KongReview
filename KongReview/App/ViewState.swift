@@ -312,6 +312,8 @@ struct CardDraft: Identifiable {
     var card: Card
     var tagsText: String = ""
     var error: String?
+    var entryGuidance: CardEntryGuidance?
+    var entryValidationAttempted = false
     var isNew: Bool { card.id == nil }
 }
 
