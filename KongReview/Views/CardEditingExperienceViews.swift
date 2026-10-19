@@ -180,8 +180,7 @@ struct CardComparisonView: View {
         do {
             guard let id = draftID, store.cardEditor?.id == id, store.cardEditor?.card == incoming else { throw CardComparisonError.noDraft }
             let preview = try previewResult.get()
-            let saved = try store.db.appendCardAnswer(preview)
-            if store.study.current?.id == saved.id { store.study.current = saved }
+            _ = try store.appendCardAnswerWithUndo(preview)
             store.cardWorkflow.duplicateReturn = nil
             store.finishCardEditorDraft(id:id); store.cardEditor = nil; store.reload(); dismiss()
         } catch { self.error = error.localizedDescription }

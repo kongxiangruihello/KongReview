@@ -38,6 +38,9 @@ struct DeckOptionsView: View {
             Text("牌组选项").font(.title2.bold())
             Text(o?.deck ?? "").foregroundStyle(.secondary)
             Form {
+                Section("新建卡片的录入模板") {
+                    Button("设置此牌组的录入模板…") { store.deckEntryPresetEditor = .init(deck:o?.deck ?? "默认") }
+                }
                 Section("每日上限") {
                     limitRow("单独设置每天新卡数", \.newPerDay, global: CardSettings.newPerDay, range: 0...9999, step: 5)
                     limitRow("单独设置每天复习上限", \.reviewsPerDay, global: CardSettings.reviewsPerDay, range: 0...9999, step: 10)
@@ -82,6 +85,7 @@ struct DeckOptionsView: View {
         }
         .padding(20)
         .frame(width: 560, height: 520)
+        .modifier(DeckEntryPresetPresentation(host:.options))
     }
 }
 

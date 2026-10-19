@@ -13,7 +13,11 @@ struct ContentView: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 168, ideal: 196, max: 280)
         } detail: {
-            detail
+            VStack(spacing:0) {
+                CardAppendUndoBanner()
+                CardEntryOrganizationUndoBanner()
+                detail
+            }
         }
         .disabled(store.fullBackupBusy)
         .overlay {
@@ -119,6 +123,11 @@ struct ContentView: View {
         }
         .modifier(CardSheets())
         .modifier(EditorDraftRecoverySheets())
+        .modifier(CardEntryPresetPresentation(insideEditor:false))
+        .modifier(DeckEntryPresetPresentation(host:.main))
+        .modifier(CardEntryBatchPresentation(insideEditor:false))
+        .modifier(CardEntryHistoryPresentation(insideEditor:false))
+        .modifier(CardBulkEntryPresentation(insideEditor:false))
         .modifier(TagSheets())
         .modifier(WritingSheets())
         .modifier(NotebookSheets())

@@ -394,6 +394,14 @@ final class AppDatabase {
                 t.column("updatedAt", .datetime).notNull()
             }
         }
+        m.registerMigration("v15-card-entry-workflows") { db in
+            try db.create(table:"card_entry_record") { t in
+                t.column("cardId",.integer).primaryKey().references("card",onDelete:.cascade)
+                t.column("recordedAt",.datetime).notNull()
+            }
+            try db.create(index:"card_entry_record_date",on:"card_entry_record",columns:["recordedAt","cardId"])
+            try AppDatabase.installCardEntryOrganizationUndoTracking(in:db)
+        }
         return m
     }
 }

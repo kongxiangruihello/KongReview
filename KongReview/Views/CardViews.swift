@@ -164,6 +164,10 @@ struct CardsHomeView: View {
             ToolbarItemGroup {
                 Button { store.newCard(deck: nil) } label: { Label("新建卡片", systemImage: "plus.rectangle.on.rectangle") }
                     .help("新建记忆卡")
+                Menu {
+                    Button("批量粘贴问答…") { store.showsCardBulkEntry = true }
+                    Button("今日录入与录入历史…") { store.cardEntryHistory.isPresented = true }
+                } label: { Label("录入工具",systemImage:"tray.and.arrow.down") }.handCursor()
                 Button { ExportService.importAnki(store: store) } label: { Label("导入 Anki", systemImage: "square.and.arrow.down") }
                     .help("导入 Anki 牌组（.apkg / .colpkg，或“纯文本笔记”导出的 .txt）")
                 Button { store.apkgExport = ApkgExportRequest(allDecks: decks.map(\.name), decks: Set(decks.map(\.name))) } label: {
@@ -172,6 +176,8 @@ struct CardsHomeView: View {
                 .help("导出为 .apkg，在 AnkiMobile / AnkiDroid / Anki 桌面版里导入复习")
                 .disabled(decks.isEmpty)
                 Menu {
+                    Button("管理常用录入预设…") { store.showsCardEntryPresetManager = true }
+                    Divider()
                     let templates = store.noteTemplates.values.sorted { $0.name < $1.name }
                     if templates.isEmpty { Text("没有多字段的笔记类型（从 Anki 导入后出现）") }
                     ForEach(templates) { t in
@@ -183,6 +189,10 @@ struct CardsHomeView: View {
                 .help("多字段卡片：设置正面、背面各显示哪些字段，哪些折叠")
                 Button { store.findDuplicateCards() } label: { Label("查重", systemImage: "square.on.square") }
                     .help("比较已有的重复记忆卡，选择保留的卡片和学习进度")
+                if store.cardWorkflow.addedCount > 0 {
+                    Button { store.cardWorkflow.showsBatch = true } label: { Label("本次录入",systemImage:"list.bullet.rectangle") }
+                        .help("查看本次新建的卡片、重新编辑或批量调整牌组与标签").handCursor()
+                }
             }
         }
         .alert("重命名牌组", isPresented: Binding(
@@ -816,6 +826,9 @@ struct CardEditorView: View {
     @State private var showsHistory = false
     @State private var checkingDuplicate = false
     @State private var learningPreview: CardEditorPreviewSnapshot?
+    @State private var showsSavePreset = false
+    @State private var presetName = ""
+    @State private var presetSourceID: UUID?
 
     private func binding<T>(_ kp: WritableKeyPath<CardDraft, T>, _ fallback: T) -> Binding<T> {
         CardEditorSessionBindings.value(store,kp,fallback:fallback)
@@ -829,6 +842,7 @@ struct CardEditorView: View {
             HStack {
                 Text(draft?.isNew == true ? (draft?.card.highlightId != nil ? "预览并编辑新记忆卡" : "新建记忆卡") : "编辑记忆卡").font(.title2.bold())
                 Spacer()
+                entryPresetMenu
                 Button { afterFlushing {
                     if let current = store.cardEditor { learningPreview = CardEditorPreviewSnapshot(draft:current,templates:store.noteTemplates) }
                 } } label: { Label("预览卡片",systemImage:"eye") }
@@ -836,7 +850,8 @@ struct CardEditorView: View {
                     .accessibilityIdentifier("card-editor-preview")
             }
             if store.cardWorkflow.addedCount > 0 {
-                Text("本次已添加 \(store.cardWorkflow.addedCount) 张").font(.callout).foregroundStyle(.green)
+                Button("本次已添加 \(store.cardWorkflow.addedCount) 张 · 查看清单") { afterFlushing { store.cardWorkflow.showsBatch = true } }
+                    .buttonStyle(.link).font(.callout).handCursor()
                     .accessibilityIdentifier("card-editor-added-count")
             }
             if draft?.isNew == true, let id = draft?.card.highlightId {
@@ -858,9 +873,12 @@ struct CardEditorView: View {
                 Text("牌组")
                 TextField("牌组", text: binding(\.card.deck, ""))
                     .textFieldStyle(.roundedBorder)
+                    .onSubmit { afterFlushing {
+                        if let value = store.cardEditor?.card.deck { store.selectDeckForCardEntry(value) }
+                    } }
                 Menu("选择") {
                     ForEach(decks, id: \.self) { d in
-                        Button(d) { store.cardEditor?.card.deck = d }
+                        Button(d) { afterFlushing { store.selectDeckForCardEntry(d) } }
                     }
                 }
                 .fixedSize()
@@ -894,20 +912,23 @@ struct CardEditorView: View {
                         Text("笔记类型：\(type)（正反面怎么排由“记忆卡 → 卡片模板”决定）")
                             .font(.caption).foregroundStyle(.secondary)
                         ForEach(Array(c.fields.indices), id: \.self) { i in
-                            editorFieldHeading(i < names.count ? names[i] : "字段\(i + 1)",isFront:store.noteTemplates[type]?.front.first == i || (store.noteTemplates[type] == nil && i == 0))
-                            RichEditor(text: fieldBinding(i), mode: .card, toolbar: false, autoHeight: true,
+                            editorFieldHeading(i < names.count ? names[i] : "字段\(i + 1)",isFront:store.noteTemplates[type]?.front.first == i || (store.noteTemplates[type] == nil && i == 0), entryKey: "field:\(i)")
+                            entryFieldHelp("field:\(i)")
+                            RichEditor(text: fieldBinding(i), mode: .card, placeholder: entryPlaceholder("field:\(i)", fallback: ""), toolbar: false, autoHeight: true,
                                        slot: "card-field-\(i)", onSubmit: submit, onCancel: cancel,
                                        formatting: store.cardFormatting, fieldName: i < names.count ? names[i] : "字段\(i + 1)")
                                 .richEditorFrame()
                         }
                     } else {
-                        if draft?.duplicate == nil { editorFieldHeading("正面",isFront:true) }
-                        RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: "问题、字词或章句",
+                        editorFieldHeading("正面",isFront:true, entryKey: "front")
+                        entryFieldHelp("front")
+                        RichEditor(text: binding(\.card.front, ""), mode: .card, placeholder: entryPlaceholder("front", fallback: "问题、字词或章句"),
                                    toolbar: false, autoHeight: true, focus: draft?.isNew == true, slot: "card-front",
                                    onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "正面")
                             .richEditorFrame()
-                        Text("背面").font(.headline).padding(.top, 6)
-                        RichEditor(text: binding(\.card.back, ""), mode: .card, placeholder: "答案",
+                        editorFieldHeading("背面",isFront:false, entryKey: "back").padding(.top, 6)
+                        entryFieldHelp("back")
+                        RichEditor(text: binding(\.card.back, ""), mode: .card, placeholder: entryPlaceholder("back", fallback: "答案"),
                                    toolbar: false, autoHeight: true, slot: "card-back",
                                    onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting, fieldName: "背面")
                             .richEditorFrame()
@@ -982,6 +1003,41 @@ struct CardEditorView: View {
         }
         .sheet(isPresented:$showsHistory) { if let id = store.cardEditor?.card.id { CardHistoryView(cardID:id) } }
         .sheet(item:$learningPreview) { CardEditorPreviewView(snapshot:$0) }
+        .modifier(CardEntryPresetPresentation(insideEditor:true))
+        .modifier(DeckEntryPresetPresentation(host:.cardEditor))
+        .modifier(CardEntryBatchPresentation(insideEditor:true))
+        .modifier(CardEntryHistoryPresentation(insideEditor:true))
+        .modifier(CardBulkEntryPresentation(insideEditor:true))
+        .alert("保存录入预设",isPresented:$showsSavePreset) {
+            TextField("预设名称",text:$presetName)
+            Button("取消",role:.cancel) { }
+            Button("保存") {
+                guard store.cardEditor?.id == presetSourceID else { return }
+                do { _ = try store.saveCurrentCardEntryPreset(name:presetName) }
+                catch { store.cardEditor?.error = error.localizedDescription }
+            }
+        } message: { Text("仅保存牌组、标签及空白栏目／字段结构。") }
+    }
+    private var entryPresetMenu: some View {
+        let library = (try? store.db.cardEntryPresetLibrary()) ?? .init()
+        return Menu("录入预设") {
+            if let deck = store.cardEditor?.card.deck,let preset = library.preset(for:deck) {
+                Button("应用本牌组模板：" + preset.name) { afterFlushing { store.applyCurrentDeckEntryPreset() } }
+            }
+            ForEach(library.presets) { preset in
+                Button(preset.name) { afterFlushing { store.applyCardEntryPreset(preset) } }
+            }
+            Divider()
+            Button("批量粘贴问答…") { afterFlushing { store.showsCardBulkEntry = true } }
+            Button("今日录入与录入历史…") { afterFlushing { store.cardEntryHistory.isPresented = true } }
+            Button("设置当前牌组的录入模板…") { afterFlushing {
+                if let deck = store.cardEditor?.card.deck { store.deckEntryPresetEditor = .init(deck:deck) }
+            } }
+            Button("保存当前结构为预设…") { afterFlushing {
+                presetSourceID = store.cardEditor?.id;presetName = "";showsSavePreset = true
+            } }
+            Button("管理录入预设…") { afterFlushing { store.showsCardEntryPresetManager = true } }
+        }.fixedSize().handCursor().help("套用常用结构，或将当前牌组、标签和空白栏目保存为预设")
     }
     private var hasFrontContent: Bool {
         guard let card = store.cardEditor?.card else { return false }
@@ -1007,11 +1063,31 @@ struct CardEditorView: View {
             }
         }
     }
-    private func editorFieldHeading(_ title: String,isFront: Bool) -> some View {
+    private func editorFieldHeading(_ title: String,isFront: Bool, entryKey: String? = nil) -> some View {
         HStack(alignment:.firstTextBaseline,spacing:12) {
             Text(title).font(.headline)
+            if let entryKey { entryRequiredIndicator(entryKey) }
             if isFront && checkingDuplicate && store.cardEditor?.duplicate == nil { Text("正在检查…").font(.caption).foregroundStyle(.secondary) }
             Spacer(minLength:0)
+        }
+    }
+    private func entryPlaceholder(_ key: String, fallback: String) -> String {
+        store.cardEditor?.entryGuidance?.rule(for: key)?.hint.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? fallback
+    }
+    @ViewBuilder
+    private func entryRequiredIndicator(_ key: String) -> some View {
+        if store.cardEditor?.entryGuidance?.rule(for: key)?.required == true {
+            let missing = store.cardEditor?.entryValidationAttempted == true &&
+                store.cardEditor?.entryValidationIssues(templates: store.noteTemplates).contains(where: { $0.key == key }) == true
+            Text(missing ? "请填写（必填）" : "必填")
+                .font(.caption).foregroundStyle(missing ? Color.red : Color.secondary)
+        }
+    }
+    @ViewBuilder
+    private func entryFieldHelp(_ key: String) -> some View {
+        if let hint = store.cardEditor?.entryGuidance?.rule(for: key)?.hint.trimmingCharacters(in: .whitespacesAndNewlines), !hint.isEmpty {
+            Text(hint).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
         }
     }
     private func checkDuplicate() async {
@@ -1046,6 +1122,7 @@ struct CardEditorView: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.headline)
                         .frame(width: 150)
+                    entryRequiredIndicator("section:" + sec.id)
                     Menu("常用") {
                         ForEach(CardSettings.sectionNames, id: \.self) { n in
                             Button(n) { sectionBinding(sec.id, \.name, "").wrappedValue = n }
@@ -1061,9 +1138,12 @@ struct CardEditorView: View {
                     Button { moveSection(sec.id, by: 1) } label: { Image(systemName: "arrow.down") }
                         .buttonStyle(.borderless).disabled(i == secs.count - 1).help("下移")
                     Button { removeSection(sec.id) } label: { Image(systemName: "trash") }
-                        .buttonStyle(.borderless).help("删除这个栏目")
+                        .buttonStyle(.borderless)
+                        .disabled(store.cardEditor?.entryGuidance?.rule(for: "section:" + sec.id)?.required == true)
+                        .help(store.cardEditor?.entryGuidance?.rule(for: "section:" + sec.id)?.required == true ? "此栏目为模板必填；如需调整，请先复制修改录入模板，再新建卡片。" : "删除这个栏目")
                 }
-                RichEditor(text: sectionBinding(sec.id, \.text, ""), mode: .card, placeholder: "栏目内容",
+                entryFieldHelp("section:" + sec.id)
+                RichEditor(text: sectionBinding(sec.id, \.text, ""), mode: .card, placeholder: entryPlaceholder("section:" + sec.id, fallback: "栏目内容"),
                            toolbar: false, autoHeight: true, slot: "card-section-" + sec.id,
                            onSubmit: submit, onCancel: cancel, formatting: store.cardFormatting,
                            fieldName: sec.name.isEmpty ? "背面栏目" : sec.name)
@@ -1100,6 +1180,7 @@ struct CardEditorView: View {
     }
 
     private func removeSection(_ id: String) {
+        guard store.cardEditor?.entryGuidance?.rule(for: "section:" + id)?.required != true else { return }
         var secs = store.cardEditor?.card.sections ?? []
         secs.removeAll { $0.id == id }
         store.cardEditor?.card.sections = secs.isEmpty ? nil : secs

@@ -140,6 +140,12 @@ final class LibraryStore {
     let articleReading: ArticleReadingState
     let cardFormatting = CardFormattingState()
     let cardWorkflow = CardEditorWorkflowState()
+    let cardAppendUndo = CardAppendUndoState()
+    let cardEntryHistory = CardEntryHistoryState()
+    let cardEntryOrganizationUndo = CardEntryOrganizationUndoState()
+    var showsCardBulkEntry = false
+    var showsCardEntryPresetManager = false
+    var deckEntryPresetEditor: DeckEntryPresetRequest?
     let study: StudyState
     var lastCardRating: CardRatingUndoToken?
     var lastCardRatingScope: CardLearningScope?
@@ -850,8 +856,11 @@ final class LibraryStore {
 
     func newCard(deck: String?) {
         guard !fullBackupBusy else { return }
-        cardWorkflow.startSession()
-        cardEditor = CardDraft(card: Card(deck: deck ?? study.lastDeck ?? "默认", front: ""))
+        do {
+            let draft = try blankCardDraftUsingDeckPreset(deck:deck ?? study.lastDeck ?? "默认")
+            cardWorkflow.startSession()
+            cardEditor = draft
+        } catch { report(error) }
     }
 
     /// 保存卡片编辑面板；若正在学习的就是这张卡，同步刷新
@@ -859,6 +868,13 @@ final class LibraryStore {
     func commitCardEditor(allowDeleted: Bool = false) -> Card? {
         guard !fullBackupBusy else { return nil }
         guard var d = cardEditor else { return nil }
+        cardEditor?.entryValidationAttempted = true
+        do {
+            if let issue = d.entryValidationIssues(templates:try db.noteTemplates()).first {
+                cardEditor?.error = issue.message
+                return nil
+            }
+        } catch { report(error);return nil }
         if d.isNew, let hid = d.card.highlightId {
             do {
                 guard let original = try db.highlights(ids: [hid]).first, original.deletedAt == nil else {
@@ -895,7 +911,7 @@ final class LibraryStore {
             let saved = try db.saveInputCards([d.card],allowDeleted:allowDeleted)[0]
             study.lastDeck = saved.deck
             if study.current?.id == saved.id { study.current = saved }
-            if d.isNew { cardWorkflow.addedCount += 1 }
+            if d.isNew { cardWorkflow.recordAddedCard(saved.id) }
             if cardWorkflow.duplicateReturn?.originalEditorID == d.id {
                 cardWorkflow.duplicateReturn?.originalSaved = true
             }

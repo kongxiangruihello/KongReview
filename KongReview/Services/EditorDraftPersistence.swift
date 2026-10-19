@@ -249,6 +249,7 @@ struct SavedCardDraft: Codable, Identifiable {
     var card: Card
     var tagsText: String
     var original: Card?
+    var entryGuidance: CardEntryGuidance?
 
     init(draft: CardDraft, original: Card?) {
         id = draft.id
@@ -256,6 +257,7 @@ struct SavedCardDraft: Codable, Identifiable {
         card = draft.card
         tagsText = draft.tagsText
         self.original = original
+        entryGuidance = draft.entryGuidance
     }
 
     var title: String {
@@ -290,7 +292,7 @@ struct SavedCardDraft: Codable, Identifiable {
             recovered.lastReview = nil
             notice = "原记忆卡已更新或删除。草稿已作为新卡打开，原卡及其学习进度已保留。"
         }
-        var draft = CardDraft(card: recovered, tagsText: tagsText)
+        var draft = CardDraft(card: recovered, tagsText: tagsText, entryGuidance: entryGuidance)
         draft.id = id
         return CardDraftRecovery(draft: draft, notice: notice)
     }

@@ -69,22 +69,6 @@ extension AppDatabase {
 
     /// Validate the complete card and template snapshots, then save the very same composition as the preview.
     func appendCardAnswer(_ preview: CardAnswerAppendPreview) throws -> Card {
-        try writer.write { db in
-            guard let id = preview.existing.id, let before = try Card.fetchOne(db,key:id),
-                  before == preview.existing, before.deletedAt == nil else { throw CardComparisonError.changed }
-            guard try Self.matchingFront(preview.incoming,deleted:false,in:db)?.id == id else { throw CardComparisonError.changed }
-            let incomingTemplate = try preview.incoming.noteType.flatMap { try NoteTemplate.fetchOne(db,key:$0) }
-            let existingTemplate = try before.noteType.flatMap { try NoteTemplate.fetchOne(db,key:$0) }
-            guard incomingTemplate == preview.incomingTemplate, existingTemplate == preview.existingTemplate else {
-                throw CardComparisonError.changed
-            }
-            var current = try CardAnswerAppendComposer.preview(from:preview.incoming,to:before,
-                incomingTemplate:incomingTemplate,existingTemplate:existingTemplate,selection:preview.selection).result
-            guard current == preview.result else { throw CardComparisonError.changed }
-            current.updatedAt = Date(); try current.save(db)
-            try Self.recordCareAdjustment(before:before,after:current,in:db)
-            try Self.recordTopicCardEdit(before:before,after:current,in:db)
-            return current
-        }
+        try appendCardAnswerRecordingUndo(preview).after
     }
 }
