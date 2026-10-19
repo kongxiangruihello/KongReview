@@ -40,6 +40,19 @@ final class CardFormattingState {
         activeSlot = slot
         activeName = "正在编辑：" + target.name
     }
+    /// Deliver input changes before preserving the draft or opening a comparison.
+    func flushEditors(_ completion: @escaping (Bool)->Void) {
+        let views = targets.values.compactMap(\.webView)
+        guard !views.isEmpty else { completion(true); return }
+        var remaining = views.count,success = true
+        for view in views {
+            view.evaluateJavaScript("typeof krFlush === 'function' ? (krFlush(),true) : false") { value,error in
+                if error != nil || value as? Bool != true { success = false }
+                remaining -= 1
+                if remaining == 0 { completion(success) }
+            }
+        }
+    }
     func command(_ command: String) {
         if let view = activeSlot.flatMap({ sources[$0]?.textView }) { view.applyHTML(command); return }
         guard let view = activeSlot.flatMap({ targets[$0]?.webView }) else { return }

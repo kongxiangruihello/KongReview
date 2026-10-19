@@ -28,6 +28,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
     private let noteHandle = RichEditorHandle()
     private let statusLabel = NSTextField(labelWithString: "")
 
+    private var attributionPanel: NSPanel?
     private var pendingURL: String?
     /// 显示时是否全选正文（剪贴板自动填入时全选，直接打字即替换）
     private var selectAllOnShow = false
@@ -50,10 +51,12 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 80_000_000)
             self?.editorHandle.focus(selectAll: selectAll)
+            if selectAll { self?.recognizeAttribution() }
         }
     }
 
     func close() {
+        if let attributionPanel { panel?.endSheet(attributionPanel); attributionPanel.close() }; attributionPanel = nil
         panel?.orderOut(nil)
     }
 
@@ -98,6 +101,23 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
             selectAllOnShow = true
         }
         lastChangeCount = pb.changeCount
+    }
+
+    @objc private func recognizeAttribution() {
+        guard let candidate = SourceAttributionRecognition.recognize(editorModel.text),attributionPanel == nil,let parent = panel else { return }
+        let p = QuickCapturePanel(contentRect:NSRect(x:0,y:0,width:600,height:440),styleMask:[.titled],backing:.buffered,defer:false)
+        p.title = "核对出处"; p.isReleasedWhenClosed = false
+        let oldTitle = sourceField.stringValue,oldAuthor = authorField.stringValue,oldLocation = locationField.stringValue
+        p.contentView = NSHostingView(rootView:SourceAttributionView(candidate:candidate,cancel:{ [weak self,weak p] in if let p { parent.endSheet(p) }; self?.attributionPanel = nil }) { [weak self,weak p] title,author,location,remove in
+            guard let self,self.editorModel.text == candidate.original,self.sourceField.stringValue == oldTitle,self.authorField.stringValue == oldAuthor,self.locationField.stringValue == oldLocation else { return "录入内容已变化，请重新识别。" }
+            self.sourceField.stringValue = title; self.authorField.stringValue = author; self.locationField.stringValue = location
+            self.pendingURL = nil
+            if remove { self.editorModel.text = candidate.body }
+            if let p { parent.endSheet(p) }; self.attributionPanel = nil; return nil
+        })
+        attributionPanel = p
+        p.onCancel = { [weak p] in if let p { parent.endSheet(p) } }
+        parent.beginSheet(p) { [weak self,weak p] _ in p?.close(); self?.attributionPanel = nil }
     }
 
     // MARK: 保存
@@ -182,6 +202,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
             model: editorModel, handle: editorHandle,
             onSubmit: { [weak self] in self?.save() },
             onCancel: { [weak self] in self?.close() },
+            onAttribution: { [weak self] in self?.recognizeAttribution() },
             onTab: { [weak self] back in
                 guard let self, let panel = self.panel else { return }
                 if back { self.noteHandle.focus() } else { panel.makeFirstResponder(self.sourceField) }
@@ -244,7 +265,8 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         saveButton.keyEquivalentModifierMask = [.command]
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.lineBreakMode = .byTruncatingTail
-        let buttons = NSStackView(views: [statusLabel, NSView(), cancelButton, saveButton])
+        let recognizeButton = NSButton(title:"识别出处…",target:self,action:#selector(recognizeAttribution))
+        let buttons = NSStackView(views: [statusLabel, NSView(), recognizeButton, cancelButton, saveButton])
         buttons.orientation = .horizontal
         buttons.spacing = 8
 
@@ -351,11 +373,12 @@ struct QuickCaptureEditor: View {
     let handle: RichEditorHandle
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    var onAttribution: (() -> Void)? = nil
     let onTab: (Bool) -> Void
 
     var body: some View {
         RichEditor(text: Bindable(model).text, font: .highlight, placeholder: "摘录原文",
                    toolbar: true, minHeight: 135, slot: "quick-capture",
-                   onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle)
+                   onSubmit: onSubmit, onCancel: onCancel, onTab: onTab, handle: handle,onAttribution:onAttribution)
     }
 }

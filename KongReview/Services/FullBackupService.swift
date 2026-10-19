@@ -374,7 +374,7 @@ extension FullBackupService {
         "reminder.hour": 0...23, "reminder.minute": 0...59
     ]
     static let stringPreferenceKeys: Set<String> = [
-        "cards.fsrsInfo", "cards.syncFromHighlight", "citation.style", "sidebar.sourceSort", "hotkey.preset", "hotkey.lookup"
+        "editor.pasteStyle", "cards.fsrsInfo", "cards.syncFromHighlight", "citation.style", "sidebar.sourceSort", "hotkey.preset", "hotkey.lookup"
     ]
     static var preferenceKeys: Set<String> {
         booleanPreferenceKeys.union(integerPreferenceKeys.keys).union(stringPreferenceKeys)
@@ -416,6 +416,7 @@ extension FullBackupService {
             } else if stringPreferenceKeys.contains(key) {
                 if let text = value as? String, text.count <= 4_096 {
                     switch key {
+                    case "editor.pasteStyle": valid = ["keep","clean","plain"].contains(text)
                     case "cards.syncFromHighlight": valid = ["ask", "always", "never"].contains(text)
                     case "citation.style": valid = CitationStyle.allCases.contains { $0.rawValue == text }
                     case "sidebar.sourceSort": valid = SourceSort.allCases.contains { $0.rawValue == text }

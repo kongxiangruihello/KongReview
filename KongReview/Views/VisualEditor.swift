@@ -35,6 +35,7 @@ struct VisualEditorRep: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         config.userContentController.add(WeakScriptHandler(c), name: "krEditor")
         config.userContentController.addUserScript(WKUserScript(source:EditorTextScript.source,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
+        config.userContentController.addUserScript(WKUserScript(source:EditorIntakeScript.source,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
         if formatting != nil {
             config.userContentController.addUserScript(WKUserScript(source: CardFormattingScript.source,
                 injectionTime: .atDocumentEnd, forMainFrameOnly: true))
@@ -132,6 +133,15 @@ struct VisualEditorRep: NSViewRepresentable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let body = message.body as? [String: Any], let type = body["type"] as? String, let p = parent else { return }
             switch type {
+            case "media-picked":
+                p.handle?.selectedResourceValue = body["value"] as? String ?? ""
+                p.handle?.selectedResourceOccurrence = body["occurrence"] as? Int ?? 0
+                p.handle?.mediaPulse += 1
+            case "paste-attribution":
+                p.handle?.attributionPulse += 1
+            case "paste-choice":
+                guard let html = body["html"] as? String,let original = body["original"] as? String else { return }
+                p.handle?.receivePaste(html:html,plain:body["plain"] as? String ?? "",original:original)
             case "find":
                 p.handle?.showsFind = true
             case "focus":

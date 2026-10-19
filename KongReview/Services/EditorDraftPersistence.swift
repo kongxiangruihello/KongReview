@@ -33,6 +33,8 @@ final class EditorDraftPersistence {
             .appendingPathComponent("EditorDrafts", isDirectory: true)
     }
 
+    func referencedMedia() throws -> Set<String> { try MediaReferenceInventory.references(inJSON:JSONEncoder().encode(contents)) }
+
     var highlightDrafts: [SavedHighlightDraft] {
         contents.highlights.filter(\.hasUnsavedChanges).sorted { $0.savedAt > $1.savedAt }
     }

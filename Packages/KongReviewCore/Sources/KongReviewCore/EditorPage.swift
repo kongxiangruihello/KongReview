@@ -812,6 +812,7 @@ public enum EditorPage {
         var r = document.createRange(); r.selectNodeContents(ed);
         var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
       };
+      window.krPreserveHTML = function () { originalHTML = true; };
       window.krGetValue = function () { return value(); };
       window.krFlush = function () { sendNow(); return lastSent; };
       // 测试用

@@ -158,7 +158,10 @@ struct EditorMutationPreview: View {
 enum EditorViewport {
     static func revealSelection(in view: NSTextView) {
         guard let layout = view.layoutManager,let container = view.textContainer,view.selectedRange().location != NSNotFound else { return }
-        let glyphs = layout.glyphRange(forCharacterRange:view.selectedRange(),actualCharacterRange:nil)
+        var selection = view.selectedRange()
+        let length = (view.string as NSString).length
+        if selection.length == 0,length > 0 { selection = NSRange(location:min(selection.location,length-1),length:1) }
+        let glyphs = layout.glyphRange(forCharacterRange:selection,actualCharacterRange:nil)
         let box = layout.boundingRect(forGlyphRange:glyphs,in:container).offsetBy(dx:view.textContainerOrigin.x,dy:view.textContainerOrigin.y)
         reveal(box,in:view)
     }

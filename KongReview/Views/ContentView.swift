@@ -28,12 +28,16 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button { store.showsResourceAudit = true } label: { Label("资料检查",systemImage:"checkmark.magnifyingglass") }.help("全库链接与本地媒体检查").disabled(!store.canShowGlobalSearch).handCursor()
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button { store.showGlobalSearch() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
                     .disabled(!store.canShowGlobalSearch)
                     .handCursor()
                     .help("查找摘录、记忆卡、网页和出处（⌘⇧F）")
             }
         }
+        .sheet(isPresented:$store.showsResourceAudit) { LibraryResourceAuditView() }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
         .modifier(LearningMaterialExportPresentation())

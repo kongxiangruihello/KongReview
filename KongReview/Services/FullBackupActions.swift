@@ -71,6 +71,7 @@ extension LibraryStore {
         guard let prepared = fullBackupRestore, canBeginFullBackup(allowPrepared: true) else { return }
         do { try flushGrowthReflection?(); try draftPersistence?.flush() }
         catch { report(error); return }
+        resourceAudit.reset(); showsResourceAudit = false
         growthGeneration += 1
         journeyNavigation = JourneyNavigation()
         invalidateDerivedStatistics()
@@ -129,7 +130,7 @@ extension LibraryStore {
     }
 
     private var hasBlockingFullBackupPanel: Bool {
-        learningMaterialExport != nil || learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
+        showsResourceAudit || learningMaterialExport != nil || learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
             || study.cardTagEdit != nil || study.renamingDeck != nil || duplicateCardReview != nil || duplicateReview != nil
             || newNotebookRequest != nil || addArticleDraft != nil || articleSourceDraft != nil || clozeDraft != nil
             || backupList != nil || tagEditor != nil || showTagManager || bibliographyRequest != nil
@@ -142,6 +143,8 @@ extension LibraryStore {
     }
 
     private func finishFullBackupRestore() {
+        cardWorkflow.startSession()
+        cardWorkflow.actionBusy = false
         flushGrowthReflection = nil
         undoManager?.removeAllActions()
         do { try draftPersistence?.reloadFromDisk(); draftSaveError = nil }

@@ -7,32 +7,143 @@ struct CardComparisonView: View {
     let incoming: Card
     let existing: Card
     var draftID: UUID? = nil
-    @State private var confirming = false
+    var appendReview = false
     @State private var showsTextDifference = true
+    @State private var choosingAppend = false
+    @State private var appendPrepared = false
+    @State private var incomingTemplate: NoteTemplate?
+    @State private var existingTemplate: NoteTemplate?
+    @State private var selectedSources: Set<CardAppendLocation> = []
+    @State private var target: CardAppendLocation?
     @State private var error: String?
+
+    private var sources: [CardAppendContentBlock] {
+        CardAnswerAppendComposer.sources(for:incoming,template:incomingTemplate)
+    }
+    private var destinations: [CardAppendContentBlock] {
+        CardAnswerAppendComposer.destinations(for:existing,template:existingTemplate)
+    }
+    private var previewResult: Result<CardAnswerAppendPreview, Error> {
+        Result {
+            guard let target else { throw CardComparisonError.noAnswerField }
+            return try CardAnswerAppendComposer.preview(from:incoming,to:existing,
+                incomingTemplate:incomingTemplate,existingTemplate:existingTemplate,
+                selection:.init(sourceIDs:selectedSources,target:target))
+        }
+    }
+    private var validPreview: CardAnswerAppendPreview? { try? previewResult.get() }
+
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
-            Text(draftID == nil ? "修改前后对照" : "重复卡片对照").font(.title2.bold())
-            Toggle("标出文字差异（绿色新增、红色删除、橙色改动）",isOn:$showsTextDifference).toggleStyle(.checkbox)
-            Text("按段落比较正文文字；排版和媒体变化请关闭此选项查看原排版。").font(.caption).foregroundStyle(.secondary)
-            HStack(alignment:.top,spacing:16) {
-                pane(incoming,title:"当前输入")
-                Divider()
-                pane(existing,title:draftID == nil ? "上次保存" : "已有卡片")
-            }
-            if let error { Text(error).foregroundStyle(.red) }
-            HStack {
-                Text("正面、背面及出处分别对照；当前输入尚未保存。").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("关闭") { dismiss() }
-                if draftID != nil, existing.deletedAt == nil {
-                    Button("追加当前答案到已有卡片…") { confirming = true }.disabled(store.fullBackupBusy)
+            Text(choosingAppend ? "选择追加内容与位置" : (draftID == nil ? "修改前后对照" : "重复卡片对照")).font(.title2.bold())
+            if choosingAppend { appendComposer }
+            else {
+                Toggle("标出文字差异（绿色新增、红色删除、橙色改动）",isOn:$showsTextDifference).toggleStyle(.checkbox)
+                Text("按段落比较正文文字；排版和媒体变化请关闭此选项查看原排版。").font(.caption).foregroundStyle(.secondary)
+                HStack(alignment:.top,spacing:16) {
+                    pane(incoming,title:"当前输入")
+                    Divider()
+                    pane(existing,title:draftID == nil ? "上次保存" : "已有卡片")
                 }
             }
-        }.padding(20).frame(minWidth:760,minHeight:550)
-        .confirmationDialog("确认追加答案？",isPresented:$confirming,titleVisibility:.visible) {
-            Button("确认追加并保存") { append() }
-        } message: { Text("把左侧答案追加到右侧卡片，保留原答案及学习进度，不新建卡片。成功后关闭当前草稿。") }
+            if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            HStack {
+                Text(choosingAppend ? "只追加所选内容；原卡正面、牌组、标签、关联和学习进度保持原样。" : "正面、背面及出处分别对照；当前输入尚未保存。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if choosingAppend { Button("返回对照") { choosingAppend = false; error = nil } }
+                Button("关闭") { dismiss() }
+                if draftID != nil, existing.deletedAt == nil {
+                    if choosingAppend {
+                        Button("确认追加并保存") { append() }.buttonStyle(.borderedProminent)
+                            .disabled(store.fullBackupBusy || validPreview == nil)
+                            .accessibilityIdentifier("card-append-confirm")
+                    } else {
+                        Button("选择内容并追加…") { prepareAppend(); choosingAppend = true }
+                            .disabled(store.fullBackupBusy)
+                    }
+                }
+            }
+        }.padding(20).frame(minWidth:720,minHeight:620)
+        .onAppear {
+            if appendReview { prepareAppend(); choosingAppend = true }
+        }
+    }
+
+    private var appendComposer: some View {
+        HStack(alignment:.top,spacing:16) {
+            VStack(alignment:.leading,spacing:12) {
+                GroupBox {
+                    VStack(alignment:.leading,spacing:10) {
+                        HStack {
+                            Text("1. 选择要追加的内容").font(.headline)
+                            Spacer()
+                            Button("全选") { selectedSources = Set(sources.map(\.id)); error = nil }.buttonStyle(.link)
+                            Button("清空") { selectedSources = []; error = nil }.buttonStyle(.link)
+                        }
+                        if sources.isEmpty { Text("当前输入没有可追加的独立答案内容。").foregroundStyle(.secondary) }
+                        ScrollView {
+                            VStack(alignment:.leading,spacing:12) {
+                                ForEach(sources) { block in
+                                    Toggle(isOn:Binding(get:{ selectedSources.contains(block.id) },set:{ selected in
+                                        if selected { selectedSources.insert(block.id) } else { selectedSources.remove(block.id) }
+                                        error = nil
+                                    })) {
+                                        VStack(alignment:.leading,spacing:3) {
+                                            Text(block.title).font(.body.bold())
+                                            Text(Markdown.plainText(fromHTML:block.content).trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? "图片或音视频内容" : Markdown.plainText(fromHTML:block.content))
+                                                .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                                        }
+                                    }.toggleStyle(.checkbox)
+                                }
+                            }.frame(maxWidth:.infinity,alignment:.leading)
+                        }.frame(minHeight:100,maxHeight:240)
+                    }.padding(6)
+                }
+                GroupBox {
+                    VStack(alignment:.leading,spacing:10) {
+                        Text("2. 选择追加位置").font(.headline)
+                        if destinations.isEmpty { Text("原卡没有独立背面字段，请编辑原卡补充。").foregroundStyle(.red) }
+                        else {
+                            Picker("追加到",selection:$target) {
+                                ForEach(destinations) { block in Text(block.title).tag(Optional(block.id)) }
+                            }.pickerStyle(.menu)
+                            Text("原有内容保留，所选内容按上面的顺序加在末尾。").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.padding(6).frame(maxWidth:.infinity,alignment:.leading)
+                }
+                Text("模板卡片只提供独立背面字段，正面字段不参与追加。成功后关闭当前草稿。").font(.caption).foregroundStyle(.secondary)
+                if case .failure(let validationError) = previewResult {
+                    Label(validationError.localizedDescription,systemImage:"exclamationmark.triangle.fill")
+                        .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                        .accessibilityIdentifier("card-append-validation")
+                }
+                Spacer(minLength:0)
+            }.frame(width:260)
+            Divider()
+            VStack(alignment:.leading,spacing:10) {
+                Text("3. 最终卡片预览").font(.headline)
+                if let preview = validPreview {
+                    let faces = preview.result.faces(using:existingTemplate)
+                    CardWebView(front:faces.front,back:faces.back,store:store)
+                } else {
+                    Text("选择有效内容和追加位置后，在这里查看将保存的完整卡片。")
+                        .foregroundStyle(.secondary).frame(maxWidth:.infinity,maxHeight:.infinity)
+                }
+            }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+        }.frame(minHeight:440)
+    }
+
+    private func prepareAppend() {
+        guard !appendPrepared else { return }
+        do {
+            let templates = try store.db.noteTemplates()
+            incomingTemplate = incoming.noteType.flatMap { templates[$0] }
+            existingTemplate = existing.noteType.flatMap { templates[$0] }
+            selectedSources = Set(sources.map(\.id))
+            target = destinations.first?.id
+            appendPrepared = true
+        } catch { self.error = error.localizedDescription }
     }
     private func pane(_ card: Card,title: String) -> some View {
         VStack(alignment:.leading,spacing:8) {
@@ -68,8 +179,10 @@ struct CardComparisonView: View {
         guard !store.fullBackupBusy else { return }
         do {
             guard let id = draftID, store.cardEditor?.id == id, store.cardEditor?.card == incoming else { throw CardComparisonError.noDraft }
-            let saved = try store.db.appendCardAnswer(from:incoming,to:existing)
+            let preview = try previewResult.get()
+            let saved = try store.db.appendCardAnswer(preview)
             if store.study.current?.id == saved.id { store.study.current = saved }
+            store.cardWorkflow.duplicateReturn = nil
             store.finishCardEditorDraft(id:id); store.cardEditor = nil; store.reload(); dismiss()
         } catch { self.error = error.localizedDescription }
     }

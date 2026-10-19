@@ -50,21 +50,37 @@ extension AppDatabase {
     func cardContentHistory(id: Int64) throws -> [CardContentVersion] {
         Array((try progressValue([CardContentVersion].self,key:"card-content-history.\(id)") ?? []).reversed())
     }
-    /// Append only to the selected card; compare the full saved snapshot in the transaction.
+    /// Compatibility entry point: append all answer blocks to the first independent answer location.
     func appendCardAnswer(from incoming: Card, to expected: Card) throws -> Card {
+        let templates = try writer.read { db in
+            (try incoming.noteType.flatMap { try NoteTemplate.fetchOne(db,key:$0) },
+             try expected.noteType.flatMap { try NoteTemplate.fetchOne(db,key:$0) })
+        }
+        let blocks = CardAnswerAppendComposer.sources(for:incoming,template:templates.0)
+        guard !blocks.isEmpty else { throw CardComparisonError.noAnswer }
+        guard let target = CardAnswerAppendComposer.destinations(for:expected,template:templates.1).first else {
+            throw CardComparisonError.noAnswerField
+        }
+        let preview = try CardAnswerAppendComposer.preview(from:incoming,to:expected,
+            incomingTemplate:templates.0,existingTemplate:templates.1,
+            selection:.init(sourceIDs:Set(blocks.map(\.id)),target:target.id))
+        return try appendCardAnswer(preview)
+    }
+
+    /// Validate the complete card and template snapshots, then save the very same composition as the preview.
+    func appendCardAnswer(_ preview: CardAnswerAppendPreview) throws -> Card {
         try writer.write { db in
-            guard let id = expected.id, var current = try Card.fetchOne(db,key:id), current == expected, current.deletedAt == nil else { throw CardComparisonError.changed }
-            let template = try incoming.noteType.flatMap { try NoteTemplate.fetchOne(db,key:$0) }
-            let answer = incoming.faces(using:template).back
-            guard HTMLSourceCodec.hasContent(answer) || answer.contains("[sound:") else { throw CardComparisonError.noAnswer }
-            let before = current
-            let addition = "<hr><p>补充答案</p>" + Markdown.html(answer)
-            if let name = current.noteType, !current.fields.isEmpty {
-                guard let t = try NoteTemplate.fetchOne(db,key:name),
-                      let index = t.back.first(where: { current.fields.indices.contains($0) && !t.front.contains($0) }) else { throw CardComparisonError.noAnswerField }
-                current.fields[index] = Markdown.html(current.fields[index]) + addition
-                current.front = current.fields[0]; current.back = current.fields.dropFirst().joined(separator:"<hr>")
-            } else { current.back = Markdown.html(current.back) + addition }
+            guard let id = preview.existing.id, let before = try Card.fetchOne(db,key:id),
+                  before == preview.existing, before.deletedAt == nil else { throw CardComparisonError.changed }
+            guard try Self.matchingFront(preview.incoming,deleted:false,in:db)?.id == id else { throw CardComparisonError.changed }
+            let incomingTemplate = try preview.incoming.noteType.flatMap { try NoteTemplate.fetchOne(db,key:$0) }
+            let existingTemplate = try before.noteType.flatMap { try NoteTemplate.fetchOne(db,key:$0) }
+            guard incomingTemplate == preview.incomingTemplate, existingTemplate == preview.existingTemplate else {
+                throw CardComparisonError.changed
+            }
+            var current = try CardAnswerAppendComposer.preview(from:preview.incoming,to:before,
+                incomingTemplate:incomingTemplate,existingTemplate:existingTemplate,selection:preview.selection).result
+            guard current == preview.result else { throw CardComparisonError.changed }
             current.updatedAt = Date(); try current.save(db)
             try Self.recordCareAdjustment(before:before,after:current,in:db)
             try Self.recordTopicCardEdit(before:before,after:current,in:db)

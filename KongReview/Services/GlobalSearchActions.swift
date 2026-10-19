@@ -36,7 +36,7 @@ extension AppDatabase {
 extension LibraryStore {
     /// 避免命令菜单在其他面板打开时覆盖未保存的编辑内容。
     var canShowGlobalSearch: Bool {
-        learningMaterialExport == nil && learningExplorer == nil && editorDraft == nil && cardEditor == nil && editingSource == nil && addArticleDraft == nil
+        !showsResourceAudit && learningMaterialExport == nil && learningExplorer == nil && editorDraft == nil && cardEditor == nil && editingSource == nil && addArticleDraft == nil
             && articleSourceDraft == nil && batchPrompt == nil && exportRequest == nil && mergeRequest == nil
             && pendingImport == nil && cardImport == nil && duplicateReview == nil && duplicateCardReview == nil
             && deckOptionsEditor == nil && templateEditor == nil && apkgExport == nil && clozeDraft == nil
