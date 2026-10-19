@@ -5,6 +5,7 @@ struct CardBulkEntryView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     var initialDeck: String? = nil
+    var onEditOriginal: ((UUID,Int64) -> Void)? = nil
     var onSaved: ([Card]) -> Void
     @State private var source = ""
     @State private var format = CardBulkEntryFormat.tabSeparated
@@ -14,6 +15,7 @@ struct CardBulkEntryView: View {
     @State private var tags = ""
     @State private var presets: [CardEntryPreset] = []
     @State private var presetID: UUID?
+    @State private var presetSnapshot: CardEntryPreset?
     @State private var mapping: [CardBulkEntryDestination] = []
     @State private var candidates: [CardBulkEntryCandidate] = []
     @State private var selected = Set<UUID>()
@@ -27,10 +29,25 @@ struct CardBulkEntryView: View {
     @State private var editing: CardBulkEntryCandidate?
     @State private var learningPreview: CardEditorPreviewSnapshot?
     @State private var page = 1
+    @State private var draftID = UUID()
+    @State private var persistedDraft: CardBulkEntryDraft?
+    @State private var didLoad = false
+    @State private var didDiscard = false
+    @State private var restoredNotice: String?
+    @State private var editingWorkingCopy: CardBulkEntryCandidate?
+    @State private var originalPreview: CardBulkOriginalRequest?
+    @State private var appending: CardBulkOriginalRequest?
     private let pageSize = 30
 
     private var configuration: CardBulkEntryConfiguration {
-        .init(deck:deck,tags:TagParser.parse(tags),preset:presets.first { $0.id == presetID },mapping:mapping)
+        .init(deck:deck,tags:TagParser.parse(tags),preset:presetSnapshot,mapping:mapping)
+    }
+    private var draftSnapshot: CardBulkEntryDraft {
+        var value = CardBulkEntryDraft()
+        value.id = draftID;value.source = source;value.format = format;value.firstRowIsHeader = firstRowIsHeader
+        value.headers = headers;value.configuration = configuration;value.candidates = candidates
+        value.selectedIDs = selected;value.page = page;value.editingCandidate = editingWorkingCopy ?? editing
+        return value
     }
     private var needsReview: Bool {
         preview?.configuration != configuration || preview?.candidates != candidates || preview?.selectedIDs != selected
@@ -49,10 +66,13 @@ struct CardBulkEntryView: View {
             Text("先拆分并逐条预览，勾选后再统一保存；相同正面会提示，不会覆盖已有卡片。每批最多 500 张。")
                 .font(.caption).foregroundStyle(.secondary)
             settings.disabled(blocked)
+            if let restoredNotice { Text(restoredNotice).font(.caption).foregroundStyle(.secondary) }
+            CardAppendUndoBanner()
             if let error { Text(error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal:false,vertical:true) }
             if candidates.isEmpty { pasteContent } else { reviewContent }
             HStack {
-                Button("取消") { requestClose() }.keyboardShortcut(.cancelAction).handCursor().disabled(busy)
+                Button("保存草稿并关闭") { requestClose() }.keyboardShortcut(.cancelAction).handCursor().disabled(busy)
+                Button("放弃本批输入",role:.destructive) { showsCloseConfirmation = true }.disabled(blocked)
                 Spacer()
                 if candidates.isEmpty {
                     Button("拆分并检查") { parse() }.buttonStyle(.borderedProminent)
@@ -71,28 +91,47 @@ struct CardBulkEntryView: View {
         .padding(20).frame(minWidth:740,idealWidth:900,minHeight:650,idealHeight:760)
         .interactiveDismissDisabled(!didSave && (!source.isEmpty || !candidates.isEmpty))
         .task { load() }
+        .task(id:draftSnapshot) {
+            guard didLoad,!didSave,!didDiscard,draftSnapshot.hasInput else { return }
+            do { try await Task.sleep(for:.milliseconds(350)) } catch { return }
+            guard !Task.isCancelled else { return }
+            _ = persistDraft()
+        }
+        .onDisappear { if didLoad,!didSave,!didDiscard { _ = persistDraft() } }
         .onChange(of:presetID) { _,_ in
+            guard presetID != presetSnapshot?.id else { return }
+            presetSnapshot = presets.first { $0.id == presetID }
             mapping = configuration.defaultMapping(columnCount:candidates.map(\.values.count).max() ?? 0)
             preview = nil
         }
         .onChange(of:candidates.count) { _,_ in page = min(page,pageCount) }
         .confirmationDialog("放弃本批尚未保存的输入？",isPresented:$showsCloseConfirmation,titleVisibility:.visible) {
-            Button("放弃本批输入",role:.destructive) { dismiss() }
+            Button("放弃本批输入",role:.destructive) {
+                do { try store.db.clearCardBulkEntryDraft(expectedID:draftID);didDiscard = true;dismiss() }
+                catch { self.error = error.localizedDescription }
+            }
             Button("继续编辑",role:.cancel) { }
-        } message: { Text("粘贴原文和候选修改尚未写入卡片，关闭后不会保留。") }
+        } message: { Text("确认后会删除这批尚未保存的草稿；已经保存到卡片库的内容保持原样。") }
         .confirmationDialog("返回粘贴原文？",isPresented:$showsReparseConfirmation,titleVisibility:.visible) {
             Button("返回原文并重新拆分",role:.destructive) {
                 candidates = [];selected = [];preview = nil;mapping = [];error = nil;page = 1
             }
             Button("继续检查",role:.cancel) { }
         } message: { Text("原始粘贴内容仍保留；候选中的逐条修改和移除会清除。") }
-        .sheet(item:$editing) { candidate in
-            CardBulkEntryCandidateEditor(candidate:candidate,configuration:configuration,templates:store.noteTemplates) { changed in
+        .sheet(item:$editing,onDismiss:{ editingWorkingCopy = nil;_ = persistDraft() }) { candidate in
+            CardBulkEntryCandidateEditor(candidate:candidate,configuration:configuration,templates:store.noteTemplates,onChanged:{ editingWorkingCopy = $0 }) { changed in
                 guard !blocked,let index = candidates.firstIndex(where:{ $0.id == changed.id }) else { return }
                 candidates[index] = changed;preview = nil
-            }
+            }.disabled(blocked)
         }
         .sheet(item:$learningPreview) { CardEditorPreviewView(snapshot:$0) }
+        .sheet(item:$originalPreview) { request in CardBulkOriginalPreview(request:request) }
+        .sheet(item:$appending) { request in
+            CardBulkAppendView(request:request) {
+                selected.remove(request.candidateID);preview = nil
+                _ = persistDraft();check()
+            }
+        }
     }
 
     private var settings: some View {
@@ -110,6 +149,9 @@ struct CardBulkEntryView: View {
                 Picker("录入预设",selection:$presetID) {
                     Text("普通正反面").tag(Optional<UUID>.none)
                     ForEach(presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
+                    if let presetSnapshot,!presets.contains(where:{ $0.id == presetSnapshot.id }) {
+                        Text(presetSnapshot.name + "（草稿快照）").tag(Optional(presetSnapshot.id))
+                    }
                 }
                 Text("沿用预设栏目和默认标签；所填牌组优先。").font(.caption).foregroundStyle(.secondary)
             }
@@ -198,6 +240,14 @@ struct CardBulkEntryView: View {
             VStack(spacing:6) {
                 Button("编辑") { editing = candidate }.handCursor()
                 Button("预览") { openPreview(candidate) }.handCursor()
+                if let existingID = item?.duplicateCardID {
+                    Button("查看原卡") { openOriginal(candidate,id:existingID,append:false) }.handCursor()
+                    if item?.duplicateIsDeleted == false {
+                        if onEditOriginal != nil { Button("编辑原卡") { editOriginal(candidate,id:existingID) }.handCursor() }
+                        Button("追加答案…") { openOriginal(candidate,id:existingID,append:true) }.handCursor()
+                    }
+                    Button("跳过此条") { selected.remove(candidate.id) }.handCursor()
+                }
                 Button("移除",role:.destructive) {
                     candidates.removeAll { $0.id == candidate.id };selected.remove(candidate.id);preview = nil
                 }.handCursor()
@@ -214,9 +264,31 @@ struct CardBulkEntryView: View {
         do {
             let library = try store.db.cardEntryPresetLibrary()
             presets = library.presets
-            deck = initialDeck ?? store.cardEditor?.card.deck ?? store.study.lastDeck ?? "默认"
-            presetID = library.preset(for:deck)?.id
+            if let saved = try store.db.cardBulkEntryDraft() {
+                draftID = saved.id;persistedDraft = saved;source = saved.source;format = saved.format
+                firstRowIsHeader = saved.firstRowIsHeader;headers = saved.headers
+                deck = saved.configuration.deck;tags = TagParser.format(saved.configuration.tags)
+                presetSnapshot = saved.configuration.preset;presetID = presetSnapshot?.id
+                mapping = saved.configuration.mapping;candidates = saved.candidates;selected = saved.selectedIDs
+                page = min(max(1,saved.page),max(1,(saved.candidates.count + pageSize - 1) / pageSize))
+                editing = saved.editingCandidate;editingWorkingCopy = saved.editingCandidate
+                restoredNotice = "已恢复批量录入草稿；重复卡片、模板与字段将按当前资料重新检查。"
+            } else {
+                deck = initialDeck ?? store.cardEditor?.card.deck ?? store.study.lastDeck ?? "默认"
+                presetSnapshot = library.preset(for:deck);presetID = presetSnapshot?.id
+            }
+            didLoad = true
+            if !candidates.isEmpty { check() }
         } catch { self.error = error.localizedDescription }
+    }
+
+    @discardableResult private func persistDraft() -> Bool {
+        guard didLoad,!didSave,!didDiscard,!store.fullBackupBusy else { return false }
+        let value = draftSnapshot
+        guard value.hasInput || persistedDraft != nil else { return true }
+        guard value != persistedDraft else { return true }
+        do { try store.db.saveCardBulkEntryDraft(value,expected:persistedDraft);persistedDraft = value;return true }
+        catch { self.error = "草稿保存失败：" + error.localizedDescription;return false }
     }
 
     private func parse() {
@@ -254,11 +326,13 @@ struct CardBulkEntryView: View {
 
     private func save() {
         guard !blocked,!needsReview,let preview,preview.canSave else { return }
+        guard persistDraft() else { return }
+        let savingDraft = draftSnapshot
         busy = true;error = nil
         let db = store.db
         Task {
             do {
-                let saved = try await Task.detached(priority:.userInitiated) { try db.saveCardBulkEntry(preview) }.value
+                let saved = try await Task.detached(priority:.userInitiated) { try db.saveCardBulkEntry(preview,draft:savingDraft) }.value
                 didSave = true
                 onSaved(saved)
                 busy = false;dismiss()
@@ -276,7 +350,32 @@ struct CardBulkEntryView: View {
     }
     private func requestClose() {
         guard !busy else { return }
-        if !didSave && (!source.isEmpty || !candidates.isEmpty) { showsCloseConfirmation = true } else { dismiss() }
+        if didSave || persistDraft() { dismiss() }
+    }
+    private func currentOriginal(_ candidate: CardBulkEntryCandidate,id: Int64) throws -> CardBulkOriginalRequest {
+        let fresh = try store.db.previewCardBulkEntry(candidates:candidates,configuration:configuration,selectedIDs:selected)
+        guard let item = fresh.items.first(where:{ $0.id == candidate.id }),item.duplicateCardID == id,
+              let incoming = item.card,let existing = try store.db.card(id:id) else { throw CardBulkEntryError.changedSelection }
+        preview = fresh
+        return .init(candidateID:candidate.id,incoming:incoming,existing:existing)
+    }
+    private func openOriginal(_ candidate: CardBulkEntryCandidate,id: Int64,append: Bool) {
+        do {
+            let request = try currentOriginal(candidate,id:id)
+            if append {
+                guard request.existing.deletedAt == nil else { throw CardBulkEntryError.changedSelection }
+                appending = request
+            } else { originalPreview = request }
+        } catch { self.error = error.localizedDescription;preview = nil }
+    }
+    private func editOriginal(_ candidate: CardBulkEntryCandidate,id: Int64) {
+        do {
+            let request = try currentOriginal(candidate,id:id)
+            guard request.existing.deletedAt == nil,let onEditOriginal else { throw CardBulkEntryError.changedSelection }
+            selected.remove(candidate.id)
+            guard persistDraft() else { return }
+            onEditOriginal(candidate.id,id);dismiss()
+        } catch { self.error = error.localizedDescription;preview = nil }
     }
 }
 
@@ -285,6 +384,7 @@ private struct CardBulkEntryCandidateEditor: View {
     @State var candidate: CardBulkEntryCandidate
     let configuration: CardBulkEntryConfiguration
     let templates: [String:NoteTemplate]
+    var onChanged: (CardBulkEntryCandidate)->Void = { _ in }
     var onApply: (CardBulkEntryCandidate)->Void
     @State private var formatting = CardFormattingState()
     @State private var busy = false
@@ -328,6 +428,7 @@ private struct CardBulkEntryCandidateEditor: View {
             }
         }.padding(20).frame(minWidth:680,idealWidth:760,minHeight:600,idealHeight:720).disabled(busy)
             .interactiveDismissDisabled(busy)
+            .onChange(of:candidate) { _,value in onChanged(value) }
             .sheet(item:$preview) { CardEditorPreviewView(snapshot:$0) }
     }
 

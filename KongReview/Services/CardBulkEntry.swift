@@ -1,7 +1,7 @@
 import Foundation
 import KongReviewCore
 
-enum CardBulkEntryFormat: String, CaseIterable, Identifiable, Sendable {
+enum CardBulkEntryFormat: String, CaseIterable, Identifiable, Codable, Sendable {
     case tabSeparated, questionAnswer
     var id: String { rawValue }
     var title: String { self == .tabSeparated ? "表格 / Tab 分列" : "问：答：分组" }
@@ -141,7 +141,7 @@ enum CardBulkEntryParser {
     }
 }
 
-enum CardBulkEntryDestination: Hashable, Identifiable, Sendable {
+enum CardBulkEntryDestination: Hashable, Identifiable, Codable, Sendable {
     case unassigned, front, back, field(Int), section(Int)
     var id: String {
         switch self {
@@ -154,7 +154,7 @@ enum CardBulkEntryDestination: Hashable, Identifiable, Sendable {
     }
 }
 
-struct CardBulkEntryConfiguration: Equatable, Sendable {
+struct CardBulkEntryConfiguration: Codable, Equatable, Sendable {
     var deck = "默认"
     var tags: [String] = []
     var preset: CardEntryPreset?
@@ -211,7 +211,7 @@ struct CardBulkEntryConfiguration: Equatable, Sendable {
     }
 }
 
-struct CardBulkEntryCandidate: Equatable, Identifiable, Sendable {
+struct CardBulkEntryCandidate: Codable, Equatable, Identifiable, Sendable {
     var id = UUID()
     var line: Int
     /// HTML values, one per source column. Editing never mutates the pasted source.
@@ -222,6 +222,8 @@ struct CardBulkEntryPreviewItem: Identifiable, Sendable {
     var candidate: CardBulkEntryCandidate
     var card: Card?
     var issues: [String] = []
+    var duplicateCardID: Int64?
+    var duplicateIsDeleted = false
     var id: UUID { candidate.id }
 }
 
@@ -238,7 +240,7 @@ struct CardBulkEntryPreview: Sendable {
 
 enum CardBulkEntryError: LocalizedError {
     case parseIssues, emptyFront, changedTemplate, changedPreset, emptySelection, changedSelection, tooMany, invalidCandidate(Int,String)
-    case mapping(String), required(String)
+    case mapping(String), required(String), draftChanged, alreadySaved
     var errorDescription: String? {
         switch self {
         case .parseIssues: return "粘贴内容还有格式问题，请按行号修正后重新拆分。原文仍保留。"
@@ -249,6 +251,8 @@ enum CardBulkEntryError: LocalizedError {
         case .changedSelection: return "候选清单已变化，请重新检查后保存。"
         case .tooMany: return "一次最多录入 \(CardBulkEntryParser.maximumCards) 张，请拆成几批。"
         case .invalidCandidate(let line,let detail): return "第 \(line) 行：\(detail) 本批尚未保存，输入仍保留。"
+        case .draftChanged: return "批量草稿已变化，请重新打开并检查后保存。当前输入仍保留。"
+        case .alreadySaved: return "这批卡片已经保存，不能再次提交。请关闭后重新开始。"
         case .mapping(let message), .required(let message): return message
         }
     }

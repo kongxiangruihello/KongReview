@@ -13,11 +13,14 @@ struct CardEntryHistoryView: View {
     let generation: UUID
     @State private var date = Date()
     @State private var allDates = false
+    @State private var usesDateRange = false
+    @State private var endDate = Date()
     @State private var search = ""
     @State private var filterDeck = ""
     @State private var page = 1
     @State private var pageInput = "1"
     @State private var result: CardEntryHistoryPage?
+    @State private var loadedKey: CardEntryHistoryLoadKey?
     @State private var loading = true
     @State private var selected = Set<Int64>()
     @State private var deck = ""
@@ -26,10 +29,11 @@ struct CardEntryHistoryView: View {
     @State private var error: String?
     @State private var message: String?
     @State private var preview: CardEditorPreviewSnapshot?
-    private var query: CardEntryHistoryQuery { .init(date:allDates ? nil : date,text:search,deck:filterDeck) }
+    @State private var practice: CardEntryPracticeSession?
+    private var query: CardEntryHistoryQuery { .init(date:allDates ? nil : date,endDate:!allDates && usesDateRange ? max(date,endDate) : nil,text:search,deck:filterDeck) }
     private var loadKey: CardEntryHistoryLoadKey { .init(query:query,page:page,revision:store.revision,generation:generation) }
     private var active: Bool { generation == store.cardEntryHistory.generation }
-    private var blocked: Bool { loading || !active || store.fullBackupBusy }
+    private var blocked: Bool { loading || loadedKey != loadKey || !active || store.fullBackupBusy }
     private var visibleIDs: Set<Int64> { Set(result?.items.map(\.id) ?? []) }
 
     var body: some View {
@@ -40,16 +44,20 @@ struct CardEntryHistoryView: View {
             CardEntryOrganizationUndoBanner()
             HStack {
                 Toggle("全部日期",isOn:$allDates).toggleStyle(.checkbox)
+                Toggle("日期范围",isOn:$usesDateRange).toggleStyle(.checkbox).disabled(allDates)
                 DatePicker("录入日期",selection:$date,displayedComponents:.date).labelsHidden().disabled(allDates)
-                Button("今天") { allDates = false;date = Date() }.handCursor()
+                if usesDateRange && !allDates { Text("至");DatePicker("结束日期",selection:$endDate,in:date...,displayedComponents:.date).labelsHidden() }
+                Button("今天") { allDates = false;usesDateRange = false;date = Date() }.handCursor()
                 Spacer()
+            }.disabled(store.fullBackupBusy || !active)
+            HStack {
+                TextField("搜索题面、答案、标签或牌组",text:$search).textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("card-entry-history-search")
                 Picker("牌组",selection:$filterDeck) {
                     Text("全部牌组").tag("")
                     ForEach((try? store.db.deckNames()) ?? [],id:\.self) { Text($0).tag($0) }
-                }.frame(maxWidth:280)
+                }.frame(maxWidth:210)
             }.disabled(store.fullBackupBusy || !active)
-            TextField("搜索题面、答案、标签或牌组",text:$search).textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("card-entry-history-search")
             if !active { Text("资料已重新载入，请关闭后重新打开录入历史。").foregroundStyle(.red) }
             if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
@@ -58,6 +66,7 @@ struct CardEntryHistoryView: View {
                 Button("清空选择") { selected = [] }.disabled(selected.isEmpty)
                 Text("已选 \(selected.count) 张").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                Button("额外练习所选卡片") { startPractice() }.disabled(selected.isEmpty).handCursor()
                 if loading { ProgressView().controlSize(.small) }
             }.controlSize(.small).disabled(blocked)
             ScrollView {
@@ -72,6 +81,7 @@ struct CardEntryHistoryView: View {
                                 Text(item.card.deck + (item.card.tags.isEmpty ? "" : " · " + TagParser.format(item.card.tags)))
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                                 Text(item.recordedAt,format:.dateTime.year().month().day().hour().minute()).font(.caption2).foregroundStyle(.tertiary)
+                                learningStatus(item.card)
                             }
                             Button("预览") { preview = .init(draft:CardDraft(card:item.card),templates:store.noteTemplates) }.handCursor()
                             Button("编辑") { store.scheduleCardEntryHistoryEdit(id:item.id,query:query,generation:generation) }.handCursor()
@@ -80,6 +90,8 @@ struct CardEntryHistoryView: View {
                     if result?.items.isEmpty == true { ContentUnavailableView("没有符合条件的录入记录",systemImage:"calendar",description:Text("可选择其他日期，或查看全部日期。")) }
                 }.padding(.trailing,6)
             }.frame(minHeight:180).disabled(blocked)
+            Text("状态按当前排程显示；正式作答次数包含学习、复习和重学，额外练习不计入。")
+                .font(.caption2).foregroundStyle(.secondary)
             VStack(spacing:8) {
                 HStack {
                     TextField("目标牌组",text:$deck).textFieldStyle(.roundedBorder)
@@ -105,8 +117,35 @@ struct CardEntryHistoryView: View {
         }.padding(20).frame(minWidth:740,idealWidth:830,minHeight:620,idealHeight:720)
             .task(id:loadKey) { await load() }
             .onChange(of:query) { _,_ in page = 1;pageInput = "1";selected = [] }
+            .onChange(of:date) { _,value in if endDate < value { endDate = value } }
             .onChange(of:page) { _,_ in pageInput = String(page);selected = [] }
             .sheet(item:$preview) { CardEditorPreviewView(snapshot:$0,savedCard:true) }
+            .sheet(item:$practice) { CardEntryPracticeView(session:$0) }
+    }
+
+    @ViewBuilder private func learningStatus(_ card: Card) -> some View {
+        let status = CardEntryLearningStatus(card:card)
+        HStack(spacing:8) {
+            Text(status.rawValue).fontWeight(.medium)
+            Text("正式作答 \(max(0,card.reps)) 次")
+            if let due = status.nextDue(for:card) {
+                Text(due <= Date() ? "已到期" : "下次到期")
+                Text(due,format:.dateTime.year().month().day().hour().minute())
+            } else {
+                Text(status == .suspended ? "排程已暂停" : "等待首次学习")
+            }
+        }.font(.caption2).foregroundStyle(.secondary)
+    }
+
+    private func startPractice() {
+        guard !blocked,let result else { return }
+        let key = loadKey
+        do {
+            let value = try store.db.cardEntryPracticeSession(ids:Array(selected),allowedIDs:Array(visibleIDs),query:key.query,page:result.page,generation:generation)
+            guard key == loadKey,active else { throw CardEntryPracticeError.selectionChanged }
+            try store.validateCardEntryPractice(value)
+            practice = value;error = nil
+        } catch { self.error = error.localizedDescription }
     }
 
     private func jump() { page = min(max(1,Int(pageInput) ?? page),result?.pageCount ?? 1);pageInput = String(page) }
@@ -125,6 +164,7 @@ struct CardEntryHistoryView: View {
             try Task.checkCancellation()
             guard active,loadKey == key else { return }
             result = value;page = value.page;pageInput = String(value.page);selected.formIntersection(Set(value.items.map(\.id)))
+            loadedKey = .init(query:key.query,page:value.page,revision:key.revision,generation:key.generation)
             loading = false;error = nil
         } catch is CancellationError { }
         catch { loading = false;self.error = error.localizedDescription }

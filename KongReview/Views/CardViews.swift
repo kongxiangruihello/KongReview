@@ -269,6 +269,9 @@ struct CardContextPanel: View {
 
 struct StudyView: View {
     @Environment(LibraryStore.self) private var store
+    @State private var selfAnswerEnabled = false
+    @State private var selfAnswer = CardSelfAnswerDraft()
+    @State private var selfAnswerEditing = false
     private var study: StudyState { store.study }
 
     var body: some View {
@@ -282,10 +285,25 @@ struct StudyView: View {
                         cardHeader(card)
                             .padding(.horizontal, 28)
                             .padding(.top, 20)
-                        CardWebView(front: f.front, back: study.showingAnswer ? f.back : nil, store: store)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 8)
+                        if selfAnswerEnabled {
+                            ScrollView {
+                                VStack(alignment:.leading,spacing:16) {
+                                    RichWebText(text:f.front,slot:"formal-self-front-\(card.id ?? 0)")
+                                    CardSelfAnswerPanel(draft:Binding(get:{ selfAnswer },set:{ value in
+                                        guard study.current?.id == card.id else { return }
+                                        selfAnswer = value
+                                    }),showingAnswer:study.showingAnswer,
+                                        referenceHTML:f.back,slot:"formal-self-\(card.id ?? 0)",
+                                        onEditingChanged:{ if study.current?.id == card.id { selfAnswerEditing = $0 } })
+                                        .id(card.id)
+                                }.padding(20)
+                            }.frame(maxWidth:.infinity,maxHeight:.infinity)
+                        } else {
+                            CardWebView(front: f.front, back: study.showingAnswer ? f.back : nil, store: store)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, 8)
+                        }
                         // 1.9：原文语境——同一出处里按页码排在前后的摘录
                         if study.showingAnswer, study.showContext, let hid = card.highlightId {
                             CardContextPanel(highlightId: hid)
@@ -315,6 +333,9 @@ struct StudyView: View {
         .background(ReviewPalette.page)
         .navigationTitle("学习 · \(study.deck ?? "")")
         .disabled(store.learningExplorer != nil)
+        .onChange(of:study.current?.id) { _,_ in resetSelfAnswer() }
+        .onChange(of:study.showingAnswer) { wasShown,isShown in if wasShown && !isShown { resetSelfAnswer() } }
+        .onChange(of:selfAnswerEnabled) { _,enabled in if !enabled { selfAnswerEditing = false } }
         .onAppear { if study.current == nil && !study.finished { store.nextCard() } }
         .task {
             store.refreshDerived()
@@ -352,10 +373,12 @@ struct StudyView: View {
                 headerCount(DeckColors.reviewColor, "待复习", c.review)
             }
             Spacer()
+            Toggle("先作答再对照",isOn:$selfAnswerEnabled).toggleStyle(.checkbox).fixedSize()
+                .help("可先写下自己的回答；翻面后与参考答案对照，仍用原评分按钮安排复习")
             Button { store.undoLastCardRating() } label: {
                 Label("撤销评分", systemImage: "arrow.uturn.backward")
             }
-            .keyboardShortcut(store.cardRatingShortcutIsAvailable
+            .keyboardShortcut(!selfAnswerEditing && store.cardRatingShortcutIsAvailable
                               ? KeyboardShortcut("z", modifiers: .command) : nil)
             .disabled(!store.canUndoLastCardRating)
             .handCursor()
@@ -402,12 +425,12 @@ struct StudyView: View {
                                    active: study.showContext) {
                         study.showContext.toggle()
                     }
-                    .keyboardShortcut("c", modifiers: [])
+                    .keyboardShortcut(selfAnswerEditing ? nil : KeyboardShortcut("c",modifiers:[]))
                 }
                 CardIconButton(icon: "text.quote", help: "原摘录（出处、按语、标签）") { store.openHighlight(of: card) }
             }
             CardIconButton(icon: "square.and.pencil", help: "编辑这张卡（E）") { store.editCard(card) }
-                .keyboardShortcut("e", modifiers: [])
+                .keyboardShortcut(selfAnswerEditing ? nil : KeyboardShortcut("e",modifiers:[]))
             CardIconButton(icon: "pause.circle", help: "暂停这张卡：不再出现在学习中，可在“浏览”里恢复") {
                 if let id = card.id { store.setSuspended(true, cards: [id]) }
                 store.nextCard()
@@ -440,7 +463,7 @@ struct StudyView: View {
             PillButton(icon: "eye", title: "显示答案", key: "空格", style: .primary) {
                 study.showingAnswer = true
             }
-            .keyboardShortcut(.space, modifiers: [])
+            .keyboardShortcut(selfAnswerEditing ? nil : KeyboardShortcut(.space,modifiers:[]))
         } else {
             let preview = store.scheduler(forDeck: card.deck).preview(card, now: Date())
             HStack(spacing: 10) {
@@ -449,13 +472,13 @@ struct StudyView: View {
                                 dot: answerColor(a), primary: a == .good) {
                         store.answerCurrent(a)
                     }
-                    .keyboardShortcut(KeyEquivalent(Character(String(a.rawValue))), modifiers: [])
+                    .keyboardShortcut(selfAnswerEditing ? nil : KeyboardShortcut(KeyEquivalent(Character(String(a.rawValue))),modifiers:[]))
                 }
             }
             .background {
                 // 与 Anki 相同：显示答案后，空格 = 良好
                 Button("") { store.answerCurrent(.good) }
-                    .keyboardShortcut(.space, modifiers: [])
+                    .keyboardShortcut(selfAnswerEditing ? nil : KeyboardShortcut(.space,modifiers:[]))
                     .opacity(0)
                     .allowsHitTesting(false)
             }
@@ -469,6 +492,11 @@ struct StudyView: View {
         case .good: return ReviewPalette.accent
         case .easy: return DeckColors.all[2].color     // 松绿
         }
+    }
+
+    private func resetSelfAnswer() {
+        selfAnswer = CardSelfAnswerDraft()
+        selfAnswerEditing = false
     }
 
     /// 当前范围的学习总结：张数去重、评分次数独立，待学状态随排程更新。
@@ -867,6 +895,12 @@ struct CardEditorView: View {
                     .help("保留原卡未保存的修改，回到刚才输入的卡片")
                     .accessibilityIdentifier("card-editor-return-incoming")
             }
+            if store.canReturnToBulkEntry {
+                Button("返回批量录入") { afterFlushing { store.returnToBulkEntry() } }
+                    .buttonStyle(.link).handCursor()
+                    .help("保留这张原卡尚未保存的修改，返回整批候选继续整理")
+                    .accessibilityIdentifier("card-editor-return-bulk")
+            }
             if let error = store.draftSaveError { Text(error).font(.caption).foregroundStyle(.red) }
             else if store.draftPersistence != nil { Text("草稿自动保存在本机").font(.caption).foregroundStyle(.secondary) }
             HStack {
@@ -981,7 +1015,7 @@ struct CardEditorView: View {
                         .accessibilityIdentifier("card-editor-save-and-new")
                         .disabled(!hasFrontContent)
                 }
-                Button(store.canReturnToIncomingCardDraft ? "保存并返回草稿" : "保存") { save() }
+                Button(store.canReturnToBulkEntry ? "保存并返回批量录入" : (store.canReturnToIncomingCardDraft ? "保存并返回草稿" : "保存")) { save() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
                     .handCursor()
@@ -1057,9 +1091,12 @@ struct CardEditorView: View {
     }
     private func save() {
         afterFlushing {
+            let returnsToBulk = store.canReturnToBulkEntry
             let returnsToDraft = store.canReturnToIncomingCardDraft
-            if store.commitCardEditor() != nil, store.cardEditor == nil, returnsToDraft {
-                store.returnToIncomingCardDraft()
+            if store.commitCardEditor() != nil, store.cardEditor == nil {
+                // The editor sheet's dismissal restores the batch after the old sheet
+                // has gone, so the two presentations cannot compete.
+                if !returnsToBulk && returnsToDraft { store.returnToIncomingCardDraft() }
             }
         }
     }

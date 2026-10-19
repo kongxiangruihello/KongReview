@@ -143,6 +143,7 @@ final class LibraryStore {
     let cardAppendUndo = CardAppendUndoState()
     let cardEntryHistory = CardEntryHistoryState()
     let cardEntryOrganizationUndo = CardEntryOrganizationUndoState()
+    let bulkOriginalEditing = CardBulkOriginalEditingState()
     var showsCardBulkEntry = false
     var showsCardEntryPresetManager = false
     var deckEntryPresetEditor: DeckEntryPresetRequest?
@@ -839,6 +840,8 @@ final class LibraryStore {
     }
 
     func editCard(_ card: Card) {
+        guard !fullBackupBusy else { return }
+        bulkOriginalEditing.clear()
         study.rememberBrowsingCard(card.id)
         do {
             let full: Card
@@ -858,6 +861,7 @@ final class LibraryStore {
         guard !fullBackupBusy else { return }
         do {
             let draft = try blankCardDraftUsingDeckPreset(deck:deck ?? study.lastDeck ?? "默认")
+            bulkOriginalEditing.clear()
             cardWorkflow.startSession()
             cardEditor = draft
         } catch { report(error) }

@@ -4,6 +4,8 @@ import KongReviewCore
 
 struct CardEntryHistoryQuery: Equatable, Sendable {
     var date: Date? = Date()
+    /// Inclusive local end date. Nil preserves the original single-day filter.
+    var endDate: Date? = nil
     var text = ""
     var deck = ""
     var calendar = Calendar.current
@@ -36,7 +38,8 @@ extension AppDatabase {
         var values: [(any DatabaseValueConvertible)?] = []
         if let date = query.date {
             let start = query.calendar.startOfDay(for:date)
-            let end = query.calendar.date(byAdding:.day,value:1,to:start)!
+            let last = query.calendar.startOfDay(for:max(date,query.endDate ?? date))
+            let end = query.calendar.date(byAdding:.day,value:1,to:last)!
             filter += " AND e.recordedAt >= ? AND e.recordedAt < ?"
             values += [start,end]
         }
@@ -51,16 +54,18 @@ extension AppDatabase {
     }
 
     func cardEntryHistoryPage(query: CardEntryHistoryQuery, page: Int) throws -> CardEntryHistoryPage {
-        try writer.read { sql in
-            let (filter,args) = Self.entryHistoryFilter(query)
-            let from = " FROM card_entry_record e JOIN card c ON c.id=e.cardId WHERE " + filter
-            let total = try Int.fetchOne(sql,sql:"SELECT COUNT(*)" + from,arguments:args) ?? 0
-            let pages = max(1,(total + CardEntryHistoryPage.size - 1) / CardEntryHistoryPage.size)
-            let current = min(max(1,page),pages)
-            let rows = try Row.fetchAll(sql,sql:"SELECT c.*, e.recordedAt AS entryRecordedAt" + from + " ORDER BY e.recordedAt DESC,c.id DESC LIMIT ? OFFSET ?",arguments:args + [CardEntryHistoryPage.size,(current - 1) * CardEntryHistoryPage.size])
-            let items = try rows.map { CardEntryHistoryItem(card:try Card(row:$0),recordedAt:$0["entryRecordedAt"]) }
-            return .init(items:items,total:total,page:current,pageCount:pages)
-        }
+        try writer.read { try Self.cardEntryHistoryPage(query:query,page:page,in:$0) }
+    }
+
+    static func cardEntryHistoryPage(query: CardEntryHistoryQuery, page: Int, in sql: Database) throws -> CardEntryHistoryPage {
+        let (filter,args) = Self.entryHistoryFilter(query)
+        let from = " FROM card_entry_record e JOIN card c ON c.id=e.cardId WHERE " + filter
+        let total = try Int.fetchOne(sql,sql:"SELECT COUNT(*)" + from,arguments:args) ?? 0
+        let pages = max(1,(total + CardEntryHistoryPage.size - 1) / CardEntryHistoryPage.size)
+        let current = min(max(1,page),pages)
+        let rows = try Row.fetchAll(sql,sql:"SELECT c.*, e.recordedAt AS entryRecordedAt" + from + " ORDER BY e.recordedAt DESC,c.id DESC LIMIT ? OFFSET ?",arguments:args + [CardEntryHistoryPage.size,(current - 1) * CardEntryHistoryPage.size])
+        let items = try rows.map { CardEntryHistoryItem(card:try Card(row:$0),recordedAt:$0["entryRecordedAt"]) }
+        return .init(items:items,total:total,page:current,pageCount:pages)
     }
 
     func validateCardEntryHistorySelection(_ ids: [Int64], query: CardEntryHistoryQuery) throws {

@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import KongReviewCore
 
 struct CardEntryPresetManagerView: View {
@@ -9,6 +11,8 @@ struct CardEntryPresetManagerView: View {
     @State private var original: CardEntryPreset?
     @State private var pendingDelete: CardEntryPreset?
     @State private var builtinPreview: CardEntryBuiltin?
+    @State private var importRequest: CardEntryPresetImportRequest?
+    @State private var message: String?
     @State private var error: String?
 
     var body: some View {
@@ -21,6 +25,8 @@ struct CardEntryPresetManagerView: View {
                     .handCursor().disabled(store.fullBackupBusy)
                 Button("从当前卡片结构创建") { captureCurrent() }
                     .handCursor().disabled(store.cardEditor == nil || store.fullBackupBusy)
+                Button("导入…") { chooseImport() }.handCursor().disabled(store.fullBackupBusy)
+                Button("导出全部…") { export(library.presets) }.handCursor().disabled(store.fullBackupBusy || library.presets.isEmpty)
                 Spacer()
                 Text("共 \(library.presets.count) 个").font(.caption).foregroundStyle(.secondary)
             }
@@ -50,12 +56,15 @@ struct CardEntryPresetManagerView: View {
                                 if let issue = validationIssue(preset) { Text(issue).font(.caption).foregroundStyle(.orange) }
                             }
                             Spacer()
+                            Button("复制") { copy(preset) }.handCursor()
                             Button("编辑") { original = preset; editing = preset }.handCursor()
+                            Button("导出…") { export([preset]) }.handCursor()
                             Button("删除", role: .destructive) { pendingDelete = preset }.handCursor()
                         }.padding(.vertical, 5)
                     }
                 }
             }.listStyle(.inset).disabled(store.fullBackupBusy)
+            if let message { Text(message).font(.callout).foregroundStyle(.secondary) }
             if let error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Text("为牌组设置预设后，新建卡片会自动带入空白结构。").font(.caption).foregroundStyle(.secondary)
@@ -69,6 +78,9 @@ struct CardEntryPresetManagerView: View {
                 CardEntryPresetEditorView(preset: preset, expected: original)
             }
             .sheet(item: $builtinPreview) { builtin in CardEntryBuiltinPreviewView(builtin: builtin) }
+            .sheet(item: $importRequest, onDismiss: { reload() }) { request in
+                CardEntryPresetImportView(presets: request.presets) { count in message = "已导入 \(count) 个独立模板；现有模板和牌组绑定保持原样。" }
+            }
             .confirmationDialog("删除「\(pendingDelete?.name ?? "")」？", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
                 Button("删除预设并解除牌组绑定", role: .destructive) {
                     guard !store.fullBackupBusy, let preset = pendingDelete else { return }
@@ -100,6 +112,41 @@ struct CardEntryPresetManagerView: View {
                 .retainingGuidance(draft.entryGuidance, from: draft.card)
             preset.name = ""
             original = nil; editing = preset
+        } catch { self.error = error.localizedDescription }
+    }
+    private func copy(_ preset: CardEntryPreset) {
+        guard !store.fullBackupBusy else { return }
+        let name = CardEntryPresetTransfer.suggestedCopyName(preset.name, existingNames: library.presets.map(\.name))
+        original = nil
+        editing = preset.copied(name: name)
+    }
+    private func chooseImport() {
+        guard !store.fullBackupBusy else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "选择单独导出的 KongReview 录入模板 JSON；导入前可预览并改名。"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            guard !store.fullBackupBusy else { throw CardEntryPresetError.backupBusy }
+            importRequest = .init(presets: try CardEntryPresetTransfer.read(from: url))
+            error = nil; message = nil
+        } catch { self.error = error.localizedDescription }
+    }
+    private func export(_ presets: [CardEntryPreset]) {
+        guard !store.fullBackupBusy else { return }
+        do {
+            let data = try CardEntryPresetTransfer.encode(presets)
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.json]
+            panel.canCreateDirectories = true
+            panel.nameFieldStringValue = "KongReview-录入模板.json"
+            panel.message = "只导出空白结构、默认标签及填写规则，不含卡片正文、学习记录或牌组绑定。"
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            guard !store.fullBackupBusy else { throw CardEntryPresetError.backupBusy }
+            try data.write(to: url, options: .atomic)
+            message = "已导出 \(presets.count) 个录入模板。"; error = nil
         } catch { self.error = error.localizedDescription }
     }
 }
@@ -151,6 +198,12 @@ private struct CardEntryPresetEditorView: View {
                                 HStack {
                                     TextField("栏目名称", text: $section.name).textFieldStyle(.roundedBorder)
                                     Toggle("默认折叠", isOn: $section.folded).toggleStyle(.checkbox)
+                                    Button { preset.moveSection(id: section.id, offset: -1) } label: { Image(systemName: "arrow.up") }
+                                        .buttonStyle(.borderless).handCursor().help("上移此栏目（填写规则随栏目移动）")
+                                        .accessibilityLabel("上移\(section.name)").disabled(preset.sections.first?.id == section.id)
+                                    Button { preset.moveSection(id: section.id, offset: 1) } label: { Image(systemName: "arrow.down") }
+                                        .buttonStyle(.borderless).handCursor().help("下移此栏目（填写规则随栏目移动）")
+                                        .accessibilityLabel("下移\(section.name)").disabled(preset.sections.last?.id == section.id)
                                     Button { let id = section.id; preset.sections.removeAll { $0.id == id } } label: { Image(systemName: "minus.circle") }
                                         .buttonStyle(.borderless).handCursor().help("删除此栏目")
                                 }
