@@ -7,7 +7,6 @@ struct WeeklySchedulesView: View {
     @State private var error: String?
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
-            Text("每周重复安排").font(.title2.bold())
             Text("新建学习计划时勾选“每周重复”。每个安排最多保留一项待办，漏做期间不补建多周记录；跳过本次请在待办中操作。暂停不删除当前待办，恢复后从下一个重复日期继续。").foregroundStyle(.secondary)
             if let error { Text(error).foregroundStyle(.red) }
             ScrollView {
@@ -46,7 +45,6 @@ struct LearningOutcomesView: View {
     var body: some View {
         @Bindable var nav = store.journeyNavigation
         VStack(alignment:.leading,spacing:12) {
-            Text("我的成果").font(.title2.bold())
             Text("汇集已完成计划中填写的收获或关联成果，按完成日期排序。专题筛选采用当前资料归属；同一成果在一个专题内只计一次。").font(.caption).foregroundStyle(.secondary)
             TextField("搜索计划或收获（支持繁简）",text:$nav.outcomesQuery).textFieldStyle(.roundedBorder)
             Picker("专题",selection:$nav.outcomesNotebookID) {
@@ -107,7 +105,7 @@ struct PeriodReflectionGuide: View {
     @State private var facts = PeriodReviewFacts(completed:0,outcomes:0,solvedQuestions:0)
     @State private var error: String?
     var body: some View {
-        GroupBox(window.period == .year ? "年度复盘引导" : "月度复盘引导") {
+        GrowthBox(title: window.period == .year ? "年度复盘引导" : "月度复盘引导", quote: true) {
             VStack(alignment:.leading,spacing:10) {
                 Text("本期学习 \(summary[.days]) 天，回顾 \(summary[.highlights]) 条摘录，学习 \(summary[.cards]) 张卡片；完成 \(facts.completed) 项计划，留下 \(facts.outcomes) 项成果，解决 \(facts.solvedQuestions) 个专题问题。")
                 Text("① 哪些理解加深了？结合下方完成计划与成果，填写“收获”。\n② 哪些问题仍未解决？回看专题问题清单，填写“困难”。\n③ 下一阶段关注什么？填写“下一步”，再转成具体计划。").fixedSize(horizontal:false,vertical:true)

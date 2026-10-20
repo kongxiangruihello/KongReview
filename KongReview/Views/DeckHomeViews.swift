@@ -58,22 +58,35 @@ struct SealStamp: View {
     }
 }
 
-/// 今日已学张数；学习步骤中已学和待学可能重叠，因此不计算百分比。
+/// 今日已学张数；学习步骤中已学和待学可能重叠，因此不写百分比。
+/// 3.14：环按“今天已学（松绿）: 当前待学（藤黄）”分两段，与首页同色。
 struct DailyRing: View {
     let done: Int
     let remaining: Int
 
     var body: some View {
+        let total = done + remaining
+        let doneShare = total == 0 ? 0 : CGFloat(done) / CGFloat(total)
         ZStack {
             Circle().stroke(ReviewPalette.hair, lineWidth: 9)
-            Circle()
-                .stroke(DeckColors.reviewColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
-                .opacity(done > 0 ? 0.7 : 0)
+            if done > 0 {
+                Circle().trim(from: 0, to: doneShare)
+                    .stroke(ReviewPalette.done, style: StrokeStyle(lineWidth: 9, lineCap: .butt))
+                    .rotationEffect(.degrees(-90))
+            }
+            if remaining > 0 {
+                Circle().trim(from: doneShare, to: 1)
+                    .stroke(ReviewPalette.pending.opacity(0.75), style: StrokeStyle(lineWidth: 9, lineCap: .butt))
+                    .rotationEffect(.degrees(-90))
+            }
             VStack(spacing: 2) {
                 Text("\(done)")
                     .font(.system(size: 30, weight: .medium, design: .serif).monospacedDigit())
-                    .foregroundStyle(ReviewPalette.ink)
+                    .foregroundStyle(done > 0 ? ReviewPalette.done : ReviewPalette.ink)
                 Text("今天已学").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+                if remaining > 0 {
+                    Text("待学 \(remaining)").font(.system(size: 10.5).monospacedDigit()).foregroundStyle(ReviewPalette.pending)
+                }
             }
         }
         .frame(width: 118, height: 118)
@@ -244,7 +257,7 @@ struct DeckHomeView: View {
     private func headline(remaining: Int, done: Int, status: CardStudyAvailability?) -> some View {
         let font = Font.system(size: 30, weight: .semibold, design: .serif)
         if remaining > 0 {
-            Text("今天还有 \(Text("\(remaining)").foregroundStyle(ReviewPalette.accent)) 张卡片等你")
+            Text("今天还有 \(Text("\(remaining)").foregroundStyle(ReviewPalette.pending)) 张卡片等你")
                 .font(font)
                 .foregroundStyle(ReviewPalette.ink)
         } else if let status {

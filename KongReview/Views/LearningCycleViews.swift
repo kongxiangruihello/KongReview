@@ -155,7 +155,7 @@ struct WeeklyReviewView: View {
     @State private var error: String?
     @State private var loading = false
     var body: some View {
-        GroupBox("每周复盘 · 决定下一步") {
+        GrowthBox(title: "每周复盘 · 决定下一步") {
             VStack(alignment:.leading,spacing:12) {
                 Text("① 回看上周承诺　② 查看本周完成与取消　③ 决定继续、调整日期或放下").font(.callout)
                 if !prior.isEmpty { Text("上周的下一步：\n" + prior).textSelection(.enabled) }

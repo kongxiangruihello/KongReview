@@ -112,9 +112,11 @@ struct DailyReviewView: View {
                 scopeMenu
                 if !state.cards.isEmpty {
                     HStack(spacing: 8) {
-                        ProgressView(value: Double(min(state.position, state.cards.count)), total: Double(state.cards.count))
-                            .tint(ReviewPalette.accent)
+                        // 3.14：已回顾（松绿）与待回顾（藤黄）
+                        DonePendingBar(done: min(state.position, state.cards.count),
+                                       pending: max(0, state.cards.count - state.position), height: 5)
                             .frame(width: 80)
+                            .help("松绿为本组已回顾，藤黄为待回顾")
                         Text("\(min(state.position + 1, state.cards.count)) / \(state.cards.count)")
                             .font(.system(size: 12.5).monospacedDigit())
                             .foregroundStyle(ReviewPalette.sub)
@@ -247,7 +249,7 @@ struct DailyReviewView: View {
 
     private func cardsChip(_ due: Int, label: String) -> some View {
         Button { store.selection = .cards } label: {
-            StatChip(icon: "brain", iconColor: ReviewPalette.accent, label: label, value: "\(due)")
+            StatChip(icon: "brain", iconColor: due > 0 ? ReviewPalette.pending : ReviewPalette.sub, label: label, value: "\(due)")
         }
         .buttonStyle(.plain)
         .fixedSize()

@@ -91,7 +91,7 @@ struct DailyLimitsView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 Text("今天已学").font(.caption).foregroundStyle(.secondary)
-                Text("新卡 \(spent.new) · 复习 \(spent.review)").monospacedDigit()
+                Text("新卡 \(spent.new) · 复习 \(spent.review)").monospacedDigit().foregroundStyle(ReviewPalette.done)
             }
         }
         .font(.callout)
@@ -194,10 +194,11 @@ struct DailyLimitsView: View {
             limitCell(row.deck, .new, default: draft.newPerDay, step: 5)
             limitCell(row.deck, .review, default: draft.reviewsPerDay, step: 10)
             Text("新 \(row.spent.new) · 复 \(row.spent.review)")
-                .monospacedDigit().foregroundStyle(.secondary)
+                .monospacedDigit().foregroundStyle(row.spent.isZero ? Color.secondary : ReviewPalette.done)
                 .gridColumnAlignment(.trailing)
             Text("新 \(can.new) · 复 \(can.review)" + (row.learning > 0 ? " · 学 \(row.learning)" : ""))
                 .monospacedDigit()
+                .foregroundStyle(can.isZero && row.learning == 0 ? Color.secondary : ReviewPalette.pending)
                 .gridColumnAlignment(.trailing)
         }
     }

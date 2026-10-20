@@ -393,7 +393,7 @@ struct DeckStudySection: View {
                             Text(s.accuracy.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
                             if !week {
                                 Text(left.map { "新 \($0.new) · 学 \($0.learning) · 复 \($0.review)" } ?? "—")
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle((left?.total ?? 0) > 0 ? ReviewPalette.pending : Color.secondary)
                             }
                         }
                     }
