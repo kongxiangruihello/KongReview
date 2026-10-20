@@ -4,11 +4,12 @@ import KongReviewCore
 extension LibraryStore {
     /// 正常应用后台更新；内存测试可同步读取同一个快照构建器。
     func refreshDerivedLibrary() {
-        let request = DerivedLibraryRequest(now: Date(),
+        let now = Date()
+        let request = DerivedLibraryRequest(now: now,
             dailyReviewCount: max(0, UserDefaults.standard.object(forKey: SettingsKeys.dailyCount) as? Int ?? 10),
-            newPerDay: CardSettings.newPerDay, reviewsPerDay: CardSettings.reviewsPerDay,
+            limits: CardSettings.limits(now: now),
             scope: currentCardLearningScope, session: ReviewSessionRecordStore.load())
-        let key = "\(revision)|\(request.scope)|\(request.dailyReviewCount)|\(request.newPerDay)|\(request.reviewsPerDay)|\(request.session?.day ?? "")|\(request.session?.position ?? -1)|\(request.session?.regularIds ?? [])|\(request.session?.masteryIds ?? [])|\(Int(request.now.timeIntervalSince1970 / 60))"
+        let key = "\(revision)|\(request.scope)|\(request.dailyReviewCount)|\(request.limits.hashValue)|\(request.session?.day ?? "")|\(request.session?.position ?? -1)|\(request.session?.regularIds ?? [])|\(request.session?.masteryIds ?? [])|\(Int(request.now.timeIntervalSince1970 / 60))"
         if usesBackgroundStatistics, derivedIsLoading, derivedPendingKey == key { return }
         derivedRefreshGeneration += 1
         let generation = derivedRefreshGeneration
@@ -57,6 +58,7 @@ extension LibraryStore {
         stats = snapshot.activity.eventSummary
         learningActivitySummary = snapshot.activity
         deckSummaryCache = snapshot.decks
+        dailyLimitLedgerCache = snapshot.ledger
         globalCardLearningSummary = snapshot.globalCards
         homeLearningSummary = snapshot.home
         cardLearningSummary = snapshot.scopedCards

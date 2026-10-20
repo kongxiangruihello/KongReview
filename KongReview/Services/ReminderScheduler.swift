@@ -32,11 +32,9 @@ final class ReminderScheduler {
             let highlights = isToday ? (today?.highlights ?? dailyCount) : dailyCount
             var cards = StudyQueue.Counts()
             if isToday {
-                for d in store?.deckSummaryCache ?? [] {
-                    cards.new += d.counts.new; cards.learning += d.counts.learning; cards.review += d.counts.review
-                }
+                cards = store?.todayCardPending ?? StudyQueue.Counts()
             } else if let db = store?.db,
-                      let n = try? db.cardsDue(on: fire, newPerDay: CardSettings.newPerDay, reviewsPerDay: CardSettings.reviewsPerDay) {
+                      let n = try? db.cardsDue(on: fire, limits: CardSettings.limits(now: fire)) {
                 cards.review = n
             }
             var yesterday: (highlights: Int, cards: Int)?

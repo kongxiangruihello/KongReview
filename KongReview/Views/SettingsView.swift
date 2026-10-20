@@ -397,11 +397,25 @@ private struct CardSettingsTab: View {
     var body: some View {
         let _ = store.revision
         Form {
-            Section("每日上限（未单独设置的牌组）") {
-                Stepper("每天新卡：\(newPerDay)", value: $newPerDay, in: 0...500, step: 5)
-                Stepper("每天复习上限：\(reviewsPerDay)", value: $reviewsPerDay, in: 10...9999, step: 10)
-                Text("每个牌组可单独设置：在“记忆卡”页右键牌组 → 牌组选项。")
-                    .font(.caption).foregroundStyle(.secondary)
+            Section("每日学习量") {
+                LabeledContent("牌组默认：每天新卡") {
+                    DailyLimitNumberField(value: limitBinding($newPerDay), step: 5)
+                }
+                LabeledContent("牌组默认：每天复习上限") {
+                    DailyLimitNumberField(value: limitBinding($reviewsPerDay), step: 10)
+                }
+                totalRow("全库合计：每天新卡", .new, step: 5)
+                totalRow("全库合计：每天复习", .review, step: 10)
+                HStack {
+                    Text("未单独设置的牌组各用“牌组默认”；全库合计限制所有牌组加起来的张数，设了就以较小者为准。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("按牌组调整…") {
+                        store.openDailyLimits()
+                        WindowOpener.showMain()
+                    }
+                }
             }
             Section("FSRS 参数") {
                 Text(CardSettings.fsrsIsDefault ? "当前：FSRS-6 默认参数" : "当前：已优化（\(CardSettings.fsrsInfo ?? "")）")
@@ -435,6 +449,31 @@ private struct CardSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// 改了默认值后立即刷新牌组页、学习队列与菜单栏
+    private func limitBinding(_ value: Binding<Int>) -> Binding<Int> {
+        Binding(get: { value.wrappedValue },
+                set: { value.wrappedValue = DailyLimitSettings.clamp($0); store.dailyLimitsChanged() })
+    }
+
+    private func totalRow(_ title: String, _ kind: DailyLimitKind, step: Int) -> some View {
+        let current = kind == .new ? CardSettings.totalNewPerDay : CardSettings.totalReviewsPerDay
+        func set(_ v: Int?) {
+            if kind == .new { CardSettings.totalNewPerDay = v } else { CardSettings.totalReviewsPerDay = v }
+            store.dailyLimitsChanged()
+            store.revisionBump()
+        }
+        return HStack {
+            Toggle(title, isOn: Binding(get: { current != nil },
+                                        set: { set($0 ? CardSettings.lastTotal(kind) : nil) }))
+            Spacer()
+            if let current {
+                DailyLimitNumberField(value: Binding(get: { current }, set: { set($0) }), step: step)
+            } else {
+                Text("不限").foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

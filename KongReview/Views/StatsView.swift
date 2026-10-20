@@ -330,6 +330,11 @@ struct ClassicProgressSection: View {
 struct DeckStudySection: View {
     @Environment(LibraryStore.self) private var store
 
+    /// 今天的全库合计上限（含临时加量）；不限时为 nil
+    private func totalLimit(_ kind: DailyLimitKind) -> Int? {
+        store.dailyLimitLedgerCache?.totalLimit(kind)
+    }
+
     var body: some View {
         let week = store.deckStudyShowWeek
         let stats = week ? store.deckStudyWeek : store.deckStudyToday
@@ -373,12 +378,15 @@ struct DeckStudySection: View {
                     ForEach(names, id: \.self) { name in
                         let s = byDeck[name] ?? DeckStudyStat(deck: name)
                         let o = store.options(for: name)
+                        // 3.13：上限含今天的临时加量，与牌组页一致
+                        let limit = store.dailyLimitLedgerCache?.deckLimit(name)
+                            ?? DailyAmount(new: o.newPerDay ?? CardSettings.newPerDay, review: o.reviewsPerDay ?? CardSettings.reviewsPerDay)
                         let left = summaries.first { $0.name == name }?.counts
                         GridRow {
                             Text(name).lineLimit(1).truncationMode(.middle).frame(maxWidth: 220, alignment: .leading)
-                            Text(week ? "\(s.newCards)" : "\(s.newCards) / \(o.newPerDay ?? CardSettings.newPerDay)")
+                            Text(week ? "\(s.newCards)" : "\(s.newCards) / \(limit.new)")
                                 .foregroundStyle(DeckColors.newColor)
-                            Text(week ? "\(s.reviewCards)" : "\(s.reviewCards) / \(o.reviewsPerDay ?? CardSettings.reviewsPerDay)")
+                            Text(week ? "\(s.reviewCards)" : "\(s.reviewCards) / \(limit.review)")
                                 .foregroundStyle(DeckColors.reviewColor)
                             Text("\(s.answers)")
                             Text("\(s.again)").foregroundStyle(s.again > 0 ? DeckColors.seal : Color.secondary)
@@ -389,12 +397,12 @@ struct DeckStudySection: View {
                             }
                         }
                     }
-                    if names.count > 1 {
+                    if names.count > 1 || totalLimit(.new) != nil || totalLimit(.review) != nil {
                         Divider().gridCellUnsizedAxes(.horizontal)
                         GridRow {
                             Text("合计").bold()
-                            Text("\(total.newCards)")
-                            Text("\(total.reviewCards)")
+                            Text(week ? "\(total.newCards)" : "\(total.newCards)" + (totalLimit(.new).map { " / \($0)" } ?? ""))
+                            Text(week ? "\(total.reviewCards)" : "\(total.reviewCards)" + (totalLimit(.review).map { " / \($0)" } ?? ""))
                             Text("\(total.answers)")
                             Text("\(total.again)")
                             Text(total.accuracy.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
@@ -408,7 +416,7 @@ struct DeckStudySection: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(ReviewPalette.card))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(ReviewPalette.hair))
             }
-            Text("新卡、复习按“张”算（同一张卡今天评几次分只算一张）：第一次评分前还是新卡的算新卡，其余算复习。“评分”是评分次数，学习步骤里一张卡会评好几次。牌组页显示的“新卡”“待复习”＝上限减去已学，且不超过实际到期的张数；“还剩”就是牌组页此刻的数字（新卡 · 学习中 · 待复习）。")
+            Text("新卡、复习按“张”算（同一张卡今天评几次分只算一张）：第一次评分前还是新卡的算新卡，其余算复习。“评分”是评分次数，学习步骤里一张卡会评好几次。牌组页显示的“新卡”“待复习”＝上限减去已学，且不超过实际到期的张数；设了全库合计时，还不超过合计的余额（合计行显示“已学 / 合计上限”）。“还剩”就是牌组页此刻的数字（新卡 · 学习中 · 待复习）。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

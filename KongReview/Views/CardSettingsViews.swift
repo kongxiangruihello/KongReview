@@ -13,7 +13,7 @@ struct DeckOptionsView: View {
     }
 
     /// nil = 跟随全局；用开关 + 步进器表示
-    private func limitRow(_ title: String, _ kp: WritableKeyPath<DeckOptions, Int?>, global: Int, range: ClosedRange<Int>, step: Int) -> some View {
+    private func limitRow(_ title: String, _ kp: WritableKeyPath<DeckOptions, Int?>, global: Int, step: Int) -> some View {
         let value = store.deckOptionsEditor?[keyPath: kp]
         return HStack {
             Toggle(title, isOn: Binding(
@@ -22,14 +22,18 @@ struct DeckOptionsView: View {
             ))
             Spacer()
             if let v = value {
-                Stepper("\(v)", value: Binding(get: { v }, set: { store.deckOptionsEditor?[keyPath: kp] = $0 }),
-                        in: range, step: step)
-                    .monospacedDigit()
-                    .fixedSize()
+                DailyLimitNumberField(value: Binding(get: { v }, set: { store.deckOptionsEditor?[keyPath: kp] = $0 }),
+                                      step: step)
             } else {
                 Text("跟随全局（\(global)）").foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// 设了全库合计时提醒：这个牌组的上限之外还受合计约束
+    private var totalNote: String? {
+        let parts = [CardSettings.totalNewPerDay.map { "新卡 \($0)" }, CardSettings.totalReviewsPerDay.map { "复习 \($0)" }].compactMap { $0 }
+        return parts.isEmpty ? nil : "同时受全库每天合计（\(parts.joined(separator: "、"))）约束；在“每日学习量”里调整。"
     }
 
     var body: some View {
@@ -42,8 +46,11 @@ struct DeckOptionsView: View {
                     Button("设置此牌组的录入模板…") { store.deckEntryPresetEditor = .init(deck:o?.deck ?? "默认") }
                 }
                 Section("每日上限") {
-                    limitRow("单独设置每天新卡数", \.newPerDay, global: CardSettings.newPerDay, range: 0...9999, step: 5)
-                    limitRow("单独设置每天复习上限", \.reviewsPerDay, global: CardSettings.reviewsPerDay, range: 0...9999, step: 10)
+                    limitRow("单独设置每天新卡数", \.newPerDay, global: CardSettings.newPerDay, step: 5)
+                    limitRow("单独设置每天复习上限", \.reviewsPerDay, global: CardSettings.reviewsPerDay, step: 10)
+                    if let total = totalNote {
+                        Text(total).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Section("排程算法") {
                     Picker("算法", selection: binding(\.algorithm, .sm2)) {

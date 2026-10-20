@@ -126,14 +126,18 @@ struct DeckHomeView: View {
 
     // MARK: 今日功课
 
+    /// 3.13：今天还可学以全库队列为准（有全库合计上限时，各牌组之和可能超过合计余额）
     private var totals: (due: StudyQueue.Counts, done: Int) {
-        var c = StudyQueue.Counts()
-        var done = 0
-        for d in decks {
-            c.new += d.counts.new; c.learning += d.counts.learning; c.review += d.counts.review
-            done += d.doneToday
-        }
-        return (c, done)
+        (store.todayCardPending, decks.reduce(0) { $0 + $1.doneToday })
+    }
+
+    /// 有全库合计上限时的一行说明：今天已学 / 合计
+    private var totalCapNote: String? {
+        guard let ledger = store.dailyLimitLedgerCache else { return nil }
+        let spent = ledger.totalSpent
+        let parts = [ledger.totalLimit(.new).map { "新卡 \(spent.new) / \($0)" },
+                     ledger.totalLimit(.review).map { "复习 \(spent.review) / \($0)" }].compactMap { $0 }
+        return parts.isEmpty ? nil : "全库每日合计：" + parts.joined(separator: " · ")
     }
 
     /// “开始复习”默认的牌组：上次学的（如果还有卡），否则待学最多的
@@ -167,12 +171,22 @@ struct DeckHomeView: View {
                     }
                 }
                 .padding(.top, 12)
+                if let note = totalCapNote {
+                    Text(note)
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(ReviewPalette.sub)
+                        .padding(.top, 8)
+                }
                 if remaining == 0, let status {
                     Text(status.detail)
                         .font(.system(size: 12.5))
                         .foregroundStyle(ReviewPalette.sub)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
+                    if status.blockedNew > 0 || status.blockedReview > 0 {
+                        TodayExtraButtons(blockedNew: status.blockedNew, blockedReview: status.blockedReview)
+                            .padding(.top, 10)
+                    }
                 }
                 HStack(spacing: 10) {
                     if let d = suggestedDeck {
@@ -181,6 +195,12 @@ struct DeckHomeView: View {
                         }
                         .help("学习牌组“\(d.name)”")
                     }
+                    if decks.filter({ $0.counts.total > 0 }).count > 1 {
+                        PillButton(icon: "square.stack.3d.up", title: "学习全部牌组") { store.startStudyAllDecks() }
+                            .help("各牌组混在一起学：学习中、到期复习优先，再按创建先后出新卡；各牌组上限与全库合计照常生效")
+                    }
+                    PillButton(icon: "slider.horizontal.3", title: "每日学习量") { store.openDailyLimits() }
+                        .help("设置牌组默认值、全库合计和各牌组的每日上限")
                     PillButton(icon: "plus", title: "新建卡片") { store.newCard(deck: store.study.lastDeck) }
                 }
                 .padding(.top, 20)
@@ -267,7 +287,7 @@ struct DeckHomeView: View {
             swatch(DeckColors.learnColor, "学习中")
             swatch(DeckColors.newColor.opacity(0.25), "新卡")
             Spacer()
-            Text("右键牌组可重命名、设置每日上限与算法（SM-2 / FSRS）。未单独设置的牌组：每天新卡 \(CardSettings.newPerDay)、复习 \(CardSettings.reviewsPerDay)。")
+            Text("点牌组卡片上的“新 · 复”调整这个牌组的每日上限；右键可重命名、设置算法（SM-2 / FSRS）。未单独设置的牌组：每天新卡 \(CardSettings.newPerDay)、复习 \(CardSettings.reviewsPerDay)。")
                 .foregroundStyle(ReviewPalette.sub)
                 .lineLimit(2)
                 .multilineTextAlignment(.trailing)
@@ -350,7 +370,8 @@ struct DeckTile: View {
                         .overlay(Capsule().stroke(ReviewPalette.hair))
                         .lineLimit(1)
                         .fixedSize()
-                        .help("排程算法；每天新卡 \(o.newPerDay ?? CardSettings.newPerDay) 张、复习 \(o.reviewsPerDay ?? CardSettings.reviewsPerDay) 张（右键“牌组选项…”修改）")
+                        .help("排程算法（右键“牌组选项…”修改）")
+                    DeckLimitChip(deck: deck.name, options: o)
                     Spacer(minLength: 4)
                     PillButton(title: "浏览") {
                         store.study.openCardBrowser(deck.name)
@@ -397,6 +418,7 @@ struct DeckTile: View {
                 store.study.renameText = deck.name
                 store.study.renamingDeck = deck.name
             }
+            Button("每日学习量…") { store.openDailyLimits(focus: deck.name) }
             Button("牌组选项…") {
                 var opt = (try? store.db.deckOptions())?[deck.name] ?? DeckOptions(deck: deck.name)
                 opt.deck = deck.name
@@ -561,5 +583,81 @@ struct ReviewHeatmapView: View {
         let date = "\(c.year ?? 0)年\(c.month ?? 0)月\(c.day ?? 0)日"
         guard n > 0 else { return date + "：没有复习" }
         return date + "：复习 \(n) 次" + (deck.map { "（主要是“\($0)”）" } ?? "")
+    }
+}
+
+// MARK: - 3.13：每日上限的入口
+
+/// 牌组卡片上的“新 20 · 复 200”：点一下打开每日学习量并定位到这个牌组
+struct DeckLimitChip: View {
+    @Environment(LibraryStore.self) private var store
+    let deck: String
+    /// 牌组的有效选项（未设置的项已填入默认值），只在账本尚未算出时兜底显示
+    let options: DeckOptions
+
+    var body: some View {
+        let ledger = store.dailyLimitLedgerCache
+        let limit = ledger?.deckLimit(deck)
+            ?? DailyAmount(new: options.newPerDay ?? CardSettings.newPerDay, review: options.reviewsPerDay ?? CardSettings.reviewsPerDay)
+        // options 已用默认值补齐，是否单独设置要看账本里的原始设置
+        let custom = ledger.map { $0.isOverridden(deck, .new) || $0.isOverridden(deck, .review) } ?? false
+        let extra = ledger.flatMap { $0.settings.extra?.deck(deck, on: $0.day) } ?? .zero
+        return Button { store.openDailyLimits(focus: deck) } label: {
+            Text("新 \(limit.new) · 复 \(limit.review)")
+                .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                .foregroundStyle(custom || !extra.isZero ? ReviewPalette.accent : ReviewPalette.sub)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(ReviewPalette.soft))
+                .overlay(Capsule().stroke(ReviewPalette.hair))
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .handCursor()
+        .help(helpText(limit: limit, custom: custom, extra: extra))
+    }
+
+    private func helpText(limit: DailyAmount, custom: Bool, extra: DailyAmount) -> String {
+        var text = "每天新卡 \(limit.new) 张、复习 \(limit.review) 张"
+        text += custom ? "（此牌组单独设置）" : "（牌组默认值）"
+        if !extra.isZero { text += "，含今天临时加量" }
+        if CardSettings.totalNewPerDay != nil || CardSettings.totalReviewsPerDay != nil { text += "；同时受全库合计约束" }
+        return text + "。点一下调整。"
+    }
+}
+
+/// 达到上限时的“仅今天”加量按钮：只放出当前范围被挡住的卡，次日自动恢复
+struct TodayExtraButtons: View {
+    @Environment(LibraryStore.self) private var store
+    let blockedNew: Int
+    let blockedReview: Int
+    var showsAdjust = true
+
+    var body: some View {
+        // 窄窗口时改为上下排列
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { buttons }
+            VStack(alignment: .leading, spacing: 8) { buttons }
+        }
+    }
+
+    @ViewBuilder
+    private var buttons: some View {
+        if blockedNew > 0 {
+            let n = min(10, blockedNew)
+            PillButton(icon: "plus.circle", title: "今天再学 \(n) 张新卡") { _ = store.addTodayExtra(n, kind: .new) }
+                .help("仅今天放宽新卡上限，明天自动恢复")
+        }
+        if blockedReview > 0 {
+            let n = min(50, blockedReview)
+            PillButton(icon: "plus.circle", title: "今天再复习 \(n) 张") { _ = store.addTodayExtra(n, kind: .review) }
+                .help("仅今天放宽复习上限，明天自动恢复")
+        }
+        if showsAdjust {
+            PillButton(icon: "slider.horizontal.3", title: "调整每日学习量…", style: .ghost) {
+                store.openDailyLimits(focus: store.study.allDecks ? nil : store.study.deck)
+            }
+        }
     }
 }
