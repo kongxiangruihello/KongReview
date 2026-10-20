@@ -137,9 +137,11 @@ public struct ReviewScheduler: Sendable {
     /// - Parameters:
     ///   - highlights: 候选摘录（通常是全库，或某个标签下的主题回顾）
     ///   - sourceWeights: 出处 id → 频率系数；缺省按 1 处理
+    ///   - multipliers: 3.15：摘录 id → 额外权重系数（本期焦点加权、熟记卡片对应摘录降权）；缺省为 1
     public func makeSession<R: RandomNumberGenerator>(
         highlights: [Highlight],
         sourceWeights: [Int64: Double],
+        multipliers: [Int64: Double] = [:],
         now: Date = Date(),
         using rng: inout R
     ) -> Session {
@@ -152,7 +154,8 @@ public struct ReviewScheduler: Sendable {
         for h in highlights {
             if let id = h.id, masteryIDs.contains(id) { continue }
             let sw = h.sourceId.flatMap { sourceWeights[$0] } ?? 1
-            let w = weight(of: h, sourceWeight: sw, now: now)
+            var w = weight(of: h, sourceWeight: sw, now: now)
+            if let id = h.id, let m = multipliers[id], w > 0 { w = max(config.minimumWeight, w * m) }
             guard w > 0 else { continue }
             let u = Double.random(in: Double.leastNonzeroMagnitude..<1, using: &rng)
             keyed.append((h, log(u) / w))
@@ -165,10 +168,11 @@ public struct ReviewScheduler: Sendable {
     public func makeSession(
         highlights: [Highlight],
         sourceWeights: [Int64: Double],
+        multipliers: [Int64: Double] = [:],
         now: Date = Date()
     ) -> Session {
         var rng = SystemRandomNumberGenerator()
-        return makeSession(highlights: highlights, sourceWeights: sourceWeights, now: now, using: &rng)
+        return makeSession(highlights: highlights, sourceWeights: sourceWeights, multipliers: multipliers, now: now, using: &rng)
     }
 
     // MARK: 状态更新

@@ -23,6 +23,10 @@ struct HomeView: View {
                 DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
                                     onOpen: { store.showsDraftRecovery = true })
 
+                TodayWorkBar(summary: store.homeLearningSummary, focus: store.learningFocus,
+                             onStart: { store.startTodayWork() },
+                             onFocus: { store.journeyNavigation.tab = 0; store.selection = .growth })
+
                 HomeLearningDashboard(summary: store.homeLearningSummary,
                                       quote: store.dailyReviewQuote(),
                                       onReview: { store.openTodayReview() },

@@ -41,12 +41,12 @@ enum ReviewPalette {
     static let hard = Color.dynamic(NSColor(hex: 0xE0913A), NSColor(hex: 0xEBA45A))
     static let easy = Color.dynamic(NSColor(hex: 0x3E9B6A), NSColor(hex: 0x5BB685))
 
-    // 3.14：完成状态的两种颜色——“已”（已回顾、已学）用松绿，“待”（待回顾、待学）用藤黄。
+    // 完成状态的两种颜色——“已”（已回顾、已学）用松绿，“待”（待回顾、待学）用醒目的朱红（3.15 起，此前为藤黄）。
     // 各处统一，颜色之外始终配文字标签。
     static let done = Color.dynamic(NSColor(hex: 0x2F7D57), NSColor(hex: 0x5BB685))
     static let doneSoft = Color.dynamic(NSColor(hex: 0x2F7D57, alpha: 0.12), NSColor(hex: 0x5BB685, alpha: 0.18))
-    static let pending = Color.dynamic(NSColor(hex: 0xB07A12), NSColor(hex: 0xDDAA45))
-    static let pendingSoft = Color.dynamic(NSColor(hex: 0xB07A12, alpha: 0.16), NSColor(hex: 0xDDAA45, alpha: 0.2))
+    static let pending = Color.dynamic(NSColor(hex: 0xD93A2B), NSColor(hex: 0xFF6A5C))
+    static let pendingSoft = Color.dynamic(NSColor(hex: 0xD93A2B, alpha: 0.12), NSColor(hex: 0xFF6A5C, alpha: 0.2))
 }
 
 /// 3.14：“已 / 待”的小圆点标签，如“● 已回顾”
@@ -60,12 +60,14 @@ struct ProgressStateLabel: View {
         HStack(spacing: 5) {
             Circle().fill(state == .done ? ReviewPalette.done : ReviewPalette.pending)
                 .frame(width: size * 0.5, height: size * 0.5)
-            Text(text).font(.system(size: size)).foregroundStyle(ReviewPalette.sub)
+            // 3.15：“待”的标签文字也用朱红，更醒目
+            Text(text).font(.system(size: size, weight: state == .pending ? .medium : .regular))
+                .foregroundStyle(state == .pending ? ReviewPalette.pending : ReviewPalette.sub)
         }
     }
 }
 
-/// 3.14：已完成（松绿）与待完成（藤黄）并排的进度条；总数为 0 时只显示底线
+/// 3.14：已完成（松绿）与待完成（朱红）并排的进度条；总数为 0 时只显示底线
 struct DonePendingBar: View {
     let done: Int
     let pending: Int
@@ -78,7 +80,7 @@ struct DonePendingBar: View {
             let doneWidth = total == 0 ? 0 : width * CGFloat(done) / CGFloat(total)
             HStack(spacing: done > 0 && pending > 0 ? 2 : 0) {
                 if done > 0 { Capsule().fill(ReviewPalette.done).frame(width: max(height, doneWidth - (pending > 0 ? 1 : 0))) }
-                if pending > 0 { Capsule().fill(ReviewPalette.pending.opacity(0.75)) }
+                if pending > 0 { Capsule().fill(ReviewPalette.pending.opacity(0.85)) }
                 if total == 0 { Capsule().fill(ReviewPalette.hair) }
             }
         }

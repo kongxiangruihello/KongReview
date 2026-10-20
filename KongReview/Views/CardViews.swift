@@ -393,7 +393,7 @@ struct StudyView: View {
             Circle().fill(color).frame(width: 7, height: 7)
             Text(label).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
             Text("\(n)").font(.system(size: 14, weight: .medium, design: .serif).monospacedDigit())
-                .foregroundStyle(n == 0 ? ReviewPalette.sub : ReviewPalette.ink)
+                .foregroundStyle(n == 0 ? ReviewPalette.sub : ReviewPalette.pending)
         }
     }
 

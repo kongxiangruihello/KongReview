@@ -190,13 +190,20 @@ struct GrowthReportView: View {
     @State private var detailsLoading = false
     @State private var previousReflection: GrowthReflection?
     @State private var planDraft: LearningPlan?
+    /// 3.15：学习质量与焦点进展
+    @State private var quality = GrowthQuality()
+    @State private var previousQuality = GrowthQuality()
+    @State private var focusProgress: FocusProgress?
     var body: some View {
         ScrollView {
             AcademicPaper {
                 HStack {
                     Spacer()
-                    Button("导出本期小结 Markdown…") { LearningMaterialExport.saveSummary(window: window, summary: current, reflection: reflection, store: store) }
-                        .controlSize(.small)
+                    Menu("导出") {
+                        Button("本期小结（Markdown）…") { LearningMaterialExport.saveSummary(window: window, summary: current, reflection: reflection, store: store) }
+                        Button("本期札记：收藏与按语（Markdown）…") { LearningMaterialExport.saveNotebook(window: window, store: store) }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
                 }
                 .padding(.bottom, -18)
                 AcademicTitleBlock(title: "\(window.period.title)学习小结", subtitle: periodLabel,
@@ -205,7 +212,11 @@ struct GrowthReportView: View {
                 if !loaded { ProgressView().frame(maxWidth: .infinity) }
                 overviewSection
                 AcademicDivider()
+                qualitySection
+                AcademicDivider()
                 distributionSection
+                AcademicDivider()
+                focusSection
                 AcademicDivider()
                 goalsSection
                 AcademicDivider()
@@ -224,6 +235,14 @@ struct GrowthReportView: View {
                 async let b = store.db.growthSummary(start: window.previousStart, end: window.previousEnd)
                 let (first,second) = try await (a,b)
                 try Task.checkCancellation(); current = first; previous = second
+                async let q1 = store.db.growthQuality(start: window.start, end: window.end)
+                async let q2 = store.db.growthQuality(start: window.previousStart, end: window.previousEnd)
+                let (thisQuality, lastQuality) = try await (q1, q2)
+                try Task.checkCancellation(); quality = thisQuality; previousQuality = lastQuality
+                if let focus = store.learningFocus {
+                    let progress = try await store.db.focusProgress(focus, start: window.start, end: window.end)
+                    try Task.checkCancellation(); focusProgress = progress
+                } else { focusProgress = nil }
                 if !loaded { reflection = try store.db.progressValue(GrowthReflection.self, key: window.key) ?? .init() }
                 previousReflection = try store.db.progressValue(GrowthReflection.self, key: window.period.window(containing: window.previousStart).key)
                 loaded = true; error = nil
@@ -275,10 +294,10 @@ struct GrowthReportView: View {
         return (r > 0 ? "+" : (r < 0 ? "−" : "")) + String(format: "%.0f%%", abs(r))
     }
 
-    /// 一、数据概览：表 1 本期与上期同期比较（点选一行，第二节与附录随之切换）
+    /// 一、数据概览：表 1 本期与上期同期比较（点选一行，第三节与附录随之切换）
     private var overviewSection: some View {
         AcademicSection(number: "一", title: "数据概览",
-                        lead: "表 1 列出本期各项学习数据及其与上期同期的比较。点选任一行，第二节“内容分布”与附录“本期明细”改为显示该项。") {
+                        lead: "表 1 列出本期各项学习数据及其与上期同期的比较。点选任一行，第三节“内容分布”与附录“本期明细”改为显示该项。") {
             AcademicTable(label: "表 1", title: "本期学习数据与上期同期比较",
                           note: "摘录和卡片在整个周期内分别去重；同一卡片的多次评分另计。难卡指本周期至少 3 次重来。新增数来自仍保存在库中的创建记录，永久删除后无法追溯。“▸”为当前选中的一项。") {
                 Text("指标")
@@ -311,22 +330,121 @@ struct GrowthReportView: View {
         }
     }
 
-    /// 二、内容分布：表 2 当前指标按出处、专题或牌组分布
+    /// 三、内容分布：表 3 当前指标按出处、专题或牌组分布
     private var distributionSection: some View {
-        AcademicSection(number: "二", title: "内容分布",
+        AcademicSection(number: "三", title: "内容分布",
                         lead: metric == .days ? "“学习天数”按日期计数，不按出处汇总；逐日记录见附录。"
-                                              : "表 2 按资料当前的归属，汇总本期“\(metric.title)”的来源，回答“本期主要学了什么”。") {
+                                              : "表 3 按资料当前的归属，汇总本期“\(metric.title)”的来源，回答“本期主要学了什么”。") {
             if metric != .days {
                 GrowthBreakdownView(window: window, metric: metric, total: current[metric]).id("\(window.key)|\(metric)")
             }
         }
     }
 
-    /// 三、目标与达成：表 3
+    private func percent(_ v: Double?) -> String { v.map { String(format: "%.0f%%", $0 * 100) } ?? "—" }
+
+    private func percentDelta(_ now: Double?, _ before: Double?) -> String {
+        guard let now, let before else { return "—" }
+        let d = (now - before) * 100
+        return abs(d) < 0.5 ? "0" : (d > 0 ? "+" : "−") + String(format: "%.0f", abs(d)) + " 个百分点"
+    }
+
+    /// 二、学习质量：表 2，从“做了多少”到“学得怎样”
+    private var qualitySection: some View {
+        AcademicSection(number: "二", title: "学习质量",
+                        lead: "表 2 从记忆、筛选与转化三方面看本期学得怎样。数字只反映记录，理解程度仍需自己判断。") {
+            AcademicTable(label: "表 2", title: "本期学习质量指标",
+                          note: "记忆卡保留率：本期对已进入复习阶段的卡片评分中，非“重来”所占比例（新卡和学习步骤不计；旧版记录缺少评分前状态的不计）。回顾筛选率：本期回顾的摘录中，收藏、弃置或写了按语的比例。摘录转卡率：本期新增摘录中已做成记忆卡的比例。") {
+                Text("指标")
+                Text("本期").gridColumnAlignment(.trailing)
+                Text("上期同期").gridColumnAlignment(.trailing)
+                Text("变化").gridColumnAlignment(.trailing)
+                Text("依据").gridColumnAlignment(.trailing)
+            } rows: {
+                qualityRow("记忆卡保留率", percent(quality.retention), percent(previousQuality.retention),
+                           percentDelta(quality.retention, previousQuality.retention), "\(quality.reviewRatings) 次复习评分")
+                qualityRow("反复重来的卡片", "\(current[.difficult])", "\(previous[.difficult])",
+                           signed(current[.difficult] - previous[.difficult]), "≥3 次重来")
+                qualityRow("回顾筛选率", percent(quality.curationRate), percent(previousQuality.curationRate),
+                           percentDelta(quality.curationRate, previousQuality.curationRate),
+                           "收藏 \(quality.favorited)・弃置 \(quality.discarded)・按语 \(quality.noted) / \(quality.reviewed)")
+                qualityRow("摘录转卡率", percent(quality.cardingRate), percent(previousQuality.cardingRate),
+                           percentDelta(quality.cardingRate, previousQuality.cardingRate), "\(quality.newHighlightsCarded) / \(quality.newHighlights) 条")
+            }
+        }
+    }
+
+    private func qualityRow(_ title: String, _ now: String, _ before: String, _ change: String, _ basis: String) -> some View {
+        GridRow {
+            Text(title).frame(maxWidth: .infinity, alignment: .leading)
+            Text(now).fontWeight(.semibold)
+            Text(before).foregroundStyle(ReviewPalette.sub)
+            Text(change)
+            Text(basis).font(AcademicType.note).foregroundStyle(ReviewPalette.sub)
+        }
+        .monospacedDigit()
+        .academicCell()
+    }
+
+    /// 四、焦点进展：表 4；在这里设定或更换本期焦点
+    private var focusSection: some View {
+        AcademicSection(number: "四", title: "焦点进展",
+                        lead: "选定一个专题或一本书作为本期焦点后，全库回顾会更常抽到其中的摘录，记忆卡也优先出现它的卡片；这一节报告本期在焦点上的进展。",
+                        trailing: AnyView(focusMenu)) {
+            if let focus = store.learningFocus, let p = focusProgress {
+                AcademicTable(label: "表 4", title: "本期焦点\(focus.label)的进展",
+                              note: "焦点自 \(focus.startedAt.formatted(date: .abbreviated, time: .omitted)) 起生效。回顾抽样中焦点摘录的权重为平时的 \(Int(ReviewBias.focusBoost)) 倍；记忆卡在同为可学时优先焦点卡片，不突破每日上限。") {
+                    Text("项目")
+                    Text("本期").gridColumnAlignment(.trailing)
+                    Text("焦点总量").gridColumnAlignment(.trailing)
+                    Text("覆盖").gridColumnAlignment(.trailing)
+                } rows: {
+                    focusRow("回顾过的摘录（条）", p.reviewedHighlights, p.totalHighlights)
+                    focusRow("学习过的卡片（张）", p.studiedCards, p.totalCards)
+                    focusRow("写按语（条）", p.notes, p.totalHighlights)
+                    focusRow("新增摘录（条）", p.newHighlights, nil)
+                }
+            } else {
+                Text("尚未设定焦点。点右上角“设为焦点”，从专题笔记本或出处中选一个。")
+                    .font(AcademicType.body).foregroundStyle(ReviewPalette.sub)
+            }
+        }
+    }
+
+    private func focusRow(_ title: String, _ value: Int, _ total: Int?) -> some View {
+        GridRow {
+            Text(title).frame(maxWidth: .infinity, alignment: .leading)
+            Text("\(value)").fontWeight(.semibold)
+            Text(total.map(String.init) ?? "—").foregroundStyle(ReviewPalette.sub)
+            Text(total.flatMap { $0 > 0 ? String(format: "%.0f%%", Double(value) / Double($0) * 100) : nil } ?? "—")
+        }
+        .monospacedDigit()
+        .academicCell()
+    }
+
+    private var focusMenu: some View {
+        Menu(store.learningFocus == nil ? "设为焦点…" : "更换焦点…") {
+            let choices = store.focusChoices
+            Section("专题笔记本") {
+                ForEach(choices.filter { $0.kind == .notebook }, id: \.id) { c in Button(c.title) { store.setLearningFocus(c) } }
+            }
+            Section("出处") {
+                ForEach(choices.filter { $0.kind == .source }.prefix(40), id: \.id) { c in Button(c.title) { store.setLearningFocus(c) } }
+            }
+            if store.learningFocus != nil {
+                Divider()
+                Button("取消焦点") { store.setLearningFocus(nil) }
+            }
+        }
+        .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
+        .disabled(store.fullBackupBusy)
+    }
+
+    /// 五、目标与达成：表 5
     private var goalsSection: some View {
-        AcademicSection(number: "三", title: "目标与达成",
+        AcademicSection(number: "五", title: "目标与达成",
                         lead: "为本期设定回顾与学习的数量目标；目标为 0 表示暂不设定。各周期独立设定，不改变学习排程。") {
-            AcademicTable(label: "表 3", title: "本期目标与实际完成") {
+            AcademicTable(label: "表 5", title: "本期目标与实际完成") {
                 Text("项目")
                 Text("目标").gridColumnAlignment(.trailing)
                 Text("实际").gridColumnAlignment(.trailing)
@@ -357,19 +475,19 @@ struct GrowthReportView: View {
 
     /// 四、复盘：收获、困难、下一步
     private var reflectionSection: some View {
-        AcademicSection(number: "四", title: "复盘", lead: "依次写下本期的收获、困难与下一步，内容自动保存。") {
+        AcademicSection(number: "六", title: "复盘", lead: "依次写下本期的收获、困难与下一步，内容自动保存。下一阶段想重点读的专题或书，可在第四节设为焦点。") {
             VStack(alignment: .leading, spacing: 18) {
                 if window.period == .month || window.period == .year { PeriodReflectionGuide(window: window, summary: current) }
                 VStack(alignment: .leading, spacing: 8) {
-                    AcademicSubheading(number: "4.1", title: "本期收获", hint: "哪些理解加深了")
+                    AcademicSubheading(number: "6.1", title: "本期收获", hint: "哪些理解加深了")
                     RichEditor(text:$reflection.gains,placeholder:"本期收获",autoHeight:true,minHeight:90,slot:"growth-gains").richEditorFrame()
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    AcademicSubheading(number: "4.2", title: "遇到的困难", hint: "哪些问题仍未解决")
+                    AcademicSubheading(number: "6.2", title: "遇到的困难", hint: "哪些问题仍未解决")
                     RichEditor(text:$reflection.challenges,placeholder:"遇到的困难",autoHeight:true,minHeight:90,slot:"growth-challenges").richEditorFrame()
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    AcademicSubheading(number: "4.3", title: "下一步", hint: "下一阶段关注什么")
+                    AcademicSubheading(number: "6.3", title: "下一步", hint: "下一阶段关注什么")
                     if let previousReflection, !previousReflection.nextSteps.isEmpty {
                         AcademicQuote(label: "对照：上期写下的“下一步”") {
                             Text(RichText.attributed(previousReflection.nextSteps)).textSelection(.enabled)
@@ -391,16 +509,16 @@ struct GrowthReportView: View {
 
     /// 五、计划执行
     private var plansSection: some View {
-        AcademicSection(number: "五", title: "计划执行",
+        AcademicSection(number: "七", title: "计划执行",
                         lead: window.period == .week ? "本期完成的学习计划，以及每周复盘中对未完成计划的决定。" : "本期完成的学习计划，按完成日期归入。") {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
-                    AcademicSubheading(number: "5.1", title: "本期完成的学习计划")
+                    AcademicSubheading(number: "7.1", title: "本期完成的学习计划")
                     CompletedGrowthPlans(window: window)
                 }
                 if window.period == .week {
                     VStack(alignment: .leading, spacing: 8) {
-                        AcademicSubheading(number: "5.2", title: "每周复盘：决定下一步")
+                        AcademicSubheading(number: "7.2", title: "每周复盘：决定下一步")
                         WeeklyReviewView(window: window).id(window.key)
                     }
                 }

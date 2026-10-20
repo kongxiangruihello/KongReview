@@ -1,4 +1,5 @@
 import SwiftUI
+import KongReviewCore
 
 struct HomeLearningHeader: View {
     let summary: HomeLearningSummary
@@ -107,7 +108,7 @@ struct HomeLearningDashboard: View {
     private var cardsBreakdown: some View {
         VStack(alignment: .leading, spacing: 10) {
             DonePendingBar(done: summary.cardsStudiedCount, pending: summary.cardsDueCount)
-                .help("松绿为今日已学，藤黄为当前待学")
+                .help("松绿为今日已学，朱红为当前待学")
             HStack(spacing: 6) {
                 HomeLearningDueCount(title: "新卡", count: summary.cardsNewDueCount, color: ReviewPalette.accent)
                 HomeLearningDueCount(title: "学习中", count: summary.cardsLearningDueCount, color: ReviewPalette.hard)
@@ -192,12 +193,13 @@ private struct HomeLearningTaskHeader: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(ReviewPalette.ink)
             Spacer(minLength: 6)
+            // 3.15：待回顾、待学习用实心朱红标记，白字
             Text(status)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(completed ? ReviewPalette.done : (pending ? ReviewPalette.pending : ReviewPalette.sub))
+                .font(.system(size: 10.5, weight: pending && !completed ? .semibold : .medium))
+                .foregroundStyle(completed ? ReviewPalette.done : (pending ? Color.white : ReviewPalette.sub))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(completed ? ReviewPalette.doneSoft : (pending ? ReviewPalette.pendingSoft : ReviewPalette.soft), in: Capsule())
+                .background(completed ? ReviewPalette.doneSoft : (pending ? ReviewPalette.pending : ReviewPalette.soft), in: Capsule())
                 .fixedSize()
         }
     }
@@ -219,7 +221,7 @@ private struct HomeLearningMetrics: View {
         .padding(.vertical, 4)
     }
 
-    /// 3.14：“已”用松绿、“待”用藤黄；数量为 0 时数字转为灰色，标签圆点保留颜色
+    /// 3.14：“已”用松绿、“待”用朱红；数量为 0 时数字转为灰色，标签圆点保留颜色
     private func metric(_ count: Int, label: String, state: ProgressStateLabel.Kind) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             ProgressStateLabel(state: state, text: label)
@@ -248,7 +250,7 @@ private struct HomeLearningDueCount: View {
         HStack(spacing: 5) {
             Circle().fill(color).frame(width: 4, height: 4)
             Text(title).foregroundStyle(ReviewPalette.sub)
-            Text("\(count)").monospacedDigit().foregroundStyle(ReviewPalette.ink)
+            Text("\(count)").monospacedDigit().foregroundStyle(count > 0 ? ReviewPalette.pending : ReviewPalette.sub)
         }
         .font(.system(size: 11))
         .frame(maxWidth: .infinity)
@@ -427,5 +429,87 @@ private enum HomeLearningDate {
 
     static func weekday(_ date: Date) -> String {
         ["日", "一", "二", "三", "四", "五", "六"][Calendar.current.component(.weekday, from: date) - 1]
+    }
+}
+
+/// 3.15：今日功课——先回顾、再记忆卡，一个入口、一个合计时长；有本期焦点时一并标出
+struct TodayWorkBar: View {
+    let summary: HomeLearningSummary
+    let focus: LearningFocus?
+    let onStart: () -> Void
+    let onFocus: () -> Void
+
+    private var cards: StudyQueue.Counts {
+        StudyQueue.Counts(new: summary.cardsNewDueCount, learning: summary.cardsLearningDueCount, review: summary.cardsReviewDueCount)
+    }
+
+    var body: some View {
+        let reviewLeft = summary.reviewPendingCount
+        let cardsLeft = cards.total
+        let minutes = LibraryStore.todayWorkMinutes(reviewPending: reviewLeft, cards: cards)
+        let allDone = reviewLeft == 0 && cardsLeft == 0
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("今日功课").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                if !allDone { Text("约 \(minutes) 分钟").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).monospacedDigit() }
+                Spacer(minLength: 8)
+                if let focus {
+                    Button(action: onFocus) {
+                        Label("本期焦点：\(focus.label)", systemImage: "scope").lineLimit(1)
+                    }
+                    .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
+                    .help("在个人成长的学习小结第四节更换或取消焦点").handCursor()
+                } else {
+                    Button("设定本期焦点…", action: onFocus).buttonStyle(.plain)
+                        .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).handCursor()
+                        .help("在个人成长的学习小结第四节选一个专题或一本书作为焦点")
+                }
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) { steps(reviewLeft: reviewLeft, cardsLeft: cardsLeft); Spacer(minLength: 8); startButton(allDone: allDone) }
+                VStack(alignment: .leading, spacing: 12) { steps(reviewLeft: reviewLeft, cardsLeft: cardsLeft); startButton(allDone: allDone) }
+            }
+        }
+        .padding(.horizontal, 22).padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(allDone ? ReviewPalette.hair : ReviewPalette.pending.opacity(0.35)))
+    }
+
+    private func steps(reviewLeft: Int, cardsLeft: Int) -> some View {
+        HStack(spacing: 10) {
+            step(1, "回顾", reviewLeft, unit: "条", done: summary.reviewCompletedCount)
+            Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ReviewPalette.sub)
+            step(2, "记忆卡", cardsLeft, unit: "张", done: summary.cardsStudiedCount)
+        }
+    }
+
+    private func step(_ n: Int, _ title: String, _ left: Int, unit: String, done: Int) -> some View {
+        HStack(spacing: 6) {
+            Text("\(n)").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(left > 0 ? ReviewPalette.pending : ReviewPalette.done, in: Circle())
+            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(ReviewPalette.ink)
+            if left > 0 {
+                Text("待 \(left) \(unit)").font(.system(size: 13, weight: .semibold).monospacedDigit()).foregroundStyle(ReviewPalette.pending)
+            } else {
+                Text(done > 0 ? "已完成" : "暂无").font(.system(size: 12.5)).foregroundStyle(done > 0 ? ReviewPalette.done : ReviewPalette.sub)
+            }
+        }
+        .fixedSize()
+    }
+
+    private func startButton(allDone: Bool) -> some View {
+        Button(action: onStart) {
+            HStack(spacing: 6) {
+                Text(allDone ? "今日功课已完成 · 查看回顾" : "开始今日功课").font(.system(size: 13, weight: .semibold))
+                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(allDone ? ReviewPalette.ink : Color.white)
+            .padding(.horizontal, 14).frame(height: 34)
+            .background(allDone ? ReviewPalette.soft : ReviewPalette.accent, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain).handCursor().fixedSize()
+        .help("先完成今日回顾，再进入记忆卡；两个以上牌组有待学卡片时混合学习")
     }
 }

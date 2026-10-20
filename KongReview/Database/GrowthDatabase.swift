@@ -29,10 +29,10 @@ struct GrowthWindow: Sendable {
     let period: GrowthPeriod
 }
 enum GrowthMetric: String, CaseIterable, Identifiable, Sendable {
-    case highlights, cards, ratings, difficult, newHighlights, newCards, days
+    case highlights, notes, cards, ratings, difficult, newHighlights, newCards, days
     var id: String { rawValue }
     var title: String { switch self {
-    case .highlights: "回顾摘录（条）"; case .cards: "学习记忆卡（张）"; case .ratings: "评分次数"
+    case .highlights: "回顾摘录（条）"; case .notes: "写按语（条）"; case .cards: "学习记忆卡（张）"; case .ratings: "评分次数"
     case .difficult: "反复重来的卡片"; case .newHighlights: "新增摘录"; case .newCards: "新增记忆卡"; case .days: "学习天数"
     } }
 }
@@ -68,10 +68,11 @@ extension AppDatabase {
                 SELECT COUNT(DISTINCT CASE WHEN kind NOT IN ('card','note') THEN highlightId END) AS highlights,
                     COUNT(DISTINCT CASE WHEN kind='card' THEN cardId END) AS cards,
                     COUNT(CASE WHEN kind='card' AND cardId IS NOT NULL THEN 1 END) AS ratings,
-                    COUNT(DISTINCT CASE WHEN (kind='card' AND cardId IS NOT NULL) OR (kind NOT IN ('card','note') AND highlightId IS NOT NULL) THEN date(at,'localtime') END) AS days
+                    COUNT(DISTINCT CASE WHEN (kind='card' AND cardId IS NOT NULL) OR (kind NOT IN ('card','note') AND highlightId IS NOT NULL) THEN date(at,'localtime') END) AS days,
+                    COUNT(DISTINCT CASE WHEN kind='note' THEN highlightId END) AS notes
                 FROM review_event WHERE at>=? AND at<?
                 """, arguments: args)!
-            var values: [GrowthMetric:Int] = [.highlights:row["highlights"],.cards:row["cards"],.ratings:row["ratings"],.days:row["days"]]
+            var values: [GrowthMetric:Int] = [.highlights:row["highlights"],.notes:row["notes"],.cards:row["cards"],.ratings:row["ratings"],.days:row["days"]]
             values[.difficult] = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM (SELECT cardId FROM review_event WHERE kind='card' AND answer=1 AND cardId IS NOT NULL AND at>=? AND at<? GROUP BY cardId HAVING COUNT(*)>=3)", arguments: args) ?? 0
             for (metric,table) in [(GrowthMetric.newHighlights,"highlight"),(.newCards,"card")] {
                 values[metric] = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table) WHERE createdAt>=? AND createdAt<?", arguments: args) ?? 0
@@ -88,10 +89,11 @@ extension AppDatabase {
                 query = "SELECT id AS rowID, id AS targetID, '\(card ? "card" : "highlight")' AS targetKind, \(card ? "front" : "text") AS title, deletedAt, '新增记录' AS detail FROM \(card ? "card" : "highlight") WHERE createdAt>=? AND createdAt<? ORDER BY createdAt DESC,id DESC"
             case .days:
                 query = "SELECT MIN(id) AS rowID, NULL AS targetID, 'highlight' AS targetKind, date(at,'localtime') AS title, NULL AS deletedAt, CAST(COUNT(*) AS TEXT)||' 次操作／评分' AS detail FROM review_event WHERE at>=? AND at<? AND ((kind='card' AND cardId IS NOT NULL) OR (kind NOT IN ('card','note') AND highlightId IS NOT NULL)) GROUP BY date(at,'localtime') ORDER BY title DESC"
-            case .highlights, .cards, .difficult, .ratings:
-                let card = metric != .highlights
+            case .highlights, .notes, .cards, .difficult, .ratings:
+                let card = metric != .highlights && metric != .notes
                 let identifier = card ? "cardId" : "highlightId"
-                let condition = card ? "e.kind='card' AND e.cardId IS NOT NULL" : "e.kind NOT IN ('card','note') AND e.highlightId IS NOT NULL"
+                let condition = card ? "e.kind='card' AND e.cardId IS NOT NULL"
+                    : (metric == .notes ? "e.kind='note' AND e.highlightId IS NOT NULL" : "e.kind NOT IN ('card','note') AND e.highlightId IS NOT NULL")
                 let rating = metric == .ratings
                 query = "SELECT \(rating ? "e.id" : "e.\(identifier)") AS rowID,c.id AS targetID,'\(card ? "card" : "highlight")' AS targetKind,coalesce(c.\(card ? "front" : "text"),'原条目已删除') AS title,c.deletedAt,\(rating ? "CASE e.answer WHEN 1 THEN '重来' WHEN 2 THEN '困难' WHEN 3 THEN '良好' WHEN 4 THEN '简单' ELSE '评分' END" : "CAST(COUNT(*) AS TEXT)||' 次记录'") AS detail FROM review_event e LEFT JOIN \(card ? "card" : "highlight") c ON c.id=e.\(identifier) WHERE e.at>=? AND e.at<? AND \(condition)" + (metric == .difficult ? " AND e.answer=1" : "") + (rating ? "" : " GROUP BY e.\(identifier)") + (metric == .difficult ? " HAVING COUNT(*)>=3" : "") + " ORDER BY MAX(e.at) DESC,rowID DESC"
             }

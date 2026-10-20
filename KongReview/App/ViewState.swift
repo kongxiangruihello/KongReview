@@ -15,6 +15,8 @@ final class ReviewState {
         willSet { if newValue != theme { leaveCurrentEditor() } }
     }
     var cards: [ReviewCard] = []
+    /// 3.15：这一组里需要“重读原文”的摘录 → 对应卡片近 7 天重来次数
+    var refreshLapses: [Int64: Int] = [:]
     var position = 0 {
         willSet { if newValue != position { leaveCurrentEditor() } }
     }
