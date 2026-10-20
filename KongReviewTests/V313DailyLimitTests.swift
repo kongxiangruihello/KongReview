@@ -184,7 +184,7 @@ final class V313DailyLimitTests: XCTestCase {
         draft.setLimit("甲", .new, 1)
         XCTAssertEqual(draft.preview.new, 4)
         XCTAssertEqual(draft.sumOfDeckLimits.new, 4)
-        XCTAssertEqual(draft.deckPreview(overview.rows[0]).new, 1)
+        XCTAssertEqual(draft.deckPreview(try XCTUnwrap(overview.rows.first { $0.deck == "甲" })).new, 1)
         let queue = try db.cardLearningSummary(scope: .all, now: now, calendar: calendar,
                                                limits: draft.settings).pending.new
         XCTAssertEqual(queue, 5, "草稿里的牌组单独设置未保存前不影响实际队列（甲 仍按默认 3 张，合计截到 5）")
