@@ -121,7 +121,7 @@ final class V313DailyLimitTests: XCTestCase {
         var blocks: [NotebookBlock] = []
         for i in 0..<3 {
             let h = try db.save(Highlight(text: "摘录\(i)"))
-            blocks.append(NotebookBlock(notebookId: notebook.id!, position: i + 1, kind: .highlight, highlightId: h.id))
+            blocks.append(NotebookBlock(notebookId: notebook.id!, position: Double(i + 1), kind: .highlight, highlightId: h.id))
             _ = try db.save(Card(deck: "甲", front: "笔记本卡\(i)", highlightId: h.id, due: now))
         }
         _ = try db.insertBlocks(blocks, into: notebook.id!, after: nil)
