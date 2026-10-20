@@ -8,6 +8,10 @@ struct CardSelfAnswerPanel: View {
     let referenceHTML: String
     var slot = "self-answer"
     var allowsAssessment = false
+    /// 3.15.1：作答后点“对照参考答案”才显示参考答案；空格不再翻面
+    var onReveal: (() -> Void)? = nil
+    /// 新卡出现时把光标放进“我的回答”，按键直接写进回答框
+    var focusOnAppear = true
     var onEditingChanged: (Bool) -> Void = { _ in }
     @FocusState private var editing: Bool
     @State private var availableWidth: CGFloat = 0
@@ -31,8 +35,27 @@ struct CardSelfAnswerPanel: View {
                 }
             }
             if !showingAnswer {
-                Text("先写下自己的回答，再用“显示答案”对照。不会自动判定对错。")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing:12) {
+                    if let onReveal {
+                        Button {
+                            editing = false
+                            onReveal()
+                        } label: {
+                            Label("对照参考答案",systemImage:"eye")
+                                .padding(.horizontal,6).padding(.vertical,2)
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.large)
+                        .keyboardShortcut(.return,modifiers:.command)
+                        .handCursor()
+                        .help("写完回答后点此显示参考答案（⌘↩，回答框里打字时也可用）")
+                        .accessibilityIdentifier("card-self-answer-reveal")
+                    }
+                    Text(draft.text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty
+                         ? "参考答案已遮住。先写下自己的回答，写完点“对照参考答案”（⌘↩）；想不起来也可以直接对照。"
+                         : "写完了就点“对照参考答案”（⌘↩）。不会自动判定对错。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal:false,vertical:true)
+                }
             }
             if showingAnswer && allowsAssessment {
                 HStack {
@@ -58,6 +81,12 @@ struct CardSelfAnswerPanel: View {
             availableWidth = width
         }
         .onChange(of:editing) { _,value in onEditingChanged(value) }
+        // 对照后交出键盘：数字键 1–4 直接评分；要补写回答，再点回答框即可
+        .onChange(of:showingAnswer) { _,shown in if shown { editing = false } }
+        .onAppear {
+            guard focusOnAppear,!showingAnswer else { return }
+            DispatchQueue.main.async { editing = true }
+        }
         .onDisappear { onEditingChanged(false) }
     }
 

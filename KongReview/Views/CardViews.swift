@@ -269,7 +269,8 @@ struct CardContextPanel: View {
 
 struct StudyView: View {
     @Environment(LibraryStore.self) private var store
-    @State private var selfAnswerEnabled = false
+    /// 3.15.1：记住“先作答再对照”的开关
+    @AppStorage("study.selfAnswerFirst") private var selfAnswerEnabled = false
     @State private var selfAnswer = CardSelfAnswerDraft()
     @State private var selfAnswerEditing = false
     private var study: StudyState { store.study }
@@ -294,6 +295,7 @@ struct StudyView: View {
                                         selfAnswer = value
                                     }),showingAnswer:study.showingAnswer,
                                         referenceHTML:f.back,slot:"formal-self-\(card.id ?? 0)",
+                                        onReveal:{ if study.current?.id == card.id { study.showingAnswer = true } },
                                         onEditingChanged:{ if study.current?.id == card.id { selfAnswerEditing = $0 } })
                                         .id(card.id)
                                 }.padding(20)
@@ -374,7 +376,7 @@ struct StudyView: View {
             }
             Spacer()
             Toggle("先作答再对照",isOn:$selfAnswerEnabled).toggleStyle(.checkbox).fixedSize()
-                .help("可先写下自己的回答；翻面后与参考答案对照，仍用原评分按钮安排复习")
+                .help("先写下自己的回答，点“对照参考答案”（⌘↩）后才显示答案；对照后仍用原评分按钮安排复习")
             Button { store.undoLastCardRating() } label: {
                 Label("撤销评分", systemImage: "arrow.uturn.backward")
             }
@@ -459,7 +461,12 @@ struct StudyView: View {
     /// 卡片下方：先“显示答案”，再四个评分（每个按钮写着下次间隔与数字键）
     @ViewBuilder
     private func controls(_ card: Card) -> some View {
-        if !study.showingAnswer {
+        if !study.showingAnswer && selfAnswerEnabled {
+            // 先作答模式：答案只由回答框下方的“对照参考答案”打开，空格不翻面
+            Text("评分按钮在对照参考答案之后出现")
+                .font(.caption).foregroundStyle(ReviewPalette.sub)
+                .frame(height: 36)
+        } else if !study.showingAnswer {
             PillButton(icon: "eye", title: "显示答案", key: "空格", style: .primary) {
                 study.showingAnswer = true
             }
