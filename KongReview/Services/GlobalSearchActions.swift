@@ -39,7 +39,7 @@ extension LibraryStore {
         !showsResourceAudit && learningMaterialExport == nil && learningExplorer == nil && editorDraft == nil && cardEditor == nil && editingSource == nil && addArticleDraft == nil
             && articleSourceDraft == nil && batchPrompt == nil && exportRequest == nil && mergeRequest == nil
             && pendingImport == nil && cardImport == nil && duplicateReview == nil && duplicateCardReview == nil
-            && deckOptionsEditor == nil && templateEditor == nil && apkgExport == nil && clozeDraft == nil
+            && deckOptionsEditor == nil && dailyLimitsEditor == nil && templateEditor == nil && apkgExport == nil && clozeDraft == nil
             && tagEditor == nil && !showTagManager && bibliographyRequest == nil && newNotebookRequest == nil
             && pageRange == nil && citationCheck == nil && editionImport == nil && chapterProgressRequest == nil
             && backupList == nil && !showsDraftRecovery && pendingDraftRecovery == nil

@@ -6,6 +6,9 @@ enum CardLearningScope: Equatable {
     case all
     case deck(String)
     case notebook(Int64)
+
+    /// 3.13：“全部牌组”学习会话的标题
+    static let allDecksTitle = "全部牌组"
 }
 
 struct CardLearningSummary: Equatable {
@@ -38,6 +41,7 @@ struct CardStudyAvailability: Equatable {
 
     struct Group {
         var cards: [Card]
+        /// 牌组自己的上限与余额（含仅今天加量）；全库合计另由 `TotalCap` 表示
         var newLimit: Int
         var reviewLimit: Int
         var newLimitLeft: Int
@@ -45,13 +49,35 @@ struct CardStudyAvailability: Equatable {
         var studiedCards = 0
     }
 
+    /// 3.13：全库合计上限（所有牌组加起来）。nil 的上限表示不限。
+    struct TotalCap: Equatable {
+        var newLimit: Int?
+        var reviewLimit: Int?
+        var newLeft: Int
+        var reviewLeft: Int
+
+        init(newLimit: Int?, reviewLimit: Int?, newLeft: Int, reviewLeft: Int) {
+            self.newLimit = newLimit; self.reviewLimit = reviewLimit
+            self.newLeft = newLeft; self.reviewLeft = reviewLeft
+        }
+
+        init?(_ ledger: DailyLimitLedger) {
+            let n = ledger.totalLimit(.new), r = ledger.totalLimit(.review)
+            guard n != nil || r != nil else { return nil }
+            let left = ledger.totalLeft
+            self.init(newLimit: n, reviewLimit: r, newLeft: left.new, reviewLeft: left.review)
+        }
+    }
+
     /// 只解释 StudyQueue 的结果；到期判断和计数仍由同一个学习队列负责。
-    static func summarize(_ groups: [Group], now: Date, calendar: Calendar,
+    /// 先按各牌组余额计数，再与全库合计余额取小（`total` 为 nil 表示没有合计上限）。
+    static func summarize(_ groups: [Group], total: TotalCap? = nil, now: Date, calendar: Calendar,
                           studiedCards: Int) -> (counts: StudyQueue.Counts, status: Self) {
         let all = groups.flatMap(\.cards).filter { $0.deletedAt == nil }
         let active = all.filter { !$0.isSuspended }
         var counts = StudyQueue.Counts()
         var blockedNew = 0, blockedReview = 0
+        var unrestrictedNew = 0, unrestrictedReview = 0
         var nextDates: [Date] = []
         var zeroLimits: [String] = []
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
@@ -63,10 +89,10 @@ struct CardStudyAvailability: Equatable {
             counts.review += due.review
             let unrestricted = StudyQueue.counts(group.cards, now: now, newLimitLeft: Int.max,
                                                  reviewLimitLeft: Int.max)
+            unrestrictedNew += unrestricted.new
+            unrestrictedReview += unrestricted.review
             let newBlocked = unrestricted.new - due.new
             let reviewBlocked = unrestricted.review - due.review
-            blockedNew += newBlocked
-            blockedReview += reviewBlocked
             if newBlocked > 0 {
                 if group.newLimit > 0 { nextDates.append(tomorrow) }
                 else { zeroLimits.append("新卡每日上限为 0") }
@@ -88,6 +114,24 @@ struct CardStudyAvailability: Equatable {
                 }
             }
         }
+        // 各牌组的可学张数加起来，再受全库合计余额约束
+        var totalReasons: [String] = []
+        if let total {
+            let cappedNew = min(counts.new, max(0, total.newLeft))
+            let cappedReview = min(counts.review, max(0, total.reviewLeft))
+            if cappedNew < counts.new, let limit = total.newLimit {
+                if limit > 0 { nextDates.append(tomorrow); totalReasons.append("全库每天新卡合计 \(limit) 张，今天还剩 \(max(0, total.newLeft)) 张") }
+                else { zeroLimits.append("全库新卡合计上限为 0") }
+            }
+            if cappedReview < counts.review, let limit = total.reviewLimit {
+                if limit > 0 { nextDates.append(tomorrow); totalReasons.append("全库每天复习合计 \(limit) 张，今天还剩 \(max(0, total.reviewLeft)) 张") }
+                else { zeroLimits.append("全库复习合计上限为 0") }
+            }
+            counts.new = cappedNew
+            counts.review = cappedReview
+        }
+        blockedNew = unrestrictedNew - counts.new
+        blockedReview = unrestrictedReview - counts.review
         let learningDue = active.filter { $0.state == .learning || $0.state == .relearning }
             .map(\.due).min()
         let next = nextDates.min()
@@ -96,6 +140,7 @@ struct CardStudyAvailability: Equatable {
         var reasons: [String] = []
         if blockedNew > 0 { reasons.append("尚有 \(blockedNew) 张新卡受每日上限限制") }
         if blockedReview > 0 { reasons.append("尚有 \(blockedReview) 张到期复习卡受每日上限限制") }
+        reasons += totalReasons
         reasons += Array(Set(zeroLimits)).sorted()
         if waitingLearning, let learningDue {
             reasons.append("学习中的卡于\(dateLabel(learningDue, now: now, calendar: calendar))到期，可提前 20 分钟学习")

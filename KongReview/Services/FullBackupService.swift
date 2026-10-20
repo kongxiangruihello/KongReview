@@ -368,11 +368,13 @@ final class PreparedFullBackup: Identifiable {
 extension FullBackupService {
     static let booleanPreferenceKeys: Set<String> = [
         "reminder.enabled", "cards.adjustDarkColors", "menubar.showCounts", "menubar.visible", "ui.handCursor",
-        "review.showRelated", "study.showContext", "sidebar.sourcesExpanded", "sidebar.tagsExpanded"
+        "review.showRelated", "study.showContext", "sidebar.sourcesExpanded", "sidebar.tagsExpanded",
+        "cards.totalNewEnabled", "cards.totalReviewsEnabled"
     ]
     static let integerPreferenceKeys: [String: ClosedRange<Int>] = [
         "review.dailyCount": 0...100_000, "review.masteryLimit": 0...100_000,
         "cards.newPerDay": 0...100_000, "cards.reviewsPerDay": 0...100_000,
+        "cards.totalNewPerDay": 0...100_000, "cards.totalReviewsPerDay": 0...100_000,
         "reminder.hour": 0...23, "reminder.minute": 0...59
     ]
     static let stringPreferenceKeys: Set<String> = [

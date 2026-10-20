@@ -85,12 +85,14 @@ extension LibraryStore {
 
     // MARK: 按笔记本学习
 
-    /// 学习由笔记本里的摘录做成的卡片（不论在哪个牌组）；新卡、复习按“设置 → 记忆卡”的全局每日上限
+    /// 学习由笔记本里的摘录做成的卡片（不论在哪个牌组）；新卡、复习以牌组默认值为本笔记本的额度，
+    /// 3.13 起同时受全库合计上限约束
     func startNotebookStudy(_ id: Int64) {
         clearCardRatingUndo()
         flushNotebookSaves()
         study.notebookId = id
         study.deck = "《\(notebookTitle(id))》"
+        study.allDecks = false
         study.browsingDeck = nil
         selection = .cards
         nextCard()
@@ -114,12 +116,20 @@ extension LibraryStore {
         let ids = ((try? db.notebookHighlights(id)) ?? []).compactMap(\.id)
         let cards = (try? db.cards(highlightIds: ids)) ?? []
         let done = (try? db.studiedToday(cardIds: cards.compactMap(\.id), now: now)) ?? (new: 0, review: 0)
-        let newLeft = CardSettings.newPerDay - done.new
-        let reviewLeft = CardSettings.reviewsPerDay - done.review
-        study.current = StudyQueue.next(from: cards, now: now, newLimitLeft: newLeft, reviewLimitLeft: reviewLeft)
-        study.notebookCounts = StudyQueue.counts(cards, now: now, newLimitLeft: newLeft, reviewLimitLeft: reviewLeft)
+        let left = Self.notebookLeft(id, done: DailyAmount(new: done.new, review: done.review),
+                                     ledger: try? db.dailyLimitLedger(now: now, limits: CardSettings.limits(now: now)))
+        study.current = StudyQueue.next(from: cards, now: now, newLimitLeft: left.new, reviewLimitLeft: left.review)
+        study.notebookCounts = StudyQueue.counts(cards, now: now, newLimitLeft: left.new, reviewLimitLeft: left.review)
         study.showingAnswer = false
         study.finished = study.current == nil
+    }
+
+    /// 笔记本额度（牌组默认值，含本笔记本的仅今天加量）与全库合计余额取小
+    static func notebookLeft(_ id: Int64, done: DailyAmount, ledger: DailyLimitLedger?) -> DailyAmount {
+        guard let ledger else {
+            return DailyAmount(new: CardSettings.newPerDay - done.new, review: CardSettings.reviewsPerDay - done.review)
+        }
+        return ledger.with(scope: DailyLimitLedger.notebookKey(id), spent: done).left(DailyLimitLedger.notebookKey(id))
     }
 
     // MARK: 按书回顾

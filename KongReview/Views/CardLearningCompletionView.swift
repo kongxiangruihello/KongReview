@@ -56,6 +56,12 @@ struct CardLearningCompletionView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 18)
             }
+            // 3.13：被每日上限挡住时，可仅今天多放出几张（次日自动恢复）
+            if summary.availability.blockedNew > 0 || summary.availability.blockedReview > 0 {
+                TodayExtraButtons(blockedNew: summary.availability.blockedNew,
+                                  blockedReview: summary.availability.blockedReview)
+                    .padding(.top, 16)
+            }
             HStack(spacing: 8) {
                 PillButton(icon: "chevron.left", title: "返回牌组", style: .primary, action: onReturn)
                 PillButton(icon: "arrow.clockwise", title: summary.availability.kind == .ready ? "继续学习" : "再查一次", action: onResume)

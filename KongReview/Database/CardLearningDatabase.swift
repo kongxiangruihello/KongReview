@@ -7,12 +7,19 @@ extension AppDatabase {
     /// 范围按卡片当前牌组/笔记本归属关联，已永久删除卡片无法再归入原牌组。
     func cardLearningSummary(scope: CardLearningScope = .all, now: Date = Date(),
                              calendar: Calendar = .current,
-                             newPerDay: Int = CardSettings.newPerDay,
-                             reviewsPerDay: Int = CardSettings.reviewsPerDay) throws -> CardLearningSummary {
+                             newPerDay: Int, reviewsPerDay: Int) throws -> CardLearningSummary {
+        try cardLearningSummary(scope: scope, now: now, calendar: calendar,
+                                limits: DailyLimitSettings(newPerDay: newPerDay, reviewsPerDay: reviewsPerDay))
+    }
+
+    /// 3.13：牌组上限与全库合计一起生效；笔记本学习仍以牌组默认值为本笔记本额度，并同样受全库合计约束。
+    func cardLearningSummary(scope: CardLearningScope = .all, now: Date = Date(),
+                             calendar: Calendar = .current,
+                             limits: DailyLimitSettings = CardSettings.limits()) throws -> CardLearningSummary {
         let start = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: start)!
         let tomorrowEnd = calendar.date(byAdding: .day, value: 1, to: tomorrow)!
-        let result = try writer.read { db -> (String, [Card], Int, Int, Int) in
+        let result = try writer.read { db -> (String, [Card], Int, Int, Int, DailyLimitLedger) in
             let filter: String
             let args: [any DatabaseValueConvertible]
             let label: String
@@ -35,26 +42,23 @@ extension AppDatabase {
             let activeHighlight = scope.isNotebook ? " AND EXISTS (SELECT 1 FROM highlight h WHERE h.id = c.highlightId AND h.deletedAt IS NULL)" : ""
             let cards = try Card.fetchAll(db, sql: "SELECT c.* FROM card c WHERE c.deletedAt IS NULL" + filter + activeHighlight,
                                           arguments: StatementArguments(args))
-            return (label, cards, event?["cards"] ?? 0, event?["ratings"] ?? 0, event?["correct"] ?? 0)
+            let ledger = try Self.fetchDailyLimitLedger(db, now: now, calendar: calendar, limits: limits)
+            return (label, cards, event?["cards"] ?? 0, event?["ratings"] ?? 0, event?["correct"] ?? 0, ledger)
         }
-        let (label, cards, studied, ratings, correct) = result
-        var groups: [CardStudyAvailability.Group] = []
-        if case .notebook = scope {
+        let (label, cards, studied, ratings, correct, baseLedger) = result
+        var ledger = baseLedger
+        let groups: [CardStudyAvailability.Group]
+        if case .notebook(let id) = scope {
+            // 笔记本学习沿用原设计：以牌组默认值作为本笔记本的额度；3.13 起同时受全库合计约束
+            let key = DailyLimitLedger.notebookKey(id)
             let done = try studiedToday(cardIds: cards.compactMap(\.id), now: now)
-            groups = [.init(cards: cards, newLimit: newPerDay, reviewLimit: reviewsPerDay,
-                            newLimitLeft: newPerDay - done.new, reviewLimitLeft: reviewsPerDay - done.review)]
+            ledger = ledger.with(scope: key, spent: DailyAmount(new: done.new, review: done.review))
+            groups = [Self.dailyLimitGroup(cards, key: key, ledger: ledger)]
         } else {
-            for (deck, deckCards) in Dictionary(grouping: cards, by: \.deck) {
-                let options = try effectiveOptions(deck, defaults: (newPerDay, reviewsPerDay))
-                let newLimit = options.newPerDay ?? newPerDay
-                let reviewLimit = options.reviewsPerDay ?? reviewsPerDay
-                let done = try studiedToday(deck: deck, now: now)
-                groups.append(.init(cards: deckCards, newLimit: newLimit, reviewLimit: reviewLimit,
-                                    newLimitLeft: newLimit - done.new, reviewLimitLeft: reviewLimit - done.review,
-                                    studiedCards: done.new + done.review))
-            }
+            groups = Self.dailyLimitGroups(cards, ledger: ledger)
         }
-        let queue = CardStudyAvailability.summarize(groups, now: now, calendar: calendar, studiedCards: studied)
+        let total = CardStudyAvailability.TotalCap(ledger)
+        let queue = CardStudyAvailability.summarize(groups, total: total, now: now, calendar: calendar, studiedCards: studied)
         let dueTomorrow = cards.filter {
             !$0.isSuspended && $0.state != .new && $0.due >= tomorrow && $0.due < tomorrowEnd
         }.count
@@ -62,13 +66,29 @@ extension AppDatabase {
         if !scope.isNotebook {
             for group in groups {
                 guard let deck = group.cards.first?.deck else { continue }
-                byDeck[deck] = CardStudyAvailability.summarize([group], now: now, calendar: calendar,
+                byDeck[deck] = CardStudyAvailability.summarize([group], total: total, now: now, calendar: calendar,
                                                               studiedCards: group.studiedCards).status
             }
         }
         return .init(scopeLabel: label, studiedCards: studied, ratingCount: ratings,
                      correctRatings: correct, dueTomorrow: dueTomorrow,
                      pending: queue.counts, availability: queue.status, deckAvailability: byDeck)
+    }
+}
+
+extension AppDatabase {
+    /// 按牌组分组；每组用牌组自己的上限与今天已学（含仅今天加量），全库合计另由 TotalCap 约束。
+    static func dailyLimitGroups(_ cards: [Card], ledger: DailyLimitLedger) -> [CardStudyAvailability.Group] {
+        Dictionary(grouping: cards, by: \.deck).sorted { $0.key < $1.key }.map { deck, deckCards in
+            dailyLimitGroup(deckCards, key: deck, ledger: ledger)
+        }
+    }
+
+    static func dailyLimitGroup(_ cards: [Card], key: String, ledger: DailyLimitLedger) -> CardStudyAvailability.Group {
+        let limit = ledger.deckLimit(key), spent = ledger.spent(key)
+        return .init(cards: cards, newLimit: limit.new, reviewLimit: limit.review,
+                     newLimitLeft: limit.new - spent.new, reviewLimitLeft: limit.review - spent.review,
+                     studiedCards: spent.new + spent.review)
     }
 }
 

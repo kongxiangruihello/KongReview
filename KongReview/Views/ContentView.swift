@@ -483,6 +483,9 @@ struct CardSheets: ViewModifier {
             .sheet(item: $store.deckOptionsEditor) { _ in
                 DeckOptionsView()
             }
+            .sheet(item: $store.dailyLimitsEditor) { _ in
+                DailyLimitsView()
+            }
             .sheet(item: $store.templateEditor) { _ in
                 NoteTemplateEditorView()
             }

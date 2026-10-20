@@ -6,10 +6,26 @@ import KongReviewCore
 struct DerivedLibraryRequest: @unchecked Sendable {
     let now: Date
     let dailyReviewCount: Int
-    let newPerDay: Int
-    let reviewsPerDay: Int
+    /// 3.13：牌组默认上限、全库合计与今日加量
+    let limits: DailyLimitSettings
     let scope: CardLearningScope
     let session: ReviewSessionRecordStore.Snapshot?
+
+    var newPerDay: Int { limits.newPerDay }
+    var reviewsPerDay: Int { limits.reviewsPerDay }
+
+    init(now: Date, dailyReviewCount: Int, limits: DailyLimitSettings,
+         scope: CardLearningScope, session: ReviewSessionRecordStore.Snapshot?) {
+        self.now = now; self.dailyReviewCount = dailyReviewCount; self.limits = limits
+        self.scope = scope; self.session = session
+    }
+
+    init(now: Date, dailyReviewCount: Int, newPerDay: Int, reviewsPerDay: Int,
+         scope: CardLearningScope, session: ReviewSessionRecordStore.Snapshot?) {
+        self.init(now: now, dailyReviewCount: dailyReviewCount,
+                  limits: DailyLimitSettings(newPerDay: newPerDay, reviewsPerDay: reviewsPerDay),
+                  scope: scope, session: session)
+    }
 }
 
 struct DerivedLibrarySnapshot: @unchecked Sendable {
@@ -19,6 +35,8 @@ struct DerivedLibrarySnapshot: @unchecked Sendable {
     let globalCards: CardLearningSummary
     let scopedCards: CardLearningSummary
     let home: HomeLearningSummary
+    /// 3.13：同一次读取的每日上限账本（牌组卡片标签、统计页、首页合计用）
+    let ledger: DailyLimitLedger
 }
 
 extension AppDatabase {
@@ -28,19 +46,17 @@ extension AppDatabase {
         try Task.checkCancellation()
         return try writer.read { db in
             let calendar = Calendar.current
-            let context = try CardStatisticsContext(db: db, now: request.now, calendar: calendar)
+            let context = try CardStatisticsContext(db: db, now: request.now, calendar: calendar, limits: request.limits)
             try Task.checkCancellation()
             let activity = try Self.fetchLearningActivitySummary(db, now: request.now, days: 30, calendar: calendar)
-            let decks = context.deckSummaries(now: request.now, newPerDay: request.newPerDay, reviewsPerDay: request.reviewsPerDay)
-            let global = try context.summary(scope: .all, in: db, now: request.now, calendar: calendar,
-                                             newPerDay: request.newPerDay, reviewsPerDay: request.reviewsPerDay)
+            let decks = context.deckSummaries(now: request.now)
+            let global = try context.summary(scope: .all, in: db, now: request.now, calendar: calendar)
             let scoped = request.scope == .all ? global : try context.summary(
-                scope: request.scope, in: db, now: request.now, calendar: calendar,
-                newPerDay: request.newPerDay, reviewsPerDay: request.reviewsPerDay)
+                scope: request.scope, in: db, now: request.now, calendar: calendar)
             try Task.checkCancellation()
             let home = try Self.fetchHomeLearningSummary(db, now: request.now, calendar: calendar,
                 dailyReviewCount: request.dailyReviewCount, session: request.session,
-                decks: decks, activity: activity, availability: global.availability)
+                decks: decks, activity: activity, availability: global.availability, pending: global.pending)
             let cutoff = request.now.addingTimeInterval(-180 * 86_400)
             let row = try Row.fetchOne(db, sql: """
                 SELECT COUNT(*) AS total,
@@ -58,7 +74,7 @@ extension AppDatabase {
                 GROUP BY sourceId ORDER BY n DESC LIMIT 8
                 """).map { ($0["sourceId"], $0["n"]) }
             return .init(stale: stale, activity: activity, decks: decks,
-                         globalCards: global, scopedCards: scoped, home: home)
+                         globalCards: global, scopedCards: scoped, home: home, ledger: context.ledger)
         }
     }
 }
@@ -72,11 +88,11 @@ private struct CardStatisticsContext {
     /// 这些 Card 是调度投影，只供统计，不能用于显示正文或写回数据库。
     let projections: [Card]
     let byID: [Int64: Card]
-    let options: [String: DeckOptions]
     let events: [Int64: DayRecord]
-    let spentByDeck: [String: (new: Int, review: Int)]
+    /// 3.13：牌组上限、全库合计与今天已学（按牌组）
+    let ledger: DailyLimitLedger
 
-    init(db: Database, now: Date, calendar: Calendar) throws {
+    init(db: Database, now: Date, calendar: Calendar, limits: DailyLimitSettings) throws {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
         projections = try Row.fetchAll(db, sql: """
@@ -90,7 +106,6 @@ private struct CardStatisticsContext {
                      createdAt: row["createdAt"], deletedAt: row["deletedAt"])
             }
         byID = Dictionary(uniqueKeysWithValues: projections.compactMap { c in c.id.map { ($0, c) } })
-        options = Dictionary(uniqueKeysWithValues: try DeckOptions.fetchAll(db).map { ($0.deck, $0) })
         let rows = try Row.fetchAll(db, sql: """
             SELECT e.cardId, COUNT(*) AS n, SUM(CASE WHEN e.answer > 1 THEN 1 ELSE 0 END) AS correct,
                 (SELECT e2.cardState FROM review_event e2 WHERE e2.cardId = e.cardId AND e2.kind = 'card'
@@ -100,60 +115,56 @@ private struct CardStatisticsContext {
             GROUP BY e.cardId
             """, arguments: [start, end, start, start, end])
         var events: [Int64: DayRecord] = [:]
-        var spent: [String: (new: Int, review: Int)] = [:]
+        var spent: [String: DailyAmount] = [:]
         for row in rows {
             let id: Int64 = row["cardId"]
             let count: Int = row["n"]
             let wasNew = AppDatabase.firstAnswerWasNew(state: row["firstState"], prior: row["prior"] ?? false,
                                                        reps: byID[id]?.reps ?? 0, answers: count)
             events[id] = .init(count: count, correct: row["correct"] ?? 0, wasNew: wasNew)
-            if let deck = byID[id]?.deck {
-                var value = spent[deck] ?? (0, 0)
-                if wasNew { value.new += 1 } else { value.review += 1 }
-                spent[deck] = value
-            }
+            // 已彻底删除、无法归入牌组的卡记在空字符串下，只计入全库合计（与 fetchSpentToday 相同）
+            let deck = byID[id]?.deck ?? ""
+            var value = spent[deck] ?? .zero
+            if wasNew { value.new += 1 } else { value.review += 1 }
+            spent[deck] = value
         }
         self.events = events
-        spentByDeck = spent
+        ledger = DailyLimitLedger(settings: limits, day: ReminderPlan.dayKey(now, calendar: calendar),
+                                  overrides: AppDatabase.dailyLimitOverrides(try DeckOptions.fetchAll(db)),
+                                  spent: spent)
     }
 
-    func groups(cards: [Card], newPerDay: Int, reviewsPerDay: Int) -> [CardStudyAvailability.Group] {
-        Dictionary(grouping: cards, by: \.deck).sorted { $0.key < $1.key }.map { deck, cards in
-            let option = options[deck]
-            let n = option?.newPerDay ?? newPerDay
-            let r = option?.reviewsPerDay ?? reviewsPerDay
-            let spent = spentByDeck[deck] ?? (0, 0)
-            return .init(cards: cards, newLimit: n, reviewLimit: r,
-                         newLimitLeft: n - spent.new, reviewLimitLeft: r - spent.review,
-                         studiedCards: spent.new + spent.review)
+    func groups(cards: [Card]) -> [CardStudyAvailability.Group] {
+        AppDatabase.dailyLimitGroups(cards, ledger: ledger)
+    }
+
+    func deckSummaries(now: Date) -> [DeckSummary] {
+        groups(cards: projections.filter { $0.deletedAt == nil }).map { g in
+            let deck = g.cards[0].deck
+            let left = ledger.left(deck)
+            return DeckSummary(name: deck, total: g.cards.count,
+                               counts: StudyQueue.counts(g.cards, now: now, newLimitLeft: left.new, reviewLimitLeft: left.review),
+                               maturity: DeckMaturity(g.cards), doneToday: g.studiedCards)
         }
     }
 
-    func deckSummaries(now: Date, newPerDay: Int, reviewsPerDay: Int) -> [DeckSummary] {
-        groups(cards: projections.filter { $0.deletedAt == nil }, newPerDay: newPerDay, reviewsPerDay: reviewsPerDay).map { g in
-            DeckSummary(name: g.cards[0].deck, total: g.cards.count,
-                        counts: StudyQueue.counts(g.cards, now: now, newLimitLeft: g.newLimitLeft, reviewLimitLeft: g.reviewLimitLeft),
-                        maturity: DeckMaturity(g.cards), doneToday: g.studiedCards)
-        }
-    }
-
-    func summary(scope: CardLearningScope, in db: Database, now: Date, calendar: Calendar,
-                 newPerDay: Int, reviewsPerDay: Int) throws -> CardLearningSummary {
+    func summary(scope: CardLearningScope, in db: Database, now: Date, calendar: Calendar) throws -> CardLearningSummary {
         let label: String
         let cards: [Card]
         let selectedEvents: [DayRecord]
         let groupValues: [CardStudyAvailability.Group]
+        var ledger = self.ledger
         switch scope {
         case .all:
             label = "全部牌组"
             cards = projections.filter { $0.deletedAt == nil }
             selectedEvents = Array(events.values)
-            groupValues = groups(cards: cards, newPerDay: newPerDay, reviewsPerDay: reviewsPerDay)
+            groupValues = groups(cards: cards)
         case .deck(let name):
             label = "牌组「\(name)」"
             cards = projections.filter { $0.deck == name && $0.deletedAt == nil }
             selectedEvents = events.compactMap { byID[$0.key]?.deck == name ? $0.value : nil }
-            groupValues = groups(cards: cards, newPerDay: newPerDay, reviewsPerDay: reviewsPerDay)
+            groupValues = groups(cards: cards)
         case .notebook(let id):
             label = "笔记本「\(try Notebook.fetchOne(db, key: id)?.title ?? "未命名")」"
             let hids = Set(try Int64.fetchAll(db, sql: "SELECT highlightId FROM notebook_block WHERE notebookId = ? AND kind = 'highlight' AND highlightId IS NOT NULL", arguments: [id]))
@@ -163,11 +174,13 @@ private struct CardStatisticsContext {
                 byID[entry.key]?.highlightId.map(hids.contains) == true ? entry.value : nil
             }
             let done = cards.compactMap { $0.id.flatMap { events[$0] } }
-            groupValues = [.init(cards: cards, newLimit: newPerDay, reviewLimit: reviewsPerDay,
-                                 newLimitLeft: newPerDay - done.filter(\.wasNew).count,
-                                 reviewLimitLeft: reviewsPerDay - done.filter { !$0.wasNew }.count)]
+            let key = DailyLimitLedger.notebookKey(id)
+            ledger = ledger.with(scope: key, spent: DailyAmount(new: done.filter(\.wasNew).count,
+                                                                 review: done.filter { !$0.wasNew }.count))
+            groupValues = [AppDatabase.dailyLimitGroup(cards, key: key, ledger: ledger)]
         }
-        let queue = CardStudyAvailability.summarize(groupValues, now: now, calendar: calendar, studiedCards: selectedEvents.count)
+        let total = CardStudyAvailability.TotalCap(ledger)
+        let queue = CardStudyAvailability.summarize(groupValues, total: total, now: now, calendar: calendar, studiedCards: selectedEvents.count)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
         let end = calendar.date(byAdding: .day, value: 1, to: tomorrow)!
         let tomorrowCount = cards.filter { !$0.isSuspended && $0.state != .new && $0.due >= tomorrow && $0.due < end }.count
@@ -175,7 +188,7 @@ private struct CardStatisticsContext {
         if case .notebook = scope {} else {
             for g in groupValues {
                 if let name = g.cards.first?.deck {
-                    byDeck[name] = CardStudyAvailability.summarize([g], now: now, calendar: calendar, studiedCards: g.studiedCards).status
+                    byDeck[name] = CardStudyAvailability.summarize([g], total: total, now: now, calendar: calendar, studiedCards: g.studiedCards).status
                 }
             }
         }

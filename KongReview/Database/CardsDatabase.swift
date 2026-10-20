@@ -148,17 +148,20 @@ extension AppDatabase {
     }
 
     func deckSummaries(now: Date = Date(), newPerDay: Int, reviewsPerDay: Int) throws -> [DeckSummary] {
+        try deckSummaries(now: now, limits: DailyLimitSettings(newPerDay: newPerDay, reviewsPerDay: reviewsPerDay))
+    }
+
+    /// 3.13：每个牌组的可学张数 = min(牌组余额, 全库合计余额)
+    func deckSummaries(now: Date = Date(), calendar: Calendar = .current, limits: DailyLimitSettings) throws -> [DeckSummary] {
         let all = try cards()
-        let options = try deckOptions()
+        let ledger = try dailyLimitLedger(now: now, calendar: calendar, limits: limits)
         let grouped = Dictionary(grouping: all, by: \.deck)
-        return try grouped.keys.sorted().map { name in
+        return grouped.keys.sorted().map { name in
             let cs = grouped[name] ?? []
-            let o = options[name]
-            let done = try studiedToday(deck: name, now: now)
+            let left = ledger.left(name)
+            let done = ledger.spent(name)
             return DeckSummary(name: name, total: cs.count,
-                               counts: StudyQueue.counts(cs, now: now,
-                                                         newLimitLeft: (o?.newPerDay ?? newPerDay) - done.new,
-                                                         reviewLimitLeft: (o?.reviewsPerDay ?? reviewsPerDay) - done.review),
+                               counts: StudyQueue.counts(cs, now: now, newLimitLeft: left.new, reviewLimitLeft: left.review),
                                maturity: DeckMaturity(cs),
                                doneToday: done.new + done.review)
         }
@@ -562,13 +565,31 @@ extension AppDatabase {
     // MARK: 提醒用：某天待复习的卡数（估计）
 
     func cardsDue(on day: Date, newPerDay: Int, reviewsPerDay: Int) throws -> Int {
+        try cardsDue(on: day, limits: DailyLimitSettings(newPerDay: newPerDay, reviewsPerDay: reviewsPerDay))
+    }
+
+    /// 3.13：按各牌组自己的上限分别估计，再受全库合计约束；那一天还没学，今日加量不计入。
+    func cardsDue(on day: Date, limits: DailyLimitSettings) throws -> Int {
         let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: day)) ?? day
         return try writer.read { db in
-            let rev = try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM card WHERE deletedAt IS NULL AND isSuspended = 0 AND state != 'new' AND due < ?
-                """, arguments: [end]) ?? 0
-            let new = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM card WHERE deletedAt IS NULL AND isSuspended = 0 AND state = 'new'") ?? 0
-            return min(rev, reviewsPerDay) + min(new, newPerDay)
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT deck,
+                    SUM(CASE WHEN state != 'new' AND due < ? THEN 1 ELSE 0 END) AS rev,
+                    SUM(CASE WHEN state = 'new' THEN 1 ELSE 0 END) AS new
+                FROM card WHERE deletedAt IS NULL AND isSuspended = 0 GROUP BY deck
+                """, arguments: [end])
+            var settings = limits
+            settings.extra = nil
+            let ledger = DailyLimitLedger(settings: settings, day: ReminderPlan.dayKey(day),
+                                          overrides: Self.dailyLimitOverrides(try DeckOptions.fetchAll(db)))
+            var rev = 0, new = 0
+            for row in rows {
+                let deck: String = row["deck"]
+                let limit = ledger.deckLimit(deck)
+                rev += min(row["rev"] ?? 0, max(0, limit.review))
+                new += min(row["new"] ?? 0, max(0, limit.new))
+            }
+            return min(rev, ledger.totalLimit(.review) ?? .max) + min(new, ledger.totalLimit(.new) ?? .max)
         }
     }
 }

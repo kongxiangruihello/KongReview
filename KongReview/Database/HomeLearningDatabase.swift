@@ -10,21 +10,34 @@ extension AppDatabase {
                              deckSummaries: [DeckSummary]? = nil,
                              activitySummary: LearningActivitySummary? = nil,
                              cardAvailability: CardStudyAvailability? = nil) throws -> HomeLearningSummary {
-        let decks = try deckSummaries ?? self.deckSummaries(now: now, newPerDay: newCardsPerDay, reviewsPerDay: reviewsPerDay)
-        let availability = try cardAvailability ?? cardLearningSummary(scope: .all, now: now, calendar: calendar,
-                                                                       newPerDay: newCardsPerDay, reviewsPerDay: reviewsPerDay).availability
+        try homeLearningSummary(now: now, calendar: calendar, dailyReviewCount: dailyReviewCount,
+                                limits: DailyLimitSettings(newPerDay: newCardsPerDay, reviewsPerDay: reviewsPerDay),
+                                session: session, deckSummaries: deckSummaries, activitySummary: activitySummary,
+                                cardAvailability: cardAvailability)
+    }
+
+    func homeLearningSummary(now: Date = Date(), calendar: Calendar = .current,
+                             dailyReviewCount: Int, limits: DailyLimitSettings,
+                             session: ReviewSessionRecordStore.Snapshot? = ReviewSessionRecordStore.load(),
+                             deckSummaries: [DeckSummary]? = nil,
+                             activitySummary: LearningActivitySummary? = nil,
+                             cardAvailability: CardStudyAvailability? = nil) throws -> HomeLearningSummary {
+        let decks = try deckSummaries ?? self.deckSummaries(now: now, calendar: calendar, limits: limits)
+        let global = try cardLearningSummary(scope: .all, now: now, calendar: calendar, limits: limits)
         return try writer.read { db in
             let activity = try activitySummary ?? Self.fetchLearningActivitySummary(db, now: now, days: 7, calendar: calendar)
             return try Self.fetchHomeLearningSummary(db, now: now, calendar: calendar, dailyReviewCount: dailyReviewCount,
                                                     session: session, decks: decks, activity: activity,
-                                                    availability: availability)
+                                                    availability: cardAvailability ?? global.availability,
+                                                    pending: global.pending)
         }
     }
 
     static func fetchHomeLearningSummary(_ db: Database, now: Date, calendar: Calendar,
                                          dailyReviewCount: Int, session: ReviewSessionRecordStore.Snapshot?,
                                          decks: [DeckSummary], activity: LearningActivitySummary,
-                                         availability: CardStudyAvailability) throws -> HomeLearningSummary {
+                                         availability: CardStudyAvailability,
+                                         pending: StudyQueue.Counts? = nil) throws -> HomeLearningSummary {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
         let dayKey = ReminderPlan.dayKey(now, calendar: calendar)
@@ -60,10 +73,14 @@ extension AppDatabase {
         summary.cardsStudiedCount = todayCards?["studied"] ?? 0
         summary.cardsRatingCount = todayCards?["ratings"] ?? 0
         // 含每日新卡/复习上限和学习中提前20分钟；不能用已学张数抵消当前待办。
+        // 3.13：有全库合计上限时，各牌组可学张数之和可能超过合计余额，待办以全库队列为准。
         summary.activeCardCount = decks.reduce(0) { $0 + $1.total }
-        summary.cardsNewDueCount = decks.reduce(0) { $0 + $1.counts.new }
-        summary.cardsLearningDueCount = decks.reduce(0) { $0 + $1.counts.learning }
-        summary.cardsReviewDueCount = decks.reduce(0) { $0 + $1.counts.review }
+        let due = pending ?? decks.reduce(StudyQueue.Counts()) { c, d in
+            StudyQueue.Counts(new: c.new + d.counts.new, learning: c.learning + d.counts.learning, review: c.review + d.counts.review)
+        }
+        summary.cardsNewDueCount = due.new
+        summary.cardsLearningDueCount = due.learning
+        summary.cardsReviewDueCount = due.review
 
         summary.learningStreak = activity.currentStreak
         summary.longestLearningStreak = activity.longestStreak

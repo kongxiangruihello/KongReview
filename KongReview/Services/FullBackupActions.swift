@@ -130,7 +130,7 @@ extension LibraryStore {
     }
 
     private var hasBlockingFullBackupPanel: Bool {
-        bulkOriginalEditing.pending != nil || bulkOriginalEditing.returning != nil || showsCardBulkEntry || cardEntryHistory.isPresented || deckEntryPresetEditor != nil || showsCardEntryPresetManager || cardWorkflow.showsBatch || showsResourceAudit || learningMaterialExport != nil || learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil
+        bulkOriginalEditing.pending != nil || bulkOriginalEditing.returning != nil || showsCardBulkEntry || cardEntryHistory.isPresented || deckEntryPresetEditor != nil || showsCardEntryPresetManager || cardWorkflow.showsBatch || showsResourceAudit || learningMaterialExport != nil || learningExplorer != nil || globalSearch.isPresented || editingSource != nil || templateEditor != nil || deckOptionsEditor != nil || dailyLimitsEditor != nil
             || study.cardTagEdit != nil || study.renamingDeck != nil || duplicateCardReview != nil || duplicateReview != nil
             || newNotebookRequest != nil || addArticleDraft != nil || articleSourceDraft != nil || clozeDraft != nil
             || backupList != nil || tagEditor != nil || showTagManager || bibliographyRequest != nil

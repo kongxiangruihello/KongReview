@@ -181,6 +181,8 @@ final class LibraryStore {
     /// 笔记类型模板（多字段卡片按它显示）
     var noteTemplates: [String: NoteTemplate] = [:]
     var deckOptionsEditor: DeckOptions?
+    /// 3.13：每日学习量面板
+    var dailyLimitsEditor: DailyLimitsDraft?
     var templateEditor: NoteTemplate?
     var apkgExport: ApkgExportRequest?
     var cardSyncOffer: CardSyncOffer?
@@ -689,6 +691,8 @@ final class LibraryStore {
     var stats: ReviewStats.Summary = .empty
     /// 各牌组今天的新卡 / 学习中 / 待复习
     var deckSummaryCache: [DeckSummary] = []
+    /// 3.13：最近一次统计时的每日上限账本（牌组上限、全库合计与今天已学）
+    var dailyLimitLedgerCache: DailyLimitLedger?
     /// 首页两项学习任务的进度与去重记录
     var homeLearningSummary: HomeLearningSummary = .empty
     var learningActivitySummary: LearningActivitySummary = .empty
@@ -823,7 +827,15 @@ final class LibraryStore {
 
     /// 回顾页顶部提示：所有牌组今天待学的卡片数
     func dueCardCount() -> Int {
-        deckSummaryCache.reduce(0) { $0 + $1.counts.total }
+        todayCardPending.total
+    }
+
+    /// 3.13：全库今天还可学（新卡 · 学习中 · 复习）。有全库合计上限时，各牌组之和可能超过合计余额，以全库队列为准。
+    var todayCardPending: StudyQueue.Counts {
+        if let pending = globalCardLearningSummary?.pending { return pending }
+        return deckSummaryCache.reduce(StudyQueue.Counts()) { c, d in
+            StudyQueue.Counts(new: c.new + d.counts.new, learning: c.learning + d.counts.learning, review: c.review + d.counts.review)
+        }
     }
 
     func deleteCards(_ ids: [Int64]) {
@@ -969,33 +981,46 @@ final class LibraryStore {
         let name = new.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name != old else { return }
         perform { try db.renameDeck(old, to: name) }
+        if (try? db.deckNames())?.contains(old) == false { moveTodayExtra(from: old, to: name) }
     }
 
     func startStudy(deck: String) {
         clearCardRatingUndo()
         study.notebookId = nil
         study.deck = deck
+        study.allDecks = false
         study.lastDeck = deck
         study.browsingDeck = nil
         nextCard()
         refreshDerived()
     }
 
-    /// 学习：取下一张（按牌组自己的每日上限）
+    /// 学习：取下一张（牌组自己的每日上限与全库合计余额取小；“全部牌组”时各牌组分别计算）
     func nextCard(now: Date = Date()) {
         guard let deck = study.deck else { return }
         if let nid = study.notebookId {
             nextNotebookCard(nid, now: now)
             return
         }
-        let cards = (try? db.cards(deck: deck)) ?? []
-        let done = (try? db.studiedToday(deck: deck, now: now)) ?? (new: 0, review: 0)
-        let o = options(for: deck)
-        study.current = StudyQueue.next(from: cards, now: now,
-                                        newLimitLeft: (o.newPerDay ?? CardSettings.newPerDay) - done.new,
-                                        reviewLimitLeft: (o.reviewsPerDay ?? CardSettings.reviewsPerDay) - done.review)
+        let cards = (try? study.allDecks ? db.cards() : db.cards(deck: deck)) ?? []
+        if let ledger = try? db.dailyLimitLedger(now: now, limits: CardSettings.limits(now: now)) {
+            study.current = StudyQueue.next(from: cards, now: now, left: ledger.left)
+        } else {
+            study.current = nil
+        }
         study.showingAnswer = false
         study.finished = study.current == nil
+    }
+
+    /// 3.13：所有牌组混在一起学；各牌组仍按自己的上限，合计受全库上限约束
+    func startStudyAllDecks() {
+        clearCardRatingUndo()
+        study.notebookId = nil
+        study.deck = CardLearningScope.allDecksTitle
+        study.allDecks = true
+        study.browsingDeck = nil
+        nextCard()
+        refreshDerived()
     }
 
     /// 牌组的有效选项（未设置的项用全局默认）
@@ -1032,6 +1057,7 @@ final class LibraryStore {
 
     var currentCardLearningScope: CardLearningScope {
         if let id = study.notebookId { return .notebook(id) }
+        if study.allDecks { return .all }
         if let deck = study.deck { return .deck(deck) }
         return .all
     }
@@ -1043,7 +1069,7 @@ final class LibraryStore {
             && editingSource == nil && newNotebookRequest == nil && tagEditor == nil
             && addArticleDraft == nil && articleSourceDraft == nil && batchPrompt == nil
             && exportRequest == nil && mergeRequest == nil && pendingImport == nil && cardImport == nil
-            && deckOptionsEditor == nil && templateEditor == nil && apkgExport == nil
+            && deckOptionsEditor == nil && dailyLimitsEditor == nil && templateEditor == nil && apkgExport == nil
             && shareImageHighlight == nil && bibliographyRequest == nil && pageRange == nil
             && citationCheck == nil && editionImport == nil && chapterProgressRequest == nil
             && backupList == nil && duplicateCardReview == nil && cardSyncOffer == nil

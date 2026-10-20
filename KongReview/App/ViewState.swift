@@ -186,7 +186,11 @@ struct InlineEditDraft: Equatable {
 @Observable
 final class StudyState {
     /// 正在学习的牌组（nil 显示牌组列表）
-    var deck: String?
+    var deck: String? {
+        didSet { if deck == nil { allDecks = false } }
+    }
+    /// 3.13：正在学习“全部牌组”（deck 只作标题）
+    var allDecks = false
     /// 浏览模式（列出牌组内全部卡片）
     var browsingDeck: String?
     var current: Card?
@@ -346,6 +350,66 @@ enum CardSettings {
     static var newPerDay: Int { (UserDefaults.standard.object(forKey: newPerDayKey) as? Int) ?? 20 }
     static var reviewsPerDay: Int { (UserDefaults.standard.object(forKey: reviewsPerDayKey) as? Int) ?? 200 }
     static var defaults: (new: Int, review: Int) { (newPerDay, reviewsPerDay) }
+
+    // MARK: 3.13：全库合计上限与仅今天加量
+
+    static let totalNewEnabledKey = "cards.totalNewEnabled"
+    static let totalNewPerDayKey = "cards.totalNewPerDay"
+    static let totalReviewsEnabledKey = "cards.totalReviewsEnabled"
+    static let totalReviewsPerDayKey = "cards.totalReviewsPerDay"
+    /// 仅今天的加量（JSON）；只在当天有效，不进入完整备份
+    static let todayExtraKey = "cards.todayExtra"
+
+    /// 全库每天新卡合计；nil 表示不限
+    static var totalNewPerDay: Int? {
+        get { total(enabled: totalNewEnabledKey, value: totalNewPerDayKey, fallback: 30) }
+        set { setTotal(newValue, enabled: totalNewEnabledKey, value: totalNewPerDayKey) }
+    }
+
+    /// 全库每天复习合计；nil 表示不限
+    static var totalReviewsPerDay: Int? {
+        get { total(enabled: totalReviewsEnabledKey, value: totalReviewsPerDayKey, fallback: 300) }
+        set { setTotal(newValue, enabled: totalReviewsEnabledKey, value: totalReviewsPerDayKey) }
+    }
+
+    /// 关闭合计上限后再打开时沿用上次的数字
+    static func lastTotal(_ kind: DailyLimitKind) -> Int {
+        let key = kind == .new ? totalNewPerDayKey : totalReviewsPerDayKey
+        return (UserDefaults.standard.object(forKey: key) as? Int) ?? (kind == .new ? 30 : 300)
+    }
+
+    private static func total(enabled: String, value: String, fallback: Int) -> Int? {
+        guard UserDefaults.standard.bool(forKey: enabled) else { return nil }
+        return DailyLimitSettings.clamp((UserDefaults.standard.object(forKey: value) as? Int) ?? fallback)
+    }
+
+    private static func setTotal(_ newValue: Int?, enabled: String, value: String) {
+        UserDefaults.standard.set(newValue != nil, forKey: enabled)
+        if let v = newValue { UserDefaults.standard.set(DailyLimitSettings.clamp(v), forKey: value) }
+    }
+
+    /// 今天的加量；别的日子记下的加量视为已失效
+    static func todayExtra(now: Date = Date()) -> DailyLimitExtra? {
+        guard let data = UserDefaults.standard.data(forKey: todayExtraKey),
+              let extra = try? JSONDecoder().decode(DailyLimitExtra.self, from: data),
+              extra.day == ReminderPlan.dayKey(now), !extra.isEmpty else { return nil }
+        return extra
+    }
+
+    static func setTodayExtra(_ extra: DailyLimitExtra?) {
+        if let extra, !extra.isEmpty, let data = try? JSONEncoder().encode(extra) {
+            UserDefaults.standard.set(data, forKey: todayExtraKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: todayExtraKey)
+        }
+    }
+
+    /// 当前全部每日上限设置（牌组默认、全库合计、今日加量）
+    static func limits(now: Date = Date()) -> DailyLimitSettings {
+        DailyLimitSettings(newPerDay: newPerDay, reviewsPerDay: reviewsPerDay,
+                           totalNewPerDay: totalNewPerDay, totalReviewsPerDay: totalReviewsPerDay,
+                           extra: todayExtra(now: now))
+    }
 
     /// FSRS 参数（21 个）；没优化过时用默认值
     static var fsrsParameters: [Double] {
