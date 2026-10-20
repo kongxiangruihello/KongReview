@@ -47,7 +47,7 @@ extension LearningMaterialExport {
         catch { store.report(error) }
     }
 
-    static func notebookMarkdown(entries: [NotebookEntry], window: GrowthWindow) -> String {
+    nonisolated static func notebookMarkdown(entries: [NotebookEntry], window: GrowthWindow) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年M月d日"
         var lines = ["# \(window.period.title)札记", "",
                      "\(f.string(from: window.start)) — \(f.string(from: window.end.addingTimeInterval(-1)))　共 \(entries.count) 条（收藏 \(entries.filter(\.favorited).count)，写按语 \(entries.filter(\.noted).count)）", ""]

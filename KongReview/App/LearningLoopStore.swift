@@ -37,7 +37,7 @@ extension LibraryStore {
     // MARK: 今日功课：先回顾，再记忆卡
 
     /// 回顾约 30 秒一条；记忆卡沿用牌组页的估算
-    static func todayWorkMinutes(reviewPending: Int, cards: StudyQueue.Counts) -> Int {
+    nonisolated static func todayWorkMinutes(reviewPending: Int, cards: StudyQueue.Counts) -> Int {
         let seconds = reviewPending * 30 + DeckOverview.estimatedMinutes(cards) * 60
         return seconds == 0 ? 0 : max(1, Int((Double(seconds) / 60).rounded()))
     }
