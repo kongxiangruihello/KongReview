@@ -296,6 +296,7 @@ struct StatChip: View {
     var iconColor: Color = ReviewPalette.sub
     let label: String
     let value: String
+    var valueColor: Color = ReviewPalette.ink
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -303,7 +304,7 @@ struct StatChip: View {
                 Image(systemName: icon).font(.system(size: 11.5)).foregroundStyle(iconColor)
             }
             Text(label).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
-            Text(value).font(.system(size: 14, weight: .semibold).monospacedDigit()).foregroundStyle(ReviewPalette.ink)
+            Text(value).font(.system(size: 14, weight: .semibold).monospacedDigit()).foregroundStyle(valueColor)
         }
     }
 }

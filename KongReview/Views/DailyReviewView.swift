@@ -249,7 +249,8 @@ struct DailyReviewView: View {
 
     private func cardsChip(_ due: Int, label: String) -> some View {
         Button { store.selection = .cards } label: {
-            StatChip(icon: "brain", iconColor: due > 0 ? ReviewPalette.pending : ReviewPalette.sub, label: label, value: "\(due)")
+            StatChip(icon: "brain", iconColor: due > 0 ? ReviewPalette.pending : ReviewPalette.sub, label: label, value: "\(due)",
+                     valueColor: due > 0 ? ReviewPalette.pending : ReviewPalette.sub)
         }
         .buttonStyle(.plain)
         .fixedSize()

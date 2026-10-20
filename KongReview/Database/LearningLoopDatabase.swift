@@ -63,11 +63,13 @@ struct GrowthQuality: Equatable, Sendable {
     var discarded = 0
     var noted = 0
     var reviewed = 0
+    /// 本期回顾过、且做了收藏、弃置或写按语中至少一项的摘录（同一条只计一次）
+    var curated = 0
     /// 本期新增摘录中已做成记忆卡的条数
     var newHighlights = 0
     var newHighlightsCarded = 0
 
-    var curationRate: Double? { reviewed == 0 ? nil : Double(favorited + discarded + noted) / Double(reviewed) }
+    var curationRate: Double? { reviewed == 0 ? nil : Double(curated) / Double(reviewed) }
     var cardingRate: Double? { newHighlights == 0 ? nil : Double(newHighlightsCarded) / Double(newHighlights) }
 }
 
@@ -236,6 +238,11 @@ extension AppDatabase {
             q.favorited = e?["fav"] ?? 0
             q.discarded = e?["dis"] ?? 0
             q.noted = e?["noted"] ?? 0
+            q.curated = try Int.fetchOne(db, sql: """
+                SELECT COUNT(DISTINCT highlightId) FROM review_event
+                WHERE at >= ? AND at < ? AND kind IN ('favorite','discard','note') AND highlightId IN
+                    (SELECT highlightId FROM review_event WHERE at >= ? AND at < ? AND kind NOT IN ('card','note') AND highlightId IS NOT NULL)
+                """, arguments: [start, end, start, end]) ?? 0
             q.newHighlights = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM highlight WHERE createdAt >= ? AND createdAt < ?", arguments: [start, end]) ?? 0
             q.newHighlightsCarded = try Int.fetchOne(db, sql: """
                 SELECT COUNT(*) FROM highlight h WHERE h.createdAt >= ? AND h.createdAt < ?

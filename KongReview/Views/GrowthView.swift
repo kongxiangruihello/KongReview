@@ -354,7 +354,7 @@ struct GrowthReportView: View {
         AcademicSection(number: "二", title: "学习质量",
                         lead: "表 2 从记忆、筛选与转化三方面看本期学得怎样。数字只反映记录，理解程度仍需自己判断。") {
             AcademicTable(label: "表 2", title: "本期学习质量指标",
-                          note: "记忆卡保留率：本期对已进入复习阶段的卡片评分中，非“重来”所占比例（新卡和学习步骤不计；旧版记录缺少评分前状态的不计）。回顾筛选率：本期回顾的摘录中，收藏、弃置或写了按语的比例。摘录转卡率：本期新增摘录中已做成记忆卡的比例。") {
+                          note: "记忆卡保留率：本期对已进入复习阶段的卡片评分中，非“重来”所占比例（新卡和学习步骤不计；旧版记录缺少评分前状态的不计）。回顾筛选率：本期回顾的摘录中，收藏、弃置或写了按语的比例（同一条只计一次，本期收藏 \(quality.favorited)、弃置 \(quality.discarded)、写按语 \(quality.noted) 条）。摘录转卡率：本期新增摘录中已做成记忆卡的比例。") {
                 Text("指标")
                 Text("本期").gridColumnAlignment(.trailing)
                 Text("上期同期").gridColumnAlignment(.trailing)
@@ -367,7 +367,8 @@ struct GrowthReportView: View {
                            signed(current[.difficult] - previous[.difficult]), "≥3 次重来")
                 qualityRow("回顾筛选率", percent(quality.curationRate), percent(previousQuality.curationRate),
                            percentDelta(quality.curationRate, previousQuality.curationRate),
-                           "收藏 \(quality.favorited)・弃置 \(quality.discarded)・按语 \(quality.noted) / \(quality.reviewed)")
+                           "\(quality.curated) / \(quality.reviewed) 条")
+                    .help("收藏 \(quality.favorited) 条、弃置 \(quality.discarded) 条、写按语 \(quality.noted) 条；同一条做了几项只计一次")
                 qualityRow("摘录转卡率", percent(quality.cardingRate), percent(previousQuality.cardingRate),
                            percentDelta(quality.cardingRate, previousQuality.cardingRate), "\(quality.newHighlightsCarded) / \(quality.newHighlights) 条")
             }
@@ -380,7 +381,7 @@ struct GrowthReportView: View {
             Text(now).fontWeight(.semibold)
             Text(before).foregroundStyle(ReviewPalette.sub)
             Text(change)
-            Text(basis).font(AcademicType.note).foregroundStyle(ReviewPalette.sub)
+            Text(basis).font(AcademicType.note).foregroundStyle(ReviewPalette.sub).lineLimit(1).fixedSize()
         }
         .monospacedDigit()
         .academicCell()

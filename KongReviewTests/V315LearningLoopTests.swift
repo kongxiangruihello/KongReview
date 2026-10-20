@@ -104,12 +104,17 @@ final class V315LearningLoopTests: XCTestCase {
         let a = try db.save(Highlight(text: "甲", createdAt: day(-1)))
         let b = try db.save(Highlight(text: "乙", createdAt: day(-1)))
         _ = try db.save(Card(front: "甲卡", highlightId: a.id))
-        for (kind, h) in [(ReviewEvent.Kind.keep, a), (.favorite, a), (.keep, b), (.discard, b)] { db.log(ReviewEvent(kind: kind, highlightId: h.id, at: day(0))) }
+        for (kind, h) in [(ReviewEvent.Kind.keep, a), (.favorite, a), (.note, a), (.keep, b), (.discard, b)] { db.log(ReviewEvent(kind: kind, highlightId: h.id, at: day(0))) }
+        // 只写了按语、本期没回顾过的摘录不进入分母，也不进入分子
+        let c = try db.save(Highlight(text: "丙", createdAt: day(-10)))
+        db.log(ReviewEvent(kind: .note, highlightId: c.id, at: day(0)))
         let q = try await db.growthQuality(start: start, end: end)
         XCTAssertEqual(q.reviewRatings, 2, "只算评分前已是复习状态的卡")
         XCTAssertEqual(q.retention, 0.5)
         XCTAssertEqual(q.reviewed, 2)
-        XCTAssertEqual(q.curationRate, 1)
+        XCTAssertEqual(q.curated, 2, "同一条既收藏又写按语只计一次")
+        XCTAssertEqual(q.noted, 2)
+        XCTAssertEqual(q.curationRate, 1, "筛选率不会超过 100%")
         XCTAssertEqual(q.newHighlights, 2)
         XCTAssertEqual(q.cardingRate, 0.5)
     }
