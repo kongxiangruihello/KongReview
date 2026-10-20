@@ -145,6 +145,7 @@ struct PlanOutcomeSummary: View {
 
 struct WeeklyReviewView: View {
     @Environment(LibraryStore.self) private var store
+    @Environment(\.academicEmbedded) private var embedded
     let window: GrowthWindow
     @State private var filter: WeeklyPlanFilter = .delayed
     @State private var page = 0
@@ -158,8 +159,14 @@ struct WeeklyReviewView: View {
         GrowthBox(title: "每周复盘 · 决定下一步") {
             VStack(alignment:.leading,spacing:12) {
                 Text("① 回看上周承诺　② 查看本周完成与取消　③ 决定继续、调整日期或放下").font(.callout)
-                if !prior.isEmpty { Text("上周的下一步：\n" + prior).textSelection(.enabled) }
-                else { Text("上周还没有填写下一步。").foregroundStyle(.secondary) }
+                // 3.14：按富文本显示（此前会露出 <p> 等标签）；嵌入学习小结时 4.3 已对照上期，这里不重复
+                if !embedded {
+                    if !prior.isEmpty {
+                        Text("上周的下一步：").font(.callout.weight(.semibold))
+                        Text(RichText.attributed(prior)).textSelection(.enabled)
+                    }
+                    else { Text("上周还没有填写下一步。").foregroundStyle(.secondary) }
+                }
                 Text("按计划当前状态整理；已结束周展示当周完成／取消记录及目前仍待处理的到期计划，不还原过去的待办状态。").font(.caption).foregroundStyle(.secondary)
                 Picker("计划",selection:$filter) { ForEach(WeeklyPlanFilter.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 if let error { Text(error).foregroundStyle(.red) }

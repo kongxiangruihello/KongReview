@@ -294,6 +294,7 @@ struct GrowthReportView: View {
                             Text(on ? "▸" : "　").foregroundStyle(ReviewPalette.accent)
                             Text(item.title)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         Text("\(current[item])").fontWeight(.semibold)
                         Text("\(previous[item])").foregroundStyle(ReviewPalette.sub)
                         Text(signed(current[item] - previous[item]))
@@ -342,7 +343,7 @@ struct GrowthReportView: View {
     private func goalRow(_ title: String, goal: Binding<Int>, actual: Int) -> some View {
         let g = goal.wrappedValue
         return GridRow {
-            Text(title)
+            Text(title).frame(maxWidth: .infinity, alignment: .leading)
             TextField("0", value: goal, format: .number)
                 .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing).frame(width: 80)
             Text("\(actual)").fontWeight(.semibold)
