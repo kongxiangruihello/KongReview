@@ -84,7 +84,7 @@ final class V313DailyLimitTests: XCTestCase {
         _ = try db.save(Card(deck: "乙", front: "复习", state: .review, due: now))
         try db.save(DeckOptions(deck: "甲", newPerDay: 1))
         _ = try db.answer(try XCTUnwrap(db.cards(deck: "丙").first), .good, now: now)
-        let day = DeckOverview.dayKey(now, calendar: calendar)
+        let day = ReminderPlan.dayKey(now, calendar: calendar)
         let limits = DailyLimitSettings(newPerDay: 3, reviewsPerDay: 200, totalNewPerDay: 5, totalReviewsPerDay: 0,
                                         extra: DailyLimitExtra(day: day, decks: ["甲": DailyAmount(new: 1)]))
         for scope in [CardLearningScope.all, .deck("甲"), .deck("乙")] {
@@ -243,7 +243,7 @@ final class V313DailyLimitTests: XCTestCase {
             XCTAssertEqual(second.total, DailyAmount(new: 1))
 
             // 改名后加量跟着牌组走
-            CardSettings.setTodayExtra(DailyLimitExtra(day: DeckOverview.dayKey(Date()), decks: ["甲": DailyAmount(new: 3)]))
+            CardSettings.setTodayExtra(DailyLimitExtra(day: ReminderPlan.dayKey(Date()), decks: ["甲": DailyAmount(new: 3)]))
             store.renameDeck("甲", to: "甲甲")
             XCTAssertEqual(CardSettings.todayExtra()?.decks["甲甲"], DailyAmount(new: 3))
         }
@@ -251,7 +251,7 @@ final class V313DailyLimitTests: XCTestCase {
 
     func testTodayExtraExpiresNextDayAndTotalsPersistAsSettings() throws {
         let yesterday = Date().addingTimeInterval(-86_400)
-        CardSettings.setTodayExtra(DailyLimitExtra(day: DeckOverview.dayKey(yesterday), total: DailyAmount(new: 5)))
+        CardSettings.setTodayExtra(DailyLimitExtra(day: ReminderPlan.dayKey(yesterday), total: DailyAmount(new: 5)))
         XCTAssertNil(CardSettings.todayExtra(), "昨天的加量今天不再生效")
         XCTAssertNil(CardSettings.limits().extra)
         CardSettings.totalNewPerDay = 25

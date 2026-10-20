@@ -47,7 +47,7 @@ public struct DailyLimitOverride: Hashable, Sendable {
 
 /// “仅今天”的加量：只在记录的那一天有效，换日后自动失效，不需要手动改回。
 public struct DailyLimitExtra: Hashable, Codable, Sendable {
-    /// 与 `DeckOverview.dayKey` 相同的 yyyy-MM-dd
+    /// 与 `ReminderPlan.dayKey` 相同的 yyyy-MM-dd
     public var day: String
     public var decks: [String: DailyAmount]
     public var total: DailyAmount

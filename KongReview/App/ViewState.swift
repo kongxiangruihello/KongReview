@@ -392,7 +392,7 @@ enum CardSettings {
     static func todayExtra(now: Date = Date()) -> DailyLimitExtra? {
         guard let data = UserDefaults.standard.data(forKey: todayExtraKey),
               let extra = try? JSONDecoder().decode(DailyLimitExtra.self, from: data),
-              extra.day == DeckOverview.dayKey(now), !extra.isEmpty else { return nil }
+              extra.day == ReminderPlan.dayKey(now), !extra.isEmpty else { return nil }
         return extra
     }
 

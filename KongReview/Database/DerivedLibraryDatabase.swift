@@ -129,7 +129,7 @@ private struct CardStatisticsContext {
             spent[deck] = value
         }
         self.events = events
-        ledger = DailyLimitLedger(settings: limits, day: DeckOverview.dayKey(now, calendar: calendar),
+        ledger = DailyLimitLedger(settings: limits, day: ReminderPlan.dayKey(now, calendar: calendar),
                                   overrides: AppDatabase.dailyLimitOverrides(try DeckOptions.fetchAll(db)),
                                   spent: spent)
     }

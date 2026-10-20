@@ -69,7 +69,7 @@ extension AppDatabase {
                                       limits: DailyLimitSettings) throws -> DailyLimitLedger {
         let start = calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
-        return DailyLimitLedger(settings: limits, day: DeckOverview.dayKey(now, calendar: calendar),
+        return DailyLimitLedger(settings: limits, day: ReminderPlan.dayKey(now, calendar: calendar),
                                 overrides: dailyLimitOverrides(try DeckOptions.fetchAll(db)),
                                 spent: try fetchSpentToday(db, start: start, end: end))
     }
@@ -116,7 +116,7 @@ extension AppDatabase {
             }
             // 今天学过、但所在牌组已没有卡（卡片都已删除）：只计入合计
             let orphan = spent.values.reduce(DailyAmount.zero, +)
-            return DailyLimitOverview(day: DeckOverview.dayKey(now, calendar: calendar), rows: rows,
+            return DailyLimitOverview(day: ReminderPlan.dayKey(now, calendar: calendar), rows: rows,
                                       unattributedSpent: unattributed + orphan)
         }
     }

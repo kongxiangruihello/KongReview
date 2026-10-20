@@ -580,7 +580,7 @@ extension AppDatabase {
                 """, arguments: [end])
             var settings = limits
             settings.extra = nil
-            let ledger = DailyLimitLedger(settings: settings, day: DeckOverview.dayKey(day),
+            let ledger = DailyLimitLedger(settings: settings, day: ReminderPlan.dayKey(day),
                                           overrides: Self.dailyLimitOverrides(try DeckOptions.fetchAll(db)))
             var rev = 0, new = 0
             for row in rows {
