@@ -44,8 +44,23 @@ import KongReviewCore
             // 今天：已学 4 张，另有若干待学
             for c in cards.suffix(4) { _ = try db.answer(c, .easy, now: day(0, hour: max(0, calendar.component(.hour, from: now) - 1))) }
             for i in 0..<8 { _ = try db.save(Card(deck: "史学", front: "待学示例 \(i + 1)", back: "答案", due: day(-1))) }
-            // 今日回顾：一组 10 条，已回顾 4 条
-            let ids = highlights.prefix(10).compactMap(\.id)
+            // 3.15：难卡——第 6 条摘录的卡片近几天重来 3 次（回顾时“重读原文”）；本周写过几条按语、收藏几条
+            for d in [-3, -2, -1] { _ = try db.answer(cards[5], .again, now: day(d, hour: 20)) }
+            for h in highlights.prefix(3) {
+                var noted = h; noted.note = "<p>按：\(String(h.text.prefix(4)))一句，可与《学而》首章互参。</p>"
+                _ = try db.save(noted)
+                db.log(ReviewEvent(kind: .note, highlightId: h.id, at: day(-1, hour: 10)))
+            }
+            for h in highlights[3...4] { db.log(ReviewEvent(kind: .favorite, highlightId: h.id, at: day(-1, hour: 11))) }
+            // 本期焦点：专题“何以为士”，收入其中五条摘录
+            let notebook = try db.createNotebook(title: "何以为士")
+            _ = try db.insertBlocks(highlights.enumerated().filter { $0.offset % 3 == 0 }.map {
+                NotebookBlock(notebookId: notebook.id!, position: Double($0.offset + 1), kind: .highlight, highlightId: $0.element.id)
+            }, into: notebook.id!, after: nil)
+            try db.setLearningFocus(LearningFocus(kind: .notebook, id: notebook.id!, title: notebook.title, startedAt: day(-2)))
+            // 今日回顾：一组 10 条，已回顾 4 条；当前第 5 条为“重读原文”
+            let others = highlights.prefix(10).compactMap(\.id).filter { $0 != highlights[5].id! }
+            let ids = Array(others.prefix(4)) + [highlights[5].id!] + Array(others.dropFirst(4).prefix(5))
             for id in ids.prefix(4) { db.log(ReviewEvent(kind: .keep, highlightId: id, at: now.addingTimeInterval(-600))) }
             let record = ReviewSessionRecord(day: ReviewSessionRecord.dayString(now), regularIds: Array(ids), masteryIds: [], position: 4)
             UserDefaults.standard.set(try JSONEncoder().encode(record), forKey: ReviewSessionRecord.key(theme: nil))

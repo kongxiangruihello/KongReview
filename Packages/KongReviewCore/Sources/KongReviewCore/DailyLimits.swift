@@ -243,7 +243,9 @@ public extension DailyAmount {
 public extension StudyQueue {
     /// 一组牌组里选下一张：学习中（最早到期）→ 复习（最早到期，所在牌组仍有余额）→ 新卡（最早创建，所在牌组仍有余额）。
     /// `left` 给出每个牌组此刻还能学的张数（已与全库合计取小），学完一张后应重新计算。
-    static func next(from cards: [Card], now: Date, left: (String) -> DailyAmount) -> Card? {
+    /// - prefer: 3.15：优先的卡片（如本期焦点的摘录做成的卡）。同为可学的复习卡或新卡时，优先者在前；学习中的卡不受影响。
+    static func next(from cards: [Card], now: Date, left: (String) -> DailyAmount,
+                     prefer: (Card) -> Bool = { _ in false }) -> Card? {
         let due = cards.filter { isDue($0, now: now) }
         if let l = due.filter({ ($0.state == .learning || $0.state == .relearning) && $0.due <= now })
             .min(by: { $0.due < $1.due }) { return l }
@@ -254,10 +256,11 @@ public extension StudyQueue {
             cache[deck] = v
             return v
         }
+        func rank(_ c: Card) -> Int { prefer(c) ? 0 : 1 }
         if let r = due.filter({ $0.state == .review && remaining($0.deck).review > 0 })
-            .min(by: { $0.due < $1.due }) { return r }
+            .min(by: { (rank($0), $0.due) < (rank($1), $1.due) }) { return r }
         if let n = due.filter({ $0.state == .new && remaining($0.deck).new > 0 })
-            .min(by: { ($0.createdAt, $0.id ?? 0) < ($1.createdAt, $1.id ?? 0) }) { return n }
+            .min(by: { (rank($0), $0.createdAt, $0.id ?? 0) < (rank($1), $1.createdAt, $1.id ?? 0) }) { return n }
         return due.filter { $0.state == .learning || $0.state == .relearning }.min(by: { $0.due < $1.due })
     }
 

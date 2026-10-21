@@ -29,7 +29,8 @@ private struct GrowthBreakdownQuery {
         } else {
             let ratings = metric == .ratings
             let id = card ? "cardId" : "highlightId"
-            let conditions = card ? "e.kind='card' AND e.cardId IS NOT NULL" : "e.kind NOT IN ('card','note') AND e.highlightId IS NOT NULL"
+            let conditions = card ? "e.kind='card' AND e.cardId IS NOT NULL"
+                : (metric == .notes ? "e.kind='note' AND e.highlightId IS NOT NULL" : "e.kind NOT IN ('card','note') AND e.highlightId IS NOT NULL")
             query = "SELECT \(ratings ? "e.id" : "e.\(id)") AS rowID,c.id AS targetID,'\(card ? "card" : "highlight")' AS kind,coalesce(c.\(card ? "front" : "text"),'原条目已删除') AS title,c.deletedAt,\(card ? "c.highlightId" : "c.id") AS highlightID,\(card ? "c.deck" : "NULL") AS deck,\(ratings ? "e.at" : "MAX(e.at)") AS at FROM review_event e LEFT JOIN \(card ? "card" : "highlight") c ON c.id=e.\(id) WHERE e.at>=? AND e.at<? AND \(conditions)" + (metric == .difficult ? " AND e.answer=1" : "") + (ratings ? "" : " GROUP BY e.\(id)") + (metric == .difficult ? " HAVING COUNT(*)>=3" : "")
         }
         cte = "WITH activity AS (\(query)) "

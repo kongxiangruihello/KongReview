@@ -59,7 +59,7 @@ struct SealStamp: View {
 }
 
 /// 今日已学张数；学习步骤中已学和待学可能重叠，因此不写百分比。
-/// 3.14：环按“今天已学（松绿）: 当前待学（藤黄）”分两段，与首页同色。
+/// 3.14：环按“今天已学（松绿）: 当前待学（朱红）”分两段，与首页同色。
 struct DailyRing: View {
     let done: Int
     let remaining: Int
@@ -76,7 +76,7 @@ struct DailyRing: View {
             }
             if remaining > 0 {
                 Circle().trim(from: doneShare, to: 1)
-                    .stroke(ReviewPalette.pending.opacity(0.75), style: StrokeStyle(lineWidth: 9, lineCap: .butt))
+                    .stroke(ReviewPalette.pending.opacity(0.85), style: StrokeStyle(lineWidth: 9, lineCap: .butt))
                     .rotationEffect(.degrees(-90))
             }
             VStack(spacing: 2) {
@@ -153,8 +153,10 @@ struct DeckHomeView: View {
         return parts.isEmpty ? nil : "全库每日合计：" + parts.joined(separator: " · ")
     }
 
-    /// “开始复习”默认的牌组：上次学的（如果还有卡），否则待学最多的
+    /// “开始复习”默认的牌组：3.15 起先选含本期焦点卡片最多、且还有卡的牌组；否则上次学的，再否则待学最多的
     private var suggestedDeck: DeckSummary? {
+        let focusDecks = decks.filter { $0.counts.total > 0 && (store.focusDeckCounts[$0.name] ?? 0) > 0 }
+        if let d = focusDecks.max(by: { (store.focusDeckCounts[$0.name] ?? 0) < (store.focusDeckCounts[$1.name] ?? 0) }) { return d }
         if let last = store.study.lastDeck, let d = decks.first(where: { $0.name == last && $0.counts.total > 0 }) { return d }
         return decks.filter { $0.counts.total > 0 }.max { $0.counts.total < $1.counts.total }
     }
@@ -273,7 +275,9 @@ struct DeckHomeView: View {
         HStack(spacing: 6) {
             Circle().fill(color).frame(width: 7, height: 7)
             Text(label).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
-            Text("\(n)").font(.system(size: 12.5, weight: .semibold).monospacedDigit()).foregroundStyle(ReviewPalette.ink)
+            // 3.15：待学张数用朱红；圆点仍表示新卡／学习中／待复习的类别
+            Text("\(n)").font(.system(size: 12.5, weight: .semibold).monospacedDigit())
+                .foregroundStyle(n == 0 ? ReviewPalette.sub : ReviewPalette.pending)
         }
     }
 
@@ -338,11 +342,22 @@ struct DeckTile: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(parts.parent == nil ? Color.clear : ReviewPalette.sub)
                         .lineLimit(1)
-                    Text(parts.leaf)
-                        .font(.system(size: 20, weight: .semibold, design: .serif))
-                        .foregroundStyle(ReviewPalette.ink)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    HStack(spacing: 8) {
+                        Text(parts.leaf)
+                            .font(.system(size: 20, weight: .semibold, design: .serif))
+                            .foregroundStyle(ReviewPalette.ink)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let n = store.focusDeckCounts[deck.name], n > 0, let focus = store.learningFocus {
+                            Label("焦点 \(n)", systemImage: "scope")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(ReviewPalette.accent)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(ReviewPalette.accentSoft, in: Capsule())
+                                .help("本牌组有 \(n) 张卡片来自本期焦点\(focus.label)，学习时优先出现")
+                                .fixedSize()
+                        }
+                    }
                 }
                 .padding(.trailing, finishedToday ? 56 : 0)
                 HStack(spacing: 0) {
@@ -445,12 +460,16 @@ struct DeckTile: View {
         }
     }
 
+    /// 3.15：张数都是“待学”，用朱红；标签前的圆点保留类别色
     private func stat(_ label: String, _ n: Int, _ color: Color) -> some View {
         VStack(spacing: 2) {
             Text("\(n)")
                 .font(.system(size: 22, weight: .medium, design: .serif).monospacedDigit())
-                .foregroundStyle(n == 0 ? ReviewPalette.sub.opacity(0.55) : color)
-            Text(label).font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+                .foregroundStyle(n == 0 ? ReviewPalette.sub.opacity(0.55) : ReviewPalette.pending)
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 5, height: 5)
+                Text(label).font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+            }
         }
         .frame(maxWidth: .infinity)
     }

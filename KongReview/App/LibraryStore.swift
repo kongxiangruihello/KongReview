@@ -165,6 +165,10 @@ final class LibraryStore {
     var today: String = ReminderPlan.dayKey(Date())
     /// 已做成记忆卡的摘录
     var cardHighlightIDs: Set<Int64> = []
+    /// 3.15：本期焦点及其摘录、卡片所在牌组（焦点被删除时自动清空）
+    var learningFocus: LearningFocus?
+    var focusHighlightIDs: Set<Int64> = []
+    var focusDeckCounts: [String: Int] = [:]
     var cardCount = 0
     var cardImport: CardImportPreview?
     var cardEditor: CardDraft? { didSet {
@@ -261,6 +265,7 @@ final class LibraryStore {
             coverIDs = try db.coverSourceIDs()
             notebooks = try db.notebooks()
             notebookQuoteCounts = try db.notebookQuoteCounts()
+            refreshLearningFocus()
             revision += 1
             refreshDerived()
             onReload?()
@@ -1004,7 +1009,10 @@ final class LibraryStore {
         }
         let cards = (try? study.allDecks ? db.cards() : db.cards(deck: deck)) ?? []
         if let ledger = try? db.dailyLimitLedger(now: now, limits: CardSettings.limits(now: now)) {
-            study.current = StudyQueue.next(from: cards, now: now, left: ledger.left)
+            // 3.15：本期焦点的卡片优先（同为可学时排在前面，不突破每日上限）
+            let focus = focusHighlightIDs
+            study.current = StudyQueue.next(from: cards, now: now, left: ledger.left,
+                                            prefer: { c in c.highlightId.map(focus.contains) ?? false })
         } else {
             study.current = nil
         }
@@ -1559,7 +1567,12 @@ final class LibraryStore {
                 )
                 h.sourceId = s.id
             }
+            let previousNote = try h.id.flatMap { try db.highlights(ids: [$0]).first?.note }
             let saved = try db.save(h)
+            // 3.15：新写或改写了按语，记一笔“写按语”，计入个人成长（回顾中写按语原本就会记录）
+            if let note = saved.note, !note.isEmpty, note != previousNote {
+                db.log(ReviewEvent(kind: .note, highlightId: saved.id))
+            }
             // 2.1：其他版本的页码（只存仍属同一部古籍的版本）
             if let id = saved.id, draft.editionPages != ((try? db.editionPages(id)) ?? [:]) {
                 let valid = Set(editions(for: saved.sourceId).compactMap(\.id))

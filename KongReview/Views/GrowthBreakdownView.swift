@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 学习小结第二节：当前指标按出处、专题或牌组的分布（表 2）。点选一行，在表下列出该组明细。
+/// 学习小结第三节：当前指标按出处、专题或牌组的分布（表 3）。点选一行，在表下列出该组明细。
 struct GrowthBreakdownView: View {
     @Environment(LibraryStore.self) private var store
     let window: GrowthWindow
@@ -33,7 +33,7 @@ struct GrowthBreakdownView: View {
                 }
                 if let error { Text(error).foregroundStyle(.red) }
                 if loading && groups.items.isEmpty { ProgressView() }
-                AcademicTable(label: "表 2", title: "本期“\(metric.title)”\(grouping.title)分布",
+                AcademicTable(label: "表 3", title: "本期“\(metric.title)”\(grouping.title)分布",
                               note: "按资料当前的归属汇总。卡片通过原摘录关联出处和专题；同一条内容可属于多个专题，因此按专题时各行不能直接相加，也不计占比。删除或未关联的内容单列。点选一行查看该组明细。") {
                     Text("序号").gridColumnAlignment(.trailing)
                     Text(groupLabel)
@@ -72,7 +72,7 @@ struct GrowthBreakdownView: View {
                 }
                 if groups.total > 50 { JourneyPager(page:$groupPage,total:groups.total).disabled(loading).controlSize(.small) }
                 if let selected {
-                    AcademicQuote(label: "表 2 第“\(selected.title)”组明细 · 共 \(details.total) 项") {
+                    AcademicQuote(label: "表 3 第“\(selected.title)”组明细 · 共 \(details.total) 项") {
                         if detailsLoading { ProgressView() }
                         else {
                             VStack(alignment: .leading, spacing: 6) {

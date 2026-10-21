@@ -95,7 +95,7 @@ struct DailyReviewSummaryCard<Actions: View>: View {
         .onAppear { store.refreshDerived() }
     }
 
-    /// 3.14：“已”用松绿、“待”用藤黄；数量为 0 时数字转灰
+    /// 3.14：“已”用松绿、“待”用朱红；数量为 0 时数字转灰
     private func bigStat(_ number: String, unit: String, label: String, state: ProgressStateLabel.Kind) -> some View {
         VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {

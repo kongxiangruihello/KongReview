@@ -112,11 +112,11 @@ struct DailyReviewView: View {
                 scopeMenu
                 if !state.cards.isEmpty {
                     HStack(spacing: 8) {
-                        // 3.14：已回顾（松绿）与待回顾（藤黄）
+                        // 3.14：已回顾（松绿）与待回顾（朱红）
                         DonePendingBar(done: min(state.position, state.cards.count),
                                        pending: max(0, state.cards.count - state.position), height: 5)
                             .frame(width: 80)
-                            .help("松绿为本组已回顾，藤黄为待回顾")
+                            .help("松绿为本组已回顾，朱红为待回顾")
                         Text("\(min(state.position + 1, state.cards.count)) / \(state.cards.count)")
                             .font(.system(size: 12.5).monospacedDigit())
                             .foregroundStyle(ReviewPalette.sub)
@@ -249,7 +249,8 @@ struct DailyReviewView: View {
 
     private func cardsChip(_ due: Int, label: String) -> some View {
         Button { store.selection = .cards } label: {
-            StatChip(icon: "brain", iconColor: due > 0 ? ReviewPalette.pending : ReviewPalette.sub, label: label, value: "\(due)")
+            StatChip(icon: "brain", iconColor: due > 0 ? ReviewPalette.pending : ReviewPalette.sub, label: label, value: "\(due)",
+                     valueColor: due > 0 ? ReviewPalette.pending : ReviewPalette.sub)
         }
         .buttonStyle(.plain)
         .fixedSize()
@@ -323,7 +324,11 @@ struct DailyReviewView: View {
                 .keyboardShortcut(.leftArrow, modifiers: [])
         }
         if due > 0 {
-            PillButton(icon: "brain", title: "去学习记忆卡 · \(due)", style: .primary) { store.startSuggestedStudy() }
+            // 3.15：今日功课的第二步——回顾完成后接着学记忆卡（多个牌组有卡时混合学习）
+            PillButton(icon: "brain", title: "今日功课第二步：学习记忆卡 · \(due)", style: .primary) {
+                if store.deckSummaryCache.filter({ $0.counts.total > 0 }).count > 1 { store.startStudyAllDecks(); store.selection = .cards }
+                else { store.startSuggestedStudy() }
+            }
         }
         if !state.cards.isEmpty {
             PillButton(title: "从头再看") { state.position = 0; persist() }
@@ -383,6 +388,23 @@ struct DailyReviewView: View {
                 }
             }
             .padding(.bottom, 24)
+
+            // 3.15：为何出现在今天——记忆卡反复重来的“重读原文”，或本期焦点
+            if let lapses = state.refreshLapses[card.id] {
+                Label("重读原文：由这条摘录做成的记忆卡近 7 天重来 \(lapses) 次。读一遍上下文，再回到卡片。", systemImage: "arrow.uturn.backward.circle")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(ReviewPalette.pending)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ReviewPalette.pendingSoft, in: RoundedRectangle(cornerRadius: 8))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 18)
+            } else if state.theme == nil, store.focusHighlightIDs.contains(card.id), let focus = store.learningFocus {
+                Label("本期焦点：\(focus.label)", systemImage: "scope")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(ReviewPalette.accent)
+                    .padding(.bottom, 14)
+            }
 
             if let d = state.inlineDraft, d.id == h.id {
                 inlineEditor(card)
@@ -758,6 +780,7 @@ struct DailyReviewView: View {
                 let found = try store.db.highlights(ids: ids)
                 let byID = Dictionary(found.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
                 state.cards = ids.compactMap { byID[$0] }.map { ReviewCard(highlight: $0, isMastery: false) }
+                state.refreshLapses = (try? store.db.recentLapses(highlightIDs: ids)) ?? [:]
                 // 已看前缀里有摘录被删除时，进度随存活条目重新映射，不能跳过下一条。
                 state.position = saved.resumePosition(existingIDs: Set(byID.keys))
                 state.day = today
@@ -789,15 +812,24 @@ struct DailyReviewView: View {
             } else {
                 (highlights, weights) = try store.db.reviewCandidates(tag: state.theme)
             }
+            // 3.15：全库回顾才调整抽样——本期焦点加权、记忆卡已熟记的摘录降权，难卡的原摘录放在最前“重读原文”
+            let bias = state.theme == nil ? ((try? store.db.reviewBias(focus: try? store.db.validatedLearningFocus())) ?? ReviewBias()) : ReviewBias()
+            let byID = Dictionary(highlights.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
+            let refresh = bias.refresh.compactMap { byID[$0.id] }
+            let refreshIDs = Set(refresh.compactMap(\.id))
+            let pool = highlights.filter { !refreshIDs.contains($0.id ?? -1) }
             let session: ReviewScheduler.Session
             if forceNew {
-                session = scheduler.makeSession(highlights: highlights, sourceWeights: weights)
+                session = scheduler.makeSession(highlights: pool, sourceWeights: weights, multipliers: bias.multipliers)
             } else {
                 // 以日期为种子：同一天抽到的是同一组
                 var rng = SeededGenerator.forDay(Date())
-                session = scheduler.makeSession(highlights: highlights, sourceWeights: weights, using: &rng)
+                session = scheduler.makeSession(highlights: pool, sourceWeights: weights, multipliers: bias.multipliers, using: &rng)
             }
-            state.cards = session.all.map { ReviewCard(highlight: $0, isMastery: false) }
+            // 重读原文占用每日条数中的名额，总数不变
+            let regular = Array(session.all.prefix(max(0, dailyCount - refresh.count)))
+            state.cards = (refresh + regular).map { ReviewCard(highlight: $0, isMastery: false) }
+            state.refreshLapses = Dictionary(uniqueKeysWithValues: bias.refresh.filter { refreshIDs.contains($0.id) }.map { ($0.id, $0.lapses) })
             state.position = 0
             state.day = today
             persist()
