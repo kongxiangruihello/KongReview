@@ -27,14 +27,14 @@ final class V412NotesCoreTests: XCTestCase {
 
     func testIdeaNoteMarkdownFilesAndLinks() {
         let d = Date(timeIntervalSince1970: 1_790_000_000)
-        let a = IdeaNoteMarkdown.Note(id: 1, title: "士由身份转为德行", body: "<p>见 [[士之可贵：不待外物而自立|自立]] 与 [[未建的题目]]。</p>",
+        let a = IdeaNoteMarkdown.Note(id: 1, title: "士由身份转为德行", body: "<p>见 [[士之可贵/不待外物而自立|自立]] 与 [[未建的题目]]。</p>",
                                       createdAt: d, updatedAt: d, quotes: [.init(text: "<p>士志于道</p>", cite: "《论语·里仁》")])
-        let b = IdeaNoteMarkdown.Note(id: 2, title: "士之可贵：不待外物而自立", body: "", createdAt: d.addingTimeInterval(60), updatedAt: d, quotes: [])
+        let b = IdeaNoteMarkdown.Note(id: 2, title: "士之可贵/不待外物而自立", body: "", createdAt: d.addingTimeInterval(60), updatedAt: d, quotes: [])
         let c = IdeaNoteMarkdown.Note(id: 3, title: "士由身份转为德行", body: "", createdAt: d.addingTimeInterval(120), updatedAt: d, quotes: [])
         let stems = IdeaNoteMarkdown.fileStems(for: [c, b, a])
         XCTAssertEqual(stems[1], "士由身份转为德行")
         XCTAssertEqual(stems[3], "士由身份转为德行 (2)", "同名的按先后加序号")
-        XCTAssertEqual(stems[2], "士之可贵-不待外物而自立", "去掉冒号")
+        XCTAssertEqual(stems[2], "士之可贵-不待外物而自立", "去掉斜杠等文件名不允许的字符")
         let byKey = [WikiLinks.key(b.title): stems[2]!]
         let md = IdeaNoteMarkdown.markdown(a) { byKey[WikiLinks.key($0)] }
         XCTAssertTrue(md.contains("[[士之可贵-不待外物而自立|自立]]"), "链接改写成对方的文件名，显示文字不变")
