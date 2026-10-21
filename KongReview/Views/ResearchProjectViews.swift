@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 import KongReviewCore
 
 // MARK: - 4.0：研究项目——列表、项目页、编辑面板、“归入项目”菜单
@@ -98,6 +99,8 @@ struct ResearchProjectView: View {
     @Environment(LibraryStore.self) private var store
     let projectId: Int64
     @State private var overview: ResearchProjectOverview?
+    @State private var writing: ProjectWriting?
+    @State private var writingSheet = false
     @State private var missing = false
     @State private var planDraft: LearningPlan?
     @State private var questionDraft: TopicQuestionDraft?
@@ -113,10 +116,10 @@ struct ResearchProjectView: View {
                         ViewThatFits(in: .horizontal) {
                             HStack(alignment: .top, spacing: 16) {
                                 VStack(spacing: 16) { nextSteps(o); questions(o) }.frame(maxWidth: .infinity)
-                                VStack(spacing: 16) { materials(o); stageHistory(o) }.frame(maxWidth: .infinity)
+                                VStack(spacing: 16) { materials(o); writingPanel(o); stageHistory(o) }.frame(maxWidth: .infinity)
                             }
                             .frame(minWidth: 700)
-                            VStack(spacing: 16) { nextSteps(o); questions(o); materials(o); stageHistory(o) }
+                            VStack(spacing: 16) { nextSteps(o); questions(o); materials(o); writingPanel(o); stageHistory(o) }
                         }
                     }
                     .frame(maxWidth: 960, alignment: .leading)
@@ -136,6 +139,9 @@ struct ResearchProjectView: View {
             LearningPlanForm(plan: item.plan) { planDraft = nil }.environment(store).padding().frame(minWidth: 520, minHeight: 480)
         }
         .sheet(item: $questionDraft) { draft in TopicQuestionForm(draft: draft) { questionDraft = nil }.environment(store) }
+        .sheet(isPresented: $writingSheet) {
+            if let p = overview?.project { ManualWritingSheet(project: p, hasExternalTotal: writing?.external != nil).environment(store) }
+        }
         .confirmationDialog("删除项目“\(overview?.project.title ?? "")”？", isPresented: $confirmDelete) {
             Button("删除项目", role: .destructive) { if let p = overview?.project { store.deleteResearchProject(p) } }
         } message: {
@@ -144,7 +150,10 @@ struct ResearchProjectView: View {
     }
 
     private func load() async {
-        do { overview = try await store.db.researchProjectOverview(id: projectId); missing = false }
+        do {
+            overview = try await store.db.researchProjectOverview(id: projectId); missing = false
+            writing = try await store.db.projectWriting(projectId: projectId)
+        }
         catch ResearchProjectError.missing { overview = nil; missing = true }
         catch { store.report(error) }
     }
@@ -327,6 +336,54 @@ struct ResearchProjectView: View {
             .disabled(store.fullBackupBusy || o.project.isArchived)
     }
 
+    private func writingPanel(_ o: ResearchProjectOverview) -> some View {
+        let w = writing ?? ProjectWriting()
+        let target = o.project.targetWords
+        return ProjectPanel(title: "写作", subtitle: "近 12 周新增 \(w.recent.added.formatted()) 字 · 写作 \(w.recent.days) 天") {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("稿件现有").font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
+                Text("\(w.manuscriptWords.formatted()) 字").font(.system(size: 15, weight: .semibold).monospacedDigit()).foregroundStyle(ReviewPalette.ink)
+                if let target { Text("/ 目标 \(target.formatted()) 字").font(.system(size: 12.5).monospacedDigit()).foregroundStyle(ReviewPalette.sub) }
+                Spacer(minLength: 6)
+                Button { writingSheet = true } label: { Label("记一笔", systemImage: "plus").font(.system(size: 12.5)) }
+                    .buttonStyle(.plain).foregroundStyle(ReviewPalette.accent).handCursor()
+                    .disabled(store.fullBackupBusy || o.project.isArchived)
+                    .help("登记在 Word 等处写的字数")
+            }
+            if let target, target > 0 {
+                ProgressView(value: min(1, Double(w.manuscriptWords) / Double(target))).tint(ReviewPalette.accent)
+            }
+            Text("稿件字数＝所归专题笔记本中自己写的字（文字、小标题、本文批注）\(w.external.map { "＋外部稿件全文 \($0.total.formatted()) 字（\($0.at.formatted(.dateTime.month().day())) 登记）" } ?? "")。")
+                .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+            Chart(w.weeks) { week in
+                BarMark(x: .value("周", week.start, unit: .weekOfYear), y: .value("新增字数", week.added))
+                    .foregroundStyle(ReviewPalette.accent.opacity(0.7))
+            }
+            .chartXAxis { AxisMarks(values: .stride(by: .weekOfYear, count: 3)) { _ in AxisValueLabel(format: .dateTime.month().day()) } }
+            .chartYAxis { AxisMarks(position: .leading) }
+            .frame(height: 120)
+            .accessibilityLabel("近 12 周每周新增字数")
+            if !w.entries.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(w.entries) { e in
+                        HStack(spacing: 8) {
+                            Text(e.day).font(.system(size: 11.5).monospacedDigit()).foregroundStyle(ReviewPalette.sub).frame(width: 78, alignment: .leading)
+                            Text(e.manual ? (e.note.isEmpty ? "手记" : e.note) : "笔记本《\(e.notebookTitle ?? "已删除")》")
+                                .font(.system(size: 12)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+                            Spacer(minLength: 6)
+                            Text("+\(e.added)" + (e.removed > 0 ? " / −\(e.removed)" : "")).font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub)
+                            if e.manual {
+                                Button { store.deleteWritingEntry(e.id) } label: { Image(systemName: "xmark.circle").font(.system(size: 11)) }
+                                    .buttonStyle(.plain).foregroundStyle(ReviewPalette.sub).handCursor().help("删除这条手记")
+                            }
+                        }
+                    }
+                }
+            }
+            Text("只记录实际节奏，不设每日任务与连续天数。").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+        }
+    }
+
     private func stageHistory(_ o: ResearchProjectOverview) -> some View {
         ProjectPanel(title: "阶段记录", subtitle: "建于 \(o.project.createdAt.formatted(.dateTime.year().month().day()))") {
             if o.stages.isEmpty { Text("尚无阶段变化").font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub) }
@@ -373,6 +430,57 @@ struct ProjectPanel<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ReviewPalette.hair))
+    }
+}
+
+/// 记一笔：本次新写的字数，或外部稿件当前全文字数
+struct ManualWritingSheet: View {
+    @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let project: ResearchProject
+    let hasExternalTotal: Bool
+    @State private var byTotal = false
+    @State private var words = 1_000
+    @State private var day = Date()
+    @State private var note = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("记一笔写作").font(.title2.bold())
+            Text("项目《\(project.title)》").foregroundStyle(.secondary)
+            Picker("方式", selection: $byTotal) {
+                Text("本次新写的字数").tag(false)
+                Text("外部稿件当前全文字数").tag(true)
+            }
+            .pickerStyle(.segmented)
+            Form {
+                HStack {
+                    Text(byTotal ? "全文字数" : "新写字数")
+                    TextField("", value: $words, format: .number).frame(width: 110).multilineTextAlignment(.trailing)
+                    Stepper("", value: $words, in: 0...2_000_000, step: 100).labelsHidden()
+                }
+                DatePicker("日期", selection: $day, in: ...Date(), displayedComponents: .date)
+                TextField("备注（可空）", text: $note, prompt: Text("如：第二节初稿"))
+            }
+            .formStyle(.grouped)
+            Text(byTotal
+                 ? (hasExternalTotal ? "应用按与上次登记的差计入新增（减少时记为删减）。Word 的字数见“工具 → 字数统计”。"
+                                     : "第一次登记全文字数只作为起点，不计新增；以后再登记时按差计入。")
+                 : "专题笔记本里写的字会自动记录，这里只登记在别处写的。")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("记下") {
+                    if store.recordWriting(project, words: words, byTotal: byTotal, day: day, note: note) { dismiss() }
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .disabled(words <= 0 && !byTotal)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 440, idealWidth: 480)
     }
 }
 

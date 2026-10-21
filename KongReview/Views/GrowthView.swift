@@ -194,6 +194,11 @@ struct GrowthReportView: View {
     @State private var quality = GrowthQuality()
     @State private var previousQuality = GrowthQuality()
     @State private var focusProgress: FocusProgress?
+    /// 4.0：写作量（全库本期、上期同期）与当前项目本期的写作、阶段变化
+    @State private var writingNow = WritingSummary()
+    @State private var writingBefore = WritingSummary()
+    @State private var projectWriting: WritingSummary?
+    @State private var projectStages: [ResearchProjectStageEvent] = []
     var body: some View {
         ScrollView {
             AcademicPaper {
@@ -239,10 +244,19 @@ struct GrowthReportView: View {
                 async let q2 = store.db.growthQuality(start: window.previousStart, end: window.previousEnd)
                 let (thisQuality, lastQuality) = try await (q1, q2)
                 try Task.checkCancellation(); quality = thisQuality; previousQuality = lastQuality
+                async let w1 = store.db.writingSummary(start: window.start, end: window.end)
+                async let w2 = store.db.writingSummary(start: window.previousStart, end: window.previousEnd)
+                let (thisWriting, lastWriting) = try await (w1, w2)
+                try Task.checkCancellation(); writingNow = thisWriting; writingBefore = lastWriting
                 if let focus = store.learningFocus {
                     let progress = try await store.db.focusProgress(focus, start: window.start, end: window.end)
                     try Task.checkCancellation(); focusProgress = progress
-                } else { focusProgress = nil }
+                    if focus.kind == .project {
+                        let w = try await store.db.projectWritingSummary(projectId: focus.id, start: window.start, end: window.end)
+                        let stages = try await store.db.researchProjectStages(projectId: focus.id, start: window.start, end: window.end)
+                        try Task.checkCancellation(); projectWriting = w; projectStages = stages
+                    } else { projectWriting = nil; projectStages = [] }
+                } else { focusProgress = nil; projectWriting = nil; projectStages = [] }
                 if !loaded { reflection = try store.db.progressValue(GrowthReflection.self, key: window.key) ?? .init() }
                 previousReflection = try store.db.progressValue(GrowthReflection.self, key: window.period.window(containing: window.previousStart).key)
                 loaded = true; error = nil
@@ -299,7 +313,7 @@ struct GrowthReportView: View {
         AcademicSection(number: "一", title: "数据概览",
                         lead: "表 1 列出本期各项学习数据及其与上期同期的比较。点选任一行，第三节“内容分布”与附录“本期明细”改为显示该项。") {
             AcademicTable(label: "表 1", title: "本期学习数据与上期同期比较",
-                          note: "摘录和卡片在整个周期内分别去重；同一卡片的多次评分另计。难卡指本周期至少 3 次重来。新增数来自仍保存在库中的创建记录，永久删除后无法追溯。“▸”为当前选中的一项。") {
+                          note: "摘录和卡片在整个周期内分别去重；同一卡片的多次评分另计。难卡指本周期至少 3 次重来。新增数来自仍保存在库中的创建记录，永久删除后无法追溯。写作为专题笔记本中自写文字（文字、小标题、本文批注）的新增字数与项目页手记之和，中文逐字、西文按词；写作两行不可点选。“▸”为当前选中的一项。") {
                 Text("指标")
                 Text("本期").gridColumnAlignment(.trailing)
                 Text("上期同期").gridColumnAlignment(.trailing)
@@ -326,8 +340,23 @@ struct GrowthReportView: View {
                     .onTapGesture { metric = item; page = 0 }
                     .handCursor()
                 }
+                writingRow("写作（字）", writingNow.added, writingBefore.added)
+                writingRow("写作天数", writingNow.days, writingBefore.days)
             }
         }
+    }
+
+    private func writingRow(_ title: String, _ now: Int, _ before: Int) -> some View {
+        GridRow {
+            HStack(spacing: 6) { Text("　"); Text(title) }.frame(maxWidth: .infinity, alignment: .leading)
+            Text("\(now)").fontWeight(.semibold)
+            Text("\(before)").foregroundStyle(ReviewPalette.sub)
+            Text(signed(now - before))
+            Text(rate(now, before)).foregroundStyle(ReviewPalette.sub)
+        }
+        .monospacedDigit()
+        .foregroundStyle(ReviewPalette.ink)
+        .academicCell()
     }
 
     /// 三、内容分布：表 3 当前指标按出处、专题或牌组分布
@@ -395,7 +424,7 @@ struct GrowthReportView: View {
             if let focus = store.learningFocus, let p = focusProgress {
                 AcademicTable(label: "表 4", title: focus.kind == .project ? "当前\(focus.label)的进展" : "本期焦点\(focus.label)的进展",
                               note: "自 \(focus.startedAt.formatted(date: .abbreviated, time: .omitted)) 起生效。\(focus.kind == .project ? "材料为项目中全部专题笔记本与出处的摘录（去重）。" : "")回顾抽样中这些摘录的权重为平时的 \(Int(ReviewBias.focusBoost)) 倍；记忆卡在同为可学时优先其卡片，不突破每日上限。") {
-                    Text("项目")
+                    Text("指标")
                     Text("本期").gridColumnAlignment(.trailing)
                     Text("材料总量").gridColumnAlignment(.trailing)
                     Text("覆盖").gridColumnAlignment(.trailing)
@@ -404,6 +433,12 @@ struct GrowthReportView: View {
                     focusRow("学习过的卡片（张）", p.studiedCards, p.totalCards)
                     focusRow("写按语（条）", p.notes, p.totalHighlights)
                     focusRow("新增摘录（条）", p.newHighlights, nil)
+                    if let w = projectWriting { focusRow("写作（字）", w.added, nil) }
+                }
+                if focus.kind == .project {
+                    Text(projectStages.isEmpty ? "本期阶段未变化。"
+                         : "本期阶段变化：" + projectStages.map { "\($0.at.formatted(.dateTime.month().day())) 进入“\($0.stage.title)”" }.joined(separator: "；") + "。")
+                        .font(AcademicType.body).foregroundStyle(ReviewPalette.ink)
                 }
             } else {
                 Text(store.researchProjects.isEmpty ? "还没有研究项目。点右上角菜单新建一个，再把专题笔记本和出处归进来。" : "尚未设定当前项目。点右上角菜单，从在研项目中选一个。")

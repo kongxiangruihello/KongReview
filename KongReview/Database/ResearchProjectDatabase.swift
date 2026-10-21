@@ -320,6 +320,15 @@ extension AppDatabase {
         }
     }
 
+    /// 一段时间内的阶段变化（学习小结表 4）
+    func researchProjectStages(projectId: Int64, start: Date, end: Date) async throws -> [ResearchProjectStageEvent] {
+        try await writer.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, stage, at, note FROM research_project_stage WHERE projectId = ? AND at >= ? AND at < ? ORDER BY at, id",
+                             arguments: [projectId, start, end])
+                .compactMap { r in ResearchProject.Stage(rawValue: r["stage"]).map { ResearchProjectStageEvent(id: r["id"], stage: $0, at: r["at"], note: r["note"]) } }
+        }
+    }
+
     // MARK: 写入
 
     /// 新建或保存项目；阶段改变时记一条阶段记录

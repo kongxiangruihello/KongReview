@@ -275,7 +275,7 @@ extension LibraryStore {
                 guard store.notebookState.notebookId == nid else { return }
                 var b = snapshot
                 b.id = nil
-                if let new = try? store.db.insertBlocks([b], into: nid, after: afterID, atStart: afterID == nil).first,
+                if let new = try? store.db.insertBlocks([b], into: nid, after: afterID, atStart: afterID == nil, logsWriting: false).first,
                    let newID = new.id, snapshot.kind != .highlight {
                     try? store.db.updateBlockText(newID, text: snapshot.text)
                 }

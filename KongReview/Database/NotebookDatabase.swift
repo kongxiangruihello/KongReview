@@ -53,10 +53,13 @@ extension AppDatabase {
     }
 
     /// 插入若干块到 after 这一块之后（nil 表示末尾；atStart 为 true 时插到开头）。返回插入后的块（含 id）
+    /// logsWriting：新块中自己写的字计入写作量（撤销删除时重新插入不计）
     @discardableResult
     func insertBlocks(_ blocks: [NotebookBlock], into notebookId: Int64, after: Int64?, atStart: Bool = false,
-                      now: Date = Date()) throws -> [NotebookBlock] {
-        try writer.write { db in
+                      logsWriting: Bool = true, now: Date = Date()) throws -> [NotebookBlock] {
+        let written = logsWriting ? blocks.reduce(0) { $0 + Self.ownWords($1) } : 0
+        return try writer.write { db in
+            try Self.logWriting(db, notebookId: notebookId, added: written, removed: 0, now: now)
             let existing = try NotebookBlock.filter(Column("notebookId") == notebookId)
                 .order(Column("position"), Column("id")).fetchAll(db)
             var before: Double?
@@ -128,6 +131,10 @@ extension AppDatabase {
 
     func updateBlockText(_ id: Int64, text: String, now: Date = Date()) throws {
         try writer.write { db in
+            if let old = try NotebookBlock.fetchOne(db, key: id) {
+                let d = WritingCount.delta(from: Self.ownWords(old), to: Self.ownWords(old.kind, text: text, note: old.note))
+                try Self.logWriting(db, notebookId: old.notebookId, added: d.added, removed: d.removed, now: now)
+            }
             try db.execute(sql: "UPDATE notebook_block SET text = ?, updatedAt = ? WHERE id = ?", arguments: [text, now, id])
             try db.execute(sql: "UPDATE notebook SET updatedAt = ? WHERE id = (SELECT notebookId FROM notebook_block WHERE id = ?)",
                            arguments: [now, id])
@@ -137,6 +144,10 @@ extension AppDatabase {
     /// 1.5：本文批注
     func updateBlockNote(_ id: Int64, note: String?, now: Date = Date()) throws {
         try writer.write { db in
+            if let old = try NotebookBlock.fetchOne(db, key: id) {
+                let d = WritingCount.delta(from: Self.ownWords(old), to: Self.ownWords(old.kind, text: old.text, note: note))
+                try Self.logWriting(db, notebookId: old.notebookId, added: d.added, removed: d.removed, now: now)
+            }
             try db.execute(sql: "UPDATE notebook_block SET note = ?, updatedAt = ? WHERE id = ?", arguments: [note, now, id])
         }
     }
@@ -147,8 +158,13 @@ extension AppDatabase {
         }
     }
 
-    func deleteBlocks(_ ids: [Int64]) throws {
-        _ = try writer.write { db in try NotebookBlock.deleteAll(db, keys: ids) }
+    func deleteBlocks(_ ids: [Int64], now: Date = Date()) throws {
+        try writer.write { db in
+            for b in try NotebookBlock.fetchAll(db, keys: ids) {
+                try Self.logWriting(db, notebookId: b.notebookId, added: 0, removed: Self.ownWords(b), now: now)
+            }
+            _ = try NotebookBlock.deleteAll(db, keys: ids)
+        }
     }
 
     /// 重新按给定顺序编号（拖动排序后调用）
