@@ -6,10 +6,13 @@ enum GlobalSearchKind: String, CaseIterable, Identifiable, Hashable, Sendable {
     case highlight, card, article, source
     /// 4.1：札记
     case note
+    /// 4.1.1：问题簿
+    case question
     var id: String { rawValue }
     var title: String {
         switch self {
         case .note: return "札记"
+        case .question: return "问题"
         case .highlight: return "摘录"
         case .card: return "记忆卡"
         case .article: return "网页存档"
@@ -23,6 +26,7 @@ enum GlobalSearchKind: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .article: return "doc.richtext"
         case .source: return "books.vertical"
         case .note: return "lightbulb"
+        case .question: return "questionmark.bubble"
         }
     }
 }
@@ -173,6 +177,16 @@ extension AppDatabase {
                  WHERE n.deletedAt IS NULL AND (kr_fold(n.title) LIKE :pattern ESCAPE '\\'
                     OR kr_fold(kr_search_plain(n.body)) LIKE :pattern ESCAPE '\\')
                 """, " ORDER BY n.updatedAt DESC, n.id DESC")
+        case .question:
+            let body = "CASE WHEN kr_fold(kr_search_plain(q.answer)) LIKE :pattern ESCAPE '\\' THEN q.answer ELSE q.detail END"
+            return ("""
+                SELECT q.id, q.title, \(snippet(body)) AS preview, '' AS context,
+                       CASE q.status WHEN 'solved' THEN '已解决' WHEN 'shelved' THEN '搁置' WHEN 'lead' THEN '有线索' ELSE '待研究' END AS badge
+                """, " FROM question q", """
+                 WHERE kr_fold(q.title) LIKE :pattern ESCAPE '\\'
+                    OR kr_fold(kr_search_plain(q.detail)) LIKE :pattern ESCAPE '\\'
+                    OR kr_fold(kr_search_plain(q.answer)) LIKE :pattern ESCAPE '\\'
+                """, " ORDER BY q.pinned DESC, q.updatedAt DESC, q.id DESC")
         case .source:
             return ("""
                 SELECT s.id, s.title,

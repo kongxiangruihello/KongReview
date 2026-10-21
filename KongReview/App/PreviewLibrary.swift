@@ -57,7 +57,7 @@ import KongReviewCore
             _ = try db.insertBlocks(highlights.enumerated().filter { $0.offset % 3 == 0 }.map {
                 NotebookBlock(notebookId: notebook.id!, position: Double($0.offset + 1), kind: .highlight, highlightId: $0.element.id)
             }, into: notebook.id!, after: nil)
-            // 4.0：当前项目——论文，处于“初稿”；归入专题“何以为士”与《中国近三百年学术史》，有两项下一步、两个未解问题
+            // 4.0：当前项目——论文，处于“初稿”；归入专题“何以为士”与《中国近三百年学术史》，有两项下一步与问题簿中的问题
             var project = try db.saveResearchProject(ResearchProject(title: "何以为士：先秦儒家的士人观", kind: .paper, stage: .idea,
                                                                        question: "“士”的自我期许如何从身份转为德行？",
                                                                        dueDate: calendar.startOfDay(for: day(71)), targetWords: 20_000), now: day(-30))
@@ -71,10 +71,6 @@ import KongReviewCore
             var next1 = LearningPlan(title: "补齐第三节引文页码", link: projectLink); next1.dueDate = day(2)
             var next2 = LearningPlan(title: "改写第二节结论", link: projectLink); next2.dueDate = day(5)
             try db.saveLearningPlan(next1); try db.saveLearningPlan(next2)
-            for q in ["“士志于道”与“士不可以不弘毅”能否互证？", "梁启超论清代学术的“经世”一义出处待核"] {
-                let question = TopicQuestion(notebookID: notebook.id!, question: "<p>\(q)</p>")
-                try db.saveProgress(question, key: question.key)
-            }
             _ = try db.saveResearchProject(ResearchProject(title: "《论语》导读讲稿", kind: .course, stage: .material), now: day(-3))
             // 4.0 第二步：写作量——专题里分几天写的文字，另有一笔 Word 稿的手记
             let drafts: [(Int, String)] = [(-40, "<p>士之为士，先在其志。孔子言“士志于道”，以道自任，非以身份自居。</p>"),
@@ -95,6 +91,21 @@ import KongReviewCore
                                       body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
                                       highlightIDs: [highlights[0].id!], now: day(-5))
             try db.linkToResearchProject(project.id!, kind: .note, recordId: selfReliance.id!)
+            // 4.1.1：问题簿——一个「常念」、挂着今日回顾当前摘录；一个刚记下；一个已解决（解答指向札记）；一个搁置
+            let pinned = try db.createQuestion(title: "“士志于道”与“士不可以不弘毅”能否互证？", scopes: [(.notebook, notebook.id!)], now: day(-9))
+            try db.setQuestionPinned(id: pinned.id!, true)
+            try db.addQuestionMaterial(questionId: pinned.id!, kind: .highlight, recordId: highlights[12].id!, reason: "“任重道远”正是“志于道”的担当", now: day(-8))
+            try db.addQuestionMaterial(questionId: pinned.id!, kind: .highlight, recordId: highlights[5].id!, now: day(-4))
+            try db.addQuestionMaterial(questionId: pinned.id!, kind: .note, recordId: selfReliance.id!, now: day(-3))
+            _ = try db.createQuestion(title: "梁启超论清代学术的“经世”一义出处待核", scopes: [(.notebook, notebook.id!)], now: day(-7))
+            let status = try db.createQuestion(title: "孔门之“士”是否已脱离封建等级的含义？", scopes: [(.project, project.id!)], now: day(-12))
+            try db.addQuestionMaterial(questionId: status.id!, kind: .highlight, recordId: highlights[0].id!, now: day(-10))
+            if let target = try db.resolveIdeaNoteID(title: "士由身份转为德行") {
+                try db.setQuestionAnswerNote(id: status.id!, noteId: target, now: day(-5))
+                try db.setQuestionStatus(id: status.id!, .solved, now: day(-5))
+            }
+            let shelved = try db.createQuestion(title: "“士”与“君子”在《论语》中如何分用？", detail: "<p>待读完《论语》全书再看。</p>", now: day(-20))
+            try db.setQuestionStatus(id: shelved.id!, .shelved, now: day(-15))
             try db.recordExternalWritingTotal(projectId: project.id!, total: 3_200, day: day(-20), now: day(-20))
             try db.recordExternalWritingTotal(projectId: project.id!, total: 4_650, day: day(-2), note: "第二节初稿（Word）", now: day(-2))
             // 今日回顾：一组 10 条，已回顾 4 条；当前第 5 条为“重读原文”

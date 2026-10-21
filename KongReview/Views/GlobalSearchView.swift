@@ -191,6 +191,7 @@ struct GlobalSearchView: View {
         case .article: return "阅读已存档的完整网页"
         case .source: return "打开出处及其摘录"
         case .note: return "打开札记"
+        case .question: return "打开问题"
         }
     }
 }

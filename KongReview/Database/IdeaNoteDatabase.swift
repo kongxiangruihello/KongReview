@@ -127,20 +127,23 @@ extension AppDatabase {
 
     @discardableResult
     func createIdeaNote(title: String, body: String = "", highlightIDs: [Int64] = [], now: Date = Date()) throws -> IdeaNote {
+        try writer.write { db in try Self.insertIdeaNote(db, title: title, body: body, highlightIDs: highlightIDs, now: now) }
+    }
+
+    /// 在已有事务里新建札记（问题簿“写成札记”也用它）
+    static func insertIdeaNote(_ db: Database, title: String, body: String, highlightIDs: [Int64], now: Date) throws -> IdeaNote {
         let clean = WikiLinks.normalize(title)
         guard !clean.isEmpty else { throw IdeaNoteError.emptyTitle }
-        return try writer.write { db in
-            var note = IdeaNote(title: clean, body: body, createdAt: now, updatedAt: now)
-            try note.insert(db)
-            guard let id = note.id else { return note }
-            for (i, h) in highlightIDs.enumerated() {
-                try db.execute(sql: "INSERT OR IGNORE INTO idea_note_highlight(noteId, highlightId, position, addedAt) VALUES (?, ?, ?, ?)",
-                               arguments: [id, h, Double(i + 1), now])
-            }
-            try Self.logWriting(db, noteId: id, added: WritingCount.count(html: body), removed: 0, now: now)
-            try Self.rebuildAllIdeaNoteLinks(db)
-            return note
+        var note = IdeaNote(title: clean, body: body, createdAt: now, updatedAt: now)
+        try note.insert(db)
+        guard let id = note.id else { return note }
+        for (i, h) in highlightIDs.enumerated() {
+            try db.execute(sql: "INSERT OR IGNORE INTO idea_note_highlight(noteId, highlightId, position, addedAt) VALUES (?, ?, ?, ?)",
+                           arguments: [id, h, Double(i + 1), now])
         }
+        try logWriting(db, noteId: id, added: WritingCount.count(html: body), removed: 0, now: now)
+        try rebuildAllIdeaNoteLinks(db)
+        return note
     }
 
     /// 保存题目与正文。改题目时，把其他札记里指向它的 [[旧题目]] 一并改写；按正文前后字数记入写作量

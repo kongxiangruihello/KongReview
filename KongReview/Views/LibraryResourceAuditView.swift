@@ -7,7 +7,7 @@ struct LibraryResourceAuditView: View {
     @State private var jump = "1"
     @State private var inspection: AuditIssue?
     private var audit: LibraryResourceAuditState { store.resourceAudit }
-    static let kinds = [("","全部资料"),("highlight","摘录"),("card","记忆卡"),("article","网页"),("notebook_block","专题文字"),("source","出处"),("app_progress","个人成长")]
+    static let kinds = [("","全部资料"),("highlight","摘录"),("card","记忆卡"),("article","网页"),("notebook_block","专题文字"),("source","出处"),("idea_note","札记"),("question","问题簿"),("app_progress","个人成长")]
     var body: some View {
         @Bindable var audit = audit
         VStack(alignment:.leading,spacing:12) {
@@ -73,12 +73,13 @@ struct LibraryResourceAuditView: View {
                     catch { store.report(error) }
                 }
             case "notebook_block": if let parent = issue.parentID { store.selection = .notebook(parent) }
+            case "idea_note": store.selection = .ideaNote(issue.recordID)
+            case "question": store.selection = .question(issue.recordID)
             case "app_progress":
                 store.selection = .growth
                 if issue.key.hasPrefix("growth."),let reflection = try? store.db.progressValue(GrowthReflection.self,key:issue.key),let entry = GrowthHistoryEntry.parse(key:issue.key,reflection:reflection) {
                     store.journeyNavigation.tab = 0; store.journeyNavigation.period = entry.period; store.journeyNavigation.date = entry.date
-                } else if issue.key.hasPrefix("topic-question.") { store.journeyNavigation.tab = 1; store.journeyNavigation.selectedNotebookID = issue.parentID; store.journeyNavigation.showTopicQuestions = true }
-                else if issue.key.hasPrefix("weekly-schedule.") { store.journeyNavigation.tab = 8 }
+                } else if issue.key.hasPrefix("weekly-schedule.") { store.journeyNavigation.tab = 8 }
                 else if issue.key.hasPrefix("difficult-care.") { store.journeyNavigation.tab = 6 }
                 else { store.journeyNavigation.tab = 5 }
             default: break

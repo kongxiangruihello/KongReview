@@ -25,7 +25,7 @@ struct LearningMaterialExportRequest: Identifiable {
                 if window.period == .month || window.period == .year {
                     let facts = try await store.db.periodReviewFacts(window:window)
                     guard generation == store.growthGeneration, !store.fullBackupBusy else { return }
-                    guide = "\n\n## 复盘参考\n\n完成 \(facts.completed) 项计划，留下 \(facts.outcomes) 项成果，解决 \(facts.solvedQuestions) 个专题问题。\n\n- 哪些理解加深了？\n- 哪些问题仍未解决？\n- 下一阶段关注什么？"
+                    guide = "\n\n## 复盘参考\n\n完成 \(facts.completed) 项计划，留下 \(facts.outcomes) 项成果，解决 \(facts.solvedQuestions) 个问题。\n\n- 哪些理解加深了？\n- 哪些问题仍未解决？\n- 下一阶段关注什么？"
                 }
                 let outcomes = plans.map { plan in
                     "### " + plan.title + "\n\n" + (plan.outcome?.gains ?? "") + (plan.outcome?.evidence.map { "\n\n关联成果：" + $0.title } ?? "")
@@ -67,6 +67,45 @@ extension LearningMaterialExport {
             if let t = e.highlight.translation, !plain(t).isEmpty { lines += ["", "   译文：" + plain(t)] }
             if let n = e.highlight.note, !plain(n).isEmpty { lines += ["", "   > 按：" + plain(n).replacingOccurrences(of: "\n", with: "\n   > ")] }
             lines.append("")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+extension LearningMaterialExport {
+    /// 4.1.1：本期札记——本期新写或修改过的札记，题目、正文（保留 [[题目]] 链接写法）与引用的摘录
+    static func saveIdeaNotes(window: GrowthWindow, store: LibraryStore) {
+        Task { @MainActor in
+            do {
+                let notes = try await store.db.ideaNotesTouched(start: window.start, end: window.end)
+                guard !notes.isEmpty else { store.infoMessage = "本期还没有新写或修改过的札记。"; return }
+                let sources = Dictionary(store.sources.compactMap { s in s.id.map { ($0, s) } }, uniquingKeysWith: { a, _ in a })
+                let panel = NSSavePanel(); panel.allowedContentTypes = [.plainText]; panel.nameFieldStringValue = "\(window.period.title)札记.md"
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                try ideaNotesMarkdown(notes, window: window, sourceTitle: { id in id.flatMap { sources[$0]?.title } }).write(to: url, atomically: true, encoding: .utf8)
+            } catch { store.report(error) }
+        }
+    }
+
+    nonisolated static func ideaNotesMarkdown(_ notes: [IdeaNoteDetail], window: GrowthWindow, sourceTitle: (Int64?) -> String?) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年M月d日"
+        let created = notes.filter { $0.note.createdAt >= window.start && $0.note.createdAt < window.end }.count
+        var lines = ["# \(window.period.title)札记", "",
+                     "\(f.string(from: window.start)) — \(f.string(from: window.end.addingTimeInterval(-1)))　共 \(notes.count) 条（新写 \(created)，修改 \(notes.count - created)）", ""]
+        for d in notes {
+            lines += ["## " + d.note.title, "",
+                      "写于 \(f.string(from: d.note.createdAt))　修改于 \(f.string(from: d.note.updatedAt))", ""]
+            let body = Markdown.markdown(fromHTMLFragments: d.note.body).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty { lines += [body, ""] }
+            if !d.highlights.isEmpty {
+                lines += ["引用摘录：", ""]
+                for h in d.highlights {
+                    let text = Markdown.plainText(fromHTML: Card.renderHTML(h.text)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let cite = [sourceTitle(h.sourceId).map { "《\($0)》" }, h.location].compactMap { $0 }.joined(separator: " ")
+                    lines.append("> " + text.replacingOccurrences(of: "\n", with: "\n> ") + (cite.isEmpty ? "" : "（\(cite)）"))
+                    lines.append("")
+                }
+            }
         }
         return lines.joined(separator: "\n")
     }

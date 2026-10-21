@@ -11,6 +11,7 @@ struct WeeklySchedule: Codable, Equatable, Identifiable, Sendable {
     var link: LearningPlanLink?
     var key: String { "weekly-schedule.\(id.uuidString)" }
 }
+/// 3.4 的专题问题（存于 app_progress）。4.1.1 起迁入问题簿，只在迁移时读取。
 struct TopicQuestion: Codable, Equatable, Identifiable, Sendable {
     var id = UUID()
     var notebookID: Int64
@@ -22,6 +23,7 @@ struct TopicQuestion: Codable, Equatable, Identifiable, Sendable {
     var solvedAt: Date?
     var key: String { "topic-question.\(id.uuidString)" }
 }
+/// 3.4 的专题问题草稿，4.1.1 迁移时转为 QuestionDraft
 struct TopicQuestionDraft: Codable, Equatable, Identifiable, Sendable {
     var value: TopicQuestion
     var original: TopicQuestion?
@@ -120,37 +122,9 @@ extension AppDatabase {
             let (from,args) = Self.outcomeWhere(query:"",notebookID:nil,start:window.start,end:window.end)
             let outcomes = try Int.fetchOne(db,sql:"SELECT COUNT(*)" + from,arguments:StatementArguments(args)) ?? 0
             let completed = try Int.fetchOne(db,sql:"SELECT COUNT(*) FROM app_progress WHERE key LIKE 'learning-plan.%' AND json_extract(CAST(payload AS TEXT),'$.cancelledAt') IS NULL AND json_extract(CAST(payload AS TEXT),'$.completedAt')>=? AND json_extract(CAST(payload AS TEXT),'$.completedAt')<?",arguments:[window.start.timeIntervalSinceReferenceDate,window.end.timeIntervalSinceReferenceDate]) ?? 0
-            let solved = try Int.fetchOne(db,sql:"SELECT COUNT(*) FROM app_progress WHERE key LIKE 'topic-question.%' AND json_extract(CAST(payload AS TEXT),'$.solvedAt')>=? AND json_extract(CAST(payload AS TEXT),'$.solvedAt')<?",arguments:[window.start.timeIntervalSinceReferenceDate,window.end.timeIntervalSinceReferenceDate]) ?? 0
+            // 4.1.1：改从问题簿读；迁移保留了原解决日期，前后数字一致
+            let solved = try Self.questionsSolved(db,start:window.start,end:window.end)
             return .init(completed:completed,outcomes:outcomes,solvedQuestions:solved)
-        }
-    }
-    func topicQuestions(notebookID: Int64, solved: Bool, query: String = "", offset: Int = 0) async throws -> GrowthPage<TopicQuestion> {
-        try await writer.read { db in
-            let from = " FROM app_progress WHERE key LIKE 'topic-question.%' AND json_extract(CAST(payload AS TEXT),'$.notebookID')=? AND json_extract(CAST(payload AS TEXT),'$.solvedAt') IS " + (solved ? "NOT NULL" : "NULL") + " AND instr(kr_fold(kr_search_plain(json_extract(CAST(payload AS TEXT),'$.question')||char(10)||json_extract(CAST(payload AS TEXT),'$.answer'))),kr_fold(?))>0"
-            let total = try Int.fetchOne(db,sql:"SELECT COUNT(*)" + from,arguments:[notebookID,query]) ?? 0
-            let rows = try Data.fetchAll(db,sql:"SELECT payload" + from + " ORDER BY updatedAt DESC,key LIMIT 50 OFFSET ?",arguments:[notebookID,query,max(0,offset)])
-            return .init(items:try rows.map { try JSONDecoder().decode(TopicQuestion.self,from:$0) },total:total)
-        }
-    }
-    func questionDrafts(notebookID: Int64, offset: Int = 0) async throws -> GrowthPage<TopicQuestionDraft> {
-        try await writer.read { db in
-            let from = " FROM app_progress WHERE key LIKE 'question-draft.%' AND json_extract(CAST(payload AS TEXT),'$.value.notebookID')=?"
-            let count = try Int.fetchOne(db,sql:"SELECT COUNT(*)" + from,arguments:[notebookID]) ?? 0
-            let rows = try Data.fetchAll(db,sql:"SELECT payload" + from + " ORDER BY updatedAt DESC,key LIMIT 50 OFFSET ?",arguments:[notebookID,max(0,offset)])
-            return .init(items:try rows.map { try JSONDecoder().decode(TopicQuestionDraft.self,from:$0) },total:count)
-        }
-    }
-    func saveTopicQuestion(_ draft: TopicQuestionDraft, now: Date = Date()) throws {
-        try writer.write { db in
-            var question = draft.value
-            guard HTMLSourceCodec.hasContent(question.question) else { throw GrowthPracticeError.emptyQuestion }
-            guard question.solvedAt == nil || HTMLSourceCodec.hasContent(question.answer) else { throw GrowthPracticeError.missingAnswer }
-            guard try Int.fetchOne(db,sql:"SELECT COUNT(*) FROM notebook WHERE id=?",arguments:[question.notebookID]) == 1 else { throw GrowthPracticeError.missingNotebook }
-            let saved = try Self.readProgress(TopicQuestion.self,key:question.key,in:db)
-            guard saved == draft.original else { throw GrowthPracticeError.changed }
-            question.updatedAt = now
-            try Self.putProgress(question,key:question.key,in:db)
-            try db.execute(sql:"DELETE FROM app_progress WHERE key=?",arguments:[draft.key])
         }
     }
 }

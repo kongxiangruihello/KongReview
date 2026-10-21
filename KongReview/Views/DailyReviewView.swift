@@ -446,6 +446,20 @@ struct DailyReviewView: View {
                 }
                 .padding(.top, 14)
             }
+            // 4.1.1：挂着这条摘录的未解问题
+            if let hid = h.id, let questions = store.questionsHolding(.highlight, [hid], unsolvedOnly: true)[hid], !questions.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "questionmark.bubble").font(.system(size: 11)).foregroundStyle(ReviewPalette.accent)
+                    Text("挂在未解问题下：").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+                    ForEach(questions.prefix(2)) { ref in
+                        Button(ref.title) { store.selection = .question(ref.id) }
+                            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(ReviewPalette.accent).handCursor()
+                            .lineLimit(1)
+                    }
+                    if questions.count > 2 { Text("等 \(questions.count) 个").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub) }
+                }
+                .padding(.top, 8)
+            }
 
             if state.showDetails {
                 VStack(alignment: .leading, spacing: 6) {
@@ -512,6 +526,9 @@ struct DailyReviewView: View {
             .disabled(editingNote)
             CardIconButton(icon: "lightbulb", help: "记札记（Z）：新写一条引用这条摘录的札记，或加入已有札记") {
                 store.composeIdeaNote(highlight: h)
+            }
+            CardIconButton(icon: "questionmark.bubble", help: "挂到问题（Q）：把这条摘录挂到问题簿里的某个问题下，或当场新建问题") {
+                store.attachToQuestion(kind: .highlight, recordId: h.id, preview: h.text)
             }
             CardIconButton(icon: "square.and.pencil", help: "就地编辑（E）；按住 ⌥ 点击打开编辑面板") {
                 if NSEvent.modifierFlags.contains(.option) { store.edit(h) } else { startInlineEdit(h) }
@@ -654,6 +671,7 @@ struct DailyReviewView: View {
                 Button("") { store.startCloze(for: card.highlight) }.keyboardShortcut(key("c"))
                 Button("") { state.showRelated.toggle() }.keyboardShortcut(key("r"))
                 Button("") { store.composeIdeaNote(highlight: card.highlight) }.keyboardShortcut(key("z"))
+                Button("") { store.attachToQuestion(kind: .highlight, recordId: card.highlight.id, preview: card.highlight.text) }.keyboardShortcut(key("q"))
             }
             .opacity(0)
             .allowsHitTesting(false)

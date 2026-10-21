@@ -38,12 +38,14 @@ struct ContentView: View {
                 Button { store.showGlobalSearch() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
                     .disabled(!store.canShowGlobalSearch)
                     .handCursor()
-                    .help("查找摘录、记忆卡、网页和出处（⌘⇧F）")
+                    .help("查找摘录、记忆卡、网页、出处、札记和问题（⌘⇧F）")
             }
         }
         .sheet(isPresented:$store.showsResourceAudit) { LibraryResourceAuditView() }
         .sheet(item: $store.researchProjectEditor) { project in ResearchProjectEditor(project: project).environment(store) }
         .sheet(item: $store.ideaNoteComposer) { composer in IdeaNoteComposerSheet(composer: composer).environment(store) }
+        .sheet(item: $store.questionCreator) { request in QuestionCreateSheet(request: request).environment(store) }
+        .sheet(item: $store.questionAttach) { request in QuestionAttachSheet(request: request) { store.questionAttach = nil }.environment(store) }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
         .modifier(LearningMaterialExportPresentation())
@@ -218,6 +220,10 @@ struct ContentView: View {
             IdeaNoteListView()
         case .ideaNote(let id):
             IdeaNoteView(noteId: id).id(id)
+        case .questionBook:
+            QuestionBookView()
+        case .question(let id):
+            QuestionView(questionId: id).id(id)
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -300,6 +306,15 @@ struct SidebarView: View {
                     .foregroundStyle(.secondary)
                     .sidebarMenuRow()
                     .tag(SidebarItem.projects)
+                // 4.1.1：问题簿——行尾为未解决的问题数
+                HStack {
+                    Label("问题簿", systemImage: "questionmark.bubble")
+                    Spacer()
+                    if store.openQuestionCount > 0 { SidebarCount(store.openQuestionCount) }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.questionBook)
+                .contextMenu { Button("记一个问题…") { store.newQuestion() } }
             } header: {
                 HStack {
                     Text("研究")
