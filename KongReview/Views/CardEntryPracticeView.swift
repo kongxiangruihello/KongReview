@@ -40,6 +40,7 @@ struct CardEntryPracticeView: View {
                         }),
                                             showingAnswer:session.showingAnswer,referenceHTML:faces.back,
                                             slot:"entry-practice-\(session.id)-\(card.id ?? 0)",allowsAssessment:true,
+                                            onReveal:{ perform { session.revealAnswer() } },
                                             onEditingChanged:{ editingAnswer = $0 })
                     }.padding(12)
                 }
@@ -48,12 +49,6 @@ struct CardEntryPracticeView: View {
                 HStack {
                     Button("上一张") { perform { session.previous() } }.disabled(session.position == 0)
                     Spacer()
-                    if !session.showingAnswer {
-                        Button("显示答案") { perform { session.revealAnswer() } }
-                            .buttonStyle(.borderedProminent)
-                            .keyboardShortcut(editingAnswer ? nil : KeyboardShortcut(.space,modifiers:[]))
-                            .handCursor().accessibilityIdentifier("entry-practice-reveal")
-                    }
                     Button(session.position + 1 == session.cards.count ? "完成练习" : "下一张") { perform { session.next() } }
                         .handCursor()
                 }.disabled(store.fullBackupBusy)
