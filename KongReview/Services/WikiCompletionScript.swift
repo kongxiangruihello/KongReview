@@ -28,7 +28,7 @@ enum WikiCompletionScript {
       box.id = 'kr-wiki';
       box.setAttribute('contenteditable', 'false');
       ed.parentNode.insertBefore(box, ed.nextSibling);
-      var items = [], index = 0, seq = 0;
+      var items = [], index = 0, seq = 0, dismissed = null;
       function post(m) { try { window.webkit.messageHandlers.krEditor.postMessage(m); } catch (_) {} }
       function context() {
         var sel = window.getSelection();
@@ -64,7 +64,9 @@ enum WikiCompletionScript {
       };
       function check() {
         var c = context();
-        if (!c) { hide(); return; }
+        if (!c) { dismissed = null; hide(); return; }
+        // Esc 关掉后，同一处 [[ 里继续打字不再弹出
+        if (dismissed && dismissed.node === c.node && dismissed.open === c.open) { hide(); return; }
         seq += 1;
         post({ type: 'wiki-query', value: c.query, seq: seq });
       }
@@ -88,7 +90,7 @@ enum WikiCompletionScript {
         if (e.key === 'ArrowDown') { index = (index + 1) % items.length; render(); }
         else if (e.key === 'ArrowUp') { index = (index - 1 + items.length) % items.length; render(); }
         else if ((e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey) || e.key === 'Tab') { accept(); }
-        else if (e.key === 'Escape') { hide(); }
+        else if (e.key === 'Escape') { var c = context(); if (c) dismissed = { node: c.node, open: c.open }; hide(); }
         else handled = false;
         if (handled) { e.preventDefault(); e.stopImmediatePropagation(); }
       }, true);
