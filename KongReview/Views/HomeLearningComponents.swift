@@ -56,7 +56,8 @@ struct HomeLearningDashboard: View {
     private var reviewCard: some View {
         HomeLearningTaskCard {
             HomeLearningTaskHeader(icon: "sun.max", title: "今日回顾",
-                                   status: reviewStatus, completed: summary.reviewIsComplete)
+                                   status: reviewStatus, completed: summary.reviewIsComplete,
+                                   pending: summary.reviewPendingCount > 0)
             HomeLearningMetrics(completed: summary.reviewCompletedCount, completedLabel: "已回顾",
                                 pending: summary.reviewPendingCount, pendingLabel: "待回顾", unit: "条")
             reviewProgress
@@ -69,7 +70,8 @@ struct HomeLearningDashboard: View {
     private var cardsCard: some View {
         HomeLearningTaskCard {
             HomeLearningTaskHeader(icon: "brain", title: "记忆卡",
-                                   status: cardsStatus, completed: summary.cardsIsComplete)
+                                   status: cardsStatus, completed: summary.cardsIsComplete,
+                                   pending: summary.cardsDueCount > 0)
             HomeLearningMetrics(completed: summary.cardsStudiedCount, completedLabel: "今日已学",
                                 pending: summary.cardsDueCount, pendingLabel: "当前待学", unit: "张")
             cardsBreakdown
@@ -91,14 +93,7 @@ struct HomeLearningDashboard: View {
             }
             .font(.system(size: 12))
             .foregroundStyle(ReviewPalette.sub)
-            GeometryReader { geometry in
-                Capsule().fill(ReviewPalette.accentSoft)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(summary.reviewIsComplete ? ReviewPalette.easy : ReviewPalette.accent)
-                            .frame(width: geometry.size.width * reviewFraction)
-                    }
-            }
-            .frame(height: 5)
+            DonePendingBar(done: summary.reviewCompletedCount, pending: summary.reviewPendingCount)
             Text(summary.reviewHasSession ? "按当前这一组摘录计算" : "每天读一点，回顾曾经的思考")
                 .font(.system(size: 11))
                 .foregroundStyle(ReviewPalette.sub)
@@ -111,6 +106,8 @@ struct HomeLearningDashboard: View {
 
     private var cardsBreakdown: some View {
         VStack(alignment: .leading, spacing: 10) {
+            DonePendingBar(done: summary.cardsStudiedCount, pending: summary.cardsDueCount)
+                .help("松绿为今日已学，藤黄为当前待学")
             HStack(spacing: 6) {
                 HomeLearningDueCount(title: "新卡", count: summary.cardsNewDueCount, color: ReviewPalette.accent)
                 HomeLearningDueCount(title: "学习中", count: summary.cardsLearningDueCount, color: ReviewPalette.hard)
@@ -130,11 +127,6 @@ struct HomeLearningDashboard: View {
         }
         .frame(minHeight: 58, alignment: .top)
         .help("今日已学按不同卡片计数；同一张卡反复评分只算一张。当前待学按到期时间更新，可能包含今天已经学过的卡。")
-    }
-
-    private var reviewFraction: CGFloat {
-        guard summary.reviewTotalCount > 0 else { return 0 }
-        return min(1, max(0, CGFloat(summary.reviewCompletedCount) / CGFloat(summary.reviewTotalCount)))
     }
 
     private var reviewProgressTitle: String {
@@ -187,6 +179,7 @@ private struct HomeLearningTaskHeader: View {
     let title: String
     let status: String
     let completed: Bool
+    var pending = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -201,10 +194,10 @@ private struct HomeLearningTaskHeader: View {
             Spacer(minLength: 6)
             Text(status)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(completed ? ReviewPalette.easy : ReviewPalette.sub)
+                .foregroundStyle(completed ? ReviewPalette.done : (pending ? ReviewPalette.pending : ReviewPalette.sub))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(completed ? ReviewPalette.easy.opacity(0.1) : ReviewPalette.soft, in: Capsule())
+                .background(completed ? ReviewPalette.doneSoft : (pending ? ReviewPalette.pendingSoft : ReviewPalette.soft), in: Capsule())
                 .fixedSize()
         }
     }
@@ -219,20 +212,22 @@ private struct HomeLearningMetrics: View {
 
     var body: some View {
         HStack(spacing: 20) {
-            metric(completed, label: completedLabel, accent: false)
+            metric(completed, label: completedLabel, state: .done)
             Rectangle().fill(ReviewPalette.hair).frame(width: 1, height: 50)
-            metric(pending, label: pendingLabel, accent: pending > 0)
+            metric(pending, label: pendingLabel, state: .pending)
         }
         .padding(.vertical, 4)
     }
 
-    private func metric(_ count: Int, label: String, accent: Bool) -> some View {
+    /// 3.14：“已”用松绿、“待”用藤黄；数量为 0 时数字转为灰色，标签圆点保留颜色
+    private func metric(_ count: Int, label: String, state: ProgressStateLabel.Kind) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(label).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+            ProgressStateLabel(state: state, text: label)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(count)")
                     .font(.system(size: 34, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
+                    .foregroundStyle(count == 0 ? ReviewPalette.sub.opacity(0.7)
+                                     : (state == .done ? ReviewPalette.done : ReviewPalette.pending))
                     .minimumScaleFactor(0.65)
                     .lineLimit(1)
                 Text(unit).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)

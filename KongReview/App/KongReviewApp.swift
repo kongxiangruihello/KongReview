@@ -18,6 +18,10 @@ struct KongReviewApp: App {
             self.store = EditorValidation.makeStore()
             return
         }
+        if PreviewLibrary.isEnabled {
+            self.store = PreviewLibrary.makeStore()
+            return
+        }
         LegacyMigration.migrateSettings()
         let db: AppDatabase
         do {

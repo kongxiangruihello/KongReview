@@ -150,7 +150,7 @@ struct CompletedGrowthPlans: View {
     @State private var result = GrowthPage<LearningPlan>(items: [], total: 0)
     @State private var error: String?
     var body: some View {
-        GroupBox("本期完成的学习计划 · \(result.total) 项") {
+        GrowthBox(title: "本期完成的学习计划 · \(result.total) 项") {
             VStack(alignment: .leading, spacing: 8) {
                 if let error { Text(error).foregroundStyle(.red) }
                 if result.items.isEmpty { Text("完成的计划会按完成日期自动归入小结。").foregroundStyle(.secondary) }

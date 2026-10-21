@@ -7,7 +7,7 @@ import KongReviewCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        guard !EditorValidation.isEnabled else { return }
+        guard !EditorValidation.isEnabled, !PreviewLibrary.isEnabled else { return }
         // 自己接管 URL 事件：链接直接打开快速录入浮窗，不把主窗口拉到前台
         NSAppleEventManager.shared().setEventHandler(
             self,
@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard !EditorValidation.isEnabled else { return }
+        guard !EditorValidation.isEnabled, !PreviewLibrary.isEnabled else { return }
         HotKeyCenter.shared.action = { QuickCaptureController.shared.show() }
         HotKeyCenter.shared.apply(HotKeyPreset.current)
         HotKeyCenter.shared.lookupAction = { CitationLookupController.shared.show() }

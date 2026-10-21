@@ -31,11 +31,11 @@ struct DailyReviewSummaryCard<Actions: View>: View {
                 .padding(.bottom, 26)
 
             HStack(spacing: 0) {
-                bigStat("\(groupCount)", unit: "条", label: "本组已回顾")
+                bigStat("\(groupCount)", unit: "条", label: "本组已回顾", state: .done)
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                bigStat("\(s.today.cards)", unit: "张", label: "全库今日已学 · 评分 \(s.today.cardRatings) 次")
+                bigStat("\(s.today.cards)", unit: "张", label: "全库今日已学 · 评分 \(s.today.cardRatings) 次", state: .done)
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
-                bigStat("\(due)", unit: "张", label: due > 0 ? "全库当前待学" : "当前没有待学卡片", accent: due > 0)
+                bigStat("\(due)", unit: "张", label: due > 0 ? "全库当前待学" : "当前没有待学卡片", state: .pending)
             }
             .frame(height: 104)
             .overlay(alignment: .top) { Rectangle().fill(ReviewPalette.hair).frame(height: 1) }
@@ -95,17 +95,17 @@ struct DailyReviewSummaryCard<Actions: View>: View {
         .onAppear { store.refreshDerived() }
     }
 
-    private func bigStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {
+    /// 3.14：“已”用松绿、“待”用藤黄；数量为 0 时数字转灰
+    private func bigStat(_ number: String, unit: String, label: String, state: ProgressStateLabel.Kind) -> some View {
         VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(number)
                     .font(.system(size: 40, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
+                    .foregroundStyle(number == "0" ? ReviewPalette.sub.opacity(0.7)
+                                     : (state == .done ? ReviewPalette.done : ReviewPalette.pending))
                 Text(unit).font(.system(size: 15, weight: .medium)).foregroundStyle(ReviewPalette.sub)
             }
-            Text(label)
-                .font(.system(size: 12.5))
-                .foregroundStyle(ReviewPalette.sub)
+            ProgressStateLabel(state: state, text: label, size: 12.5)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }

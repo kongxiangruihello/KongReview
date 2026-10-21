@@ -28,7 +28,7 @@ struct CardLearningCompletionView: View {
                 .padding(.top, 6)
                 .padding(.bottom, 24)
             HStack(spacing: 0) {
-                summaryStat("\(summary.studiedCards)", unit: "张", label: "本范围今日已学")
+                summaryStat("\(summary.studiedCards)", unit: "张", label: "本范围今日已学", done: true)
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
                 summaryStat("\(summary.ratingCount)", unit: "次", label: "本范围今日评分")
                 Rectangle().fill(ReviewPalette.hair).frame(width: 1)
@@ -76,12 +76,12 @@ struct CardLearningCompletionView: View {
         .shadow(color: Color(red: 0.24, green: 0.2, blue: 0.12).opacity(0.08), radius: 20, y: 10)
     }
 
-    private func summaryStat(_ number: String, unit: String, label: String, accent: Bool = false) -> some View {
+    private func summaryStat(_ number: String, unit: String, label: String, accent: Bool = false, done: Bool = false) -> some View {
         VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(number)
                     .font(.system(size: 36, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(accent ? ReviewPalette.accent : ReviewPalette.ink)
+                    .foregroundStyle(done && number != "0" ? ReviewPalette.done : (accent ? ReviewPalette.accent : ReviewPalette.ink))
                 Text(unit).font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.sub)
             }
             Text(label).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1)

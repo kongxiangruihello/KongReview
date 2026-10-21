@@ -1,52 +1,175 @@
 import SwiftUI
 import KongReviewCore
 
+/// 3.14：个人成长按“三部分、九节”组织，左侧为目录，右侧为当前一节；窄窗口时目录收为菜单。
+struct GrowthSectionInfo: Identifiable {
+    let tab: Int
+    let number: String
+    let title: String
+    let lead: String
+    var id: Int { tab }
+}
+
+struct GrowthPart: Identifiable {
+    let number: String
+    let title: String
+    let sections: [GrowthSectionInfo]
+    var id: String { number }
+
+    static let all: [GrowthPart] = [
+        GrowthPart(number: "一", title: "回顾与总结", sections: [
+            .init(tab: 0, number: "1.1", title: "学习小结", lead: "按日、周、月、年汇总回顾与学习数据，与上期同期比较，并记录目标与复盘。"),
+            .init(tab: 3, number: "1.2", title: "成长趋势", lead: "近 30 天、12 周或 12 个月的学习量变化；点击柱形或日期查看当期明细。"),
+            .init(tab: 4, number: "1.3", title: "复盘历史", lead: "按周期查找以往的小结与复盘，打开后回到对应周期的学习小结。"),
+        ]),
+        GrowthPart(number: "二", title: "计划与执行", sections: [
+            .init(tab: 5, number: "2.1", title: "学习计划", lead: "待办、已完成与已取消的学习计划；完成时可记录收获与成果。"),
+            .init(tab: 8, number: "2.2", title: "重复安排", lead: "按星期自动生成的学习计划，可暂停或恢复。"),
+            .init(tab: 6, number: "2.3", title: "难卡跟踪", lead: "反复重来的卡片的处理记录与后续观察。"),
+        ]),
+        GrowthPart(number: "三", title: "成果与资料", sections: [
+            .init(tab: 7, number: "3.1", title: "我的成果", lead: "完成计划时留下的收获与成果，可按专题和日期筛选。"),
+            .init(tab: 1, number: "3.2", title: "专题学习", lead: "以专题笔记本为单位，汇总相关摘录、卡片、出处与专题问题。"),
+            .init(tab: 2, number: "3.3", title: "资料导出", lead: "按专题或出处导出原文、按语与卡片问答，生成 Markdown 或 PDF 讲义。"),
+        ]),
+    ]
+
+    static func section(for tab: Int) -> (part: GrowthPart, section: GrowthSectionInfo) {
+        for part in all { if let s = part.sections.first(where: { $0.tab == tab }) { return (part, s) } }
+        return (all[0], all[0].sections[0])
+    }
+}
+
 struct GrowthView: View {
     @Environment(LibraryStore.self) private var store
     private var period: GrowthPeriod { get { store.journeyNavigation.period } nonmutating set { store.journeyNavigation.period = newValue } }
     private var date: Date { get { store.journeyNavigation.date } nonmutating set { store.journeyNavigation.date = newValue } }
     private var tab: Int { get { store.journeyNavigation.tab } nonmutating set { store.journeyNavigation.tab = newValue } }
     private var notebookID: Int64? { get { store.journeyNavigation.selectedNotebookID } nonmutating set { store.journeyNavigation.selectedNotebookID = newValue } }
+
     var body: some View {
         let _ = store.journeyRevision
         let _ = store.today
-        VStack(alignment: .leading, spacing: 16) {
-            Text("个人成长").font(.largeTitle.bold())
-            Text("回看学习记录，整理收获，安排下一步。统计反映投入与记录，不替代对理解程度的判断。")
-                .font(.callout).foregroundStyle(.secondary)
-            ViewThatFits(in: .horizontal) {
-                sectionPicker.pickerStyle(.segmented).fixedSize(horizontal: true, vertical: false)
-                sectionPicker.pickerStyle(.menu)
+        GeometryReader { geometry in
+            let wide = geometry.size.width >= 860
+            HStack(alignment: .top, spacing: 0) {
+                if wide {
+                    contents.frame(width: 210)
+                    Rectangle().fill(ReviewPalette.hair).frame(width: 1)
+                }
+                VStack(alignment: .leading, spacing: 14) {
+                    sectionHeader(compact: !wide)
+                    sectionBody
+                }
+                .padding(.horizontal, 28).padding(.top, 24).padding(.bottom, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            if tab == 0 {
-                HStack {
-                    Picker("周期", selection: Binding(get: { period }, set: { period = $0 })) { ForEach(GrowthPeriod.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-                    DatePicker("日期", selection: Binding(get: { date }, set: { date = $0 }), in: ...Date(), displayedComponents: .date)
-                }
-                let window = period.window(containing: date)
-                GrowthReportView(window: window).id("\(window.key)|\(store.growthGeneration)")
-            } else if tab == 1 {
-                Picker("选择专题", selection: Binding(get:{ notebookID },set:{ notebookID = $0 })) {
-                    Text("请选择专题笔记本").tag(Optional<Int64>.none)
-                    ForEach(store.notebooks) { notebook in Text(notebook.title).tag(notebook.id) }
-                }
-                if let id = notebookID { TopicLearningView(notebookID: id).id("\(id)|\(store.growthGeneration)") }
-                else { ContentUnavailableView("选择一个专题开始", systemImage: "books.vertical", description: Text("专题使用已有笔记本，摘录、卡片和出处会自动关联。")) }
-            } else if tab == 3 { GrowthTrendsView() }
-            else if tab == 4 { GrowthHistoryView { entry in period = entry.period; date = entry.date; tab = 0 } }
-            else if tab == 5 { LearningPlansView().id(store.growthGeneration) }
-            else if tab == 7 { LearningOutcomesView().id(store.growthGeneration) }
-            else if tab == 8 { WeeklySchedulesView().id(store.growthGeneration) }
-            else if tab == 6 { DifficultCareHistoryView() }
-            else { LearningMaterialExportView() }
-        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(ReviewPalette.page).navigationTitle("个人成长")
-    }
-    private var sectionPicker: some View {
-        Picker("内容", selection: Binding(get: { tab }, set: { tab = $0 })) {
-            Text("学习小结").tag(0); Text("成长趋势").tag(3); Text("复盘历史").tag(4)
-            Text("学习计划").tag(5); Text("重复安排").tag(8); Text("我的成果").tag(7); Text("难卡跟踪").tag(6); Text("专题学习").tag(1); Text("资料导出").tag(2)
         }
+        .background(ReviewPalette.page).navigationTitle("个人成长")
+    }
+
+    // MARK: 目录
+
+    private var contents: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("个人成长").font(.system(size: 20, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                    Text("目　录").font(AcademicType.note).tracking(2).foregroundStyle(ReviewPalette.sub)
+                }
+                ForEach(GrowthPart.all) { part in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(part.number)、\(part.title)").font(AcademicType.subsection).foregroundStyle(ReviewPalette.ink)
+                            .padding(.bottom, 2)
+                        ForEach(part.sections) { section in
+                            Button { tab = section.tab } label: {
+                                HStack(spacing: 8) {
+                                    Text(section.number).monospacedDigit().foregroundStyle(ReviewPalette.sub)
+                                    Text(section.title).foregroundStyle(tab == section.tab ? ReviewPalette.accent : ReviewPalette.ink)
+                                    Spacer(minLength: 0)
+                                }
+                                .font(.system(size: 13, weight: tab == section.tab ? .semibold : .regular))
+                                .padding(.vertical, 5).padding(.horizontal, 8)
+                                .background(tab == section.tab ? ReviewPalette.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).handCursor()
+                            .padding(.leading, 6)
+                        }
+                    }
+                }
+                Text("统计反映投入与记录，不替代对理解程度的判断。")
+                    .font(AcademicType.note).foregroundStyle(ReviewPalette.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 24)
+        }
+        .background(ReviewPalette.soft)
+    }
+
+    /// 窄窗口：目录收为分组菜单
+    private var contentsMenu: some View {
+        Picker("目录", selection: Binding(get: { tab }, set: { tab = $0 })) {
+            ForEach(GrowthPart.all) { part in
+                Section("\(part.number)、\(part.title)") {
+                    ForEach(part.sections) { Text("\($0.number)　\($0.title)").tag($0.tab) }
+                }
+            }
+        }
+        .pickerStyle(.menu)
+        .fixedSize()
+    }
+
+    // MARK: 节标题
+
+    private func sectionHeader(compact: Bool) -> some View {
+        let info = GrowthPart.section(for: tab)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("第\(info.part.number)部分　\(info.part.title)").font(AcademicType.note).tracking(1).foregroundStyle(ReviewPalette.sub)
+                Spacer()
+                if compact { contentsMenu }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(info.section.number).font(.system(size: 22, weight: .semibold, design: .serif)).monospacedDigit().foregroundStyle(ReviewPalette.sub)
+                Text(info.section.title).font(.system(size: 22, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+            }
+            Text(info.section.lead).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                .fixedSize(horizontal: false, vertical: true)
+            Rectangle().fill(ReviewPalette.ink.opacity(0.6)).frame(height: 1).padding(.top, 6)
+        }
+    }
+
+    // MARK: 各节内容
+
+    @ViewBuilder
+    private var sectionBody: some View {
+        if tab == 0 {
+            HStack(spacing: 12) {
+                Picker("周期", selection: Binding(get: { period }, set: { period = $0 })) { ForEach(GrowthPeriod.allCases) { Text($0.title).tag($0) } }
+                    .pickerStyle(.segmented).frame(maxWidth: 360)
+                DatePicker("日期", selection: Binding(get: { date }, set: { date = $0 }), in: ...Date(), displayedComponents: .date)
+                    .fixedSize()
+                Spacer(minLength: 0)
+            }
+            let window = period.window(containing: date)
+            GrowthReportView(window: window).id("\(window.key)|\(store.growthGeneration)")
+        } else if tab == 1 {
+            Picker("选择专题", selection: Binding(get:{ notebookID },set:{ notebookID = $0 })) {
+                Text("请选择专题笔记本").tag(Optional<Int64>.none)
+                ForEach(store.notebooks) { notebook in Text(notebook.title).tag(notebook.id) }
+            }
+            .frame(maxWidth: 420)
+            if let id = notebookID { TopicLearningView(notebookID: id).id("\(id)|\(store.growthGeneration)") }
+            else { ContentUnavailableView("选择一个专题开始", systemImage: "books.vertical", description: Text("专题使用已有笔记本，摘录、卡片和出处会自动关联。")) }
+        } else if tab == 3 { GrowthTrendsView() }
+        else if tab == 4 { GrowthHistoryView { entry in period = entry.period; date = entry.date; tab = 0 } }
+        else if tab == 5 { LearningPlansView().id(store.growthGeneration) }
+        else if tab == 7 { LearningOutcomesView().id(store.growthGeneration) }
+        else if tab == 8 { WeeklySchedulesView().id(store.growthGeneration) }
+        else if tab == 6 { DifficultCareHistoryView() }
+        else { LearningMaterialExportView() }
     }
 }
 
@@ -69,74 +192,31 @@ struct GrowthReportView: View {
     @State private var planDraft: LearningPlan?
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("\(window.period.title)学习小结 · \(window.start.formatted(date: .abbreviated, time: .omitted)) — \(window.end.formatted(date: .abbreviated, time: .shortened))").font(.headline)
-                Text(window.end < window.fullEnd ? "本期尚未结束，与上一周期相同日数及时间范围比较。" : "完整周期，与上一完整周期比较。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let error { Text(error).foregroundStyle(.red) }
-                if !loaded { ProgressView() }
-                GrowthMetricGrid(current: current, previous: previous, selected: metric) { metric = $0; page = 0 }
-                Text("摘录和卡片在整个周期内分别去重；同一卡片的多次评分另计。难卡指本周期至少3次重来。新增数来自仍保存在库中的创建记录，永久删除后无法追溯。")
-                    .font(.caption).foregroundStyle(.secondary)
-                GrowthBreakdownView(window: window, metric: metric).id("\(window.key)|\(metric)")
-                if window.period == .month || window.period == .year { PeriodReflectionGuide(window:window,summary:current) }
-                GroupBox("本期目标与复盘（自动保存）") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("摘录目标（条）"); TextField("0", value: $reflection.goalHighlights, format: .number).frame(width: 90)
-                            Text("记忆卡目标（张）"); TextField("0", value: $reflection.goalCards, format: .number).frame(width: 90)
-                        }
-                        if reflection.goalHighlights > 0 { ProgressView("摘录：\(current[.highlights]) / \(reflection.goalHighlights)", value: Double(min(current[.highlights],reflection.goalHighlights)), total: Double(reflection.goalHighlights)) }
-                        if reflection.goalCards > 0 { ProgressView("记忆卡：\(current[.cards]) / \(reflection.goalCards)", value: Double(min(current[.cards],reflection.goalCards)), total: Double(reflection.goalCards)) }
-                        Text("目标为0表示暂不设定；各周期独立设定，不改变学习排程。").font(.caption).foregroundStyle(.secondary)
-                        RichEditor(text:$reflection.gains,placeholder:"本期收获",autoHeight:true,minHeight:90,slot:"growth-gains").richEditorFrame()
-                        RichEditor(text:$reflection.challenges,placeholder:"遇到的困难",autoHeight:true,minHeight:90,slot:"growth-challenges").richEditorFrame()
-                        RichEditor(text:$reflection.nextSteps,placeholder:"下一步",autoHeight:true,minHeight:90,slot:"growth-next").richEditorFrame()
-                        Button("把下一步转为学习计划…") {
-                            save()
-                            planDraft = LearningPlan(title: reflection.nextSteps, originKey: window.key)
-                        }.disabled(reflection.nextSteps.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || planDraft != nil)
-                        if let saveError { Text(saveError).foregroundStyle(.red); Button("重试保存") { save() } }
-                    }.padding(8).textFieldStyle(.roundedBorder).disabled(!loaded)
-                }
-                if let planDraft { LearningPlanForm(plan: planDraft) { self.planDraft = nil }.id(planDraft.id) }
-                if let previousReflection, !previousReflection.nextSteps.isEmpty {
-                    GroupBox("对照上期的下一步") {
-                        Text(RichText.attributed(previousReflection.nextSteps)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                    }
-                }
-                if window.period == .week { WeeklyReviewView(window:window).id(window.key) }
-                CompletedGrowthPlans(window: window)
+            AcademicPaper {
                 HStack {
-                    Text("\(metric.title) · \(details.total) 项明细").font(.headline)
                     Spacer()
                     Button("导出本期小结 Markdown…") { LearningMaterialExport.saveSummary(window: window, summary: current, reflection: reflection, store: store) }
+                        .controlSize(.small)
                 }
-                if detailsLoading { ProgressView() }
-                else if details.rows.isEmpty { Text("本期暂无这类记录。").foregroundStyle(.secondary) }
-                else {
-                    ForEach(details.rows) { row in
-                        Button {
-                            if let target = row.target { store.learningExplorer = .init(route: .document(target,"")) }
-                            else if metric == .days {
-                                let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.locale = Locale(identifier: "en_US_POSIX")
-                                if let day = formatter.date(from: row.title) { store.learningExplorer = .init(route: .day(day)) }
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(row.title).lineLimit(3)
-                                Text(row.detail).font(.caption).foregroundStyle(.secondary)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(10).background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 8))
-                        }.buttonStyle(.plain).disabled(row.target == nil && metric != .days).handCursor()
-                    }
-                }
-                HStack {
-                    Text("第 \(page+1) / \(max(1,(details.total+49)/50)) 页")
-                    Spacer()
-                    Button("上一页") { page -= 1 }.disabled(page == 0 || detailsLoading)
-                    Button("下一页") { page += 1 }.disabled((page+1)*50 >= details.total || detailsLoading)
-                }
+                .padding(.bottom, -18)
+                AcademicTitleBlock(title: "\(window.period.title)学习小结", subtitle: periodLabel,
+                                   note: window.end < window.fullEnd ? "本期尚未结束，与上一周期相同日数及时间范围比较。" : "完整周期，与上一完整周期比较。")
+                if let error { Text(error).foregroundStyle(.red) }
+                if !loaded { ProgressView().frame(maxWidth: .infinity) }
+                overviewSection
+                AcademicDivider()
+                distributionSection
+                AcademicDivider()
+                goalsSection
+                AcademicDivider()
+                reflectionSection
+                AcademicDivider()
+                plansSection
+                AcademicDivider()
+                appendixSection
             }
+            .environment(\.academicEmbedded, true)
+            .padding(.vertical, 8)
         }
         .task(id: store.revision) {
             do {
@@ -176,31 +256,208 @@ struct GrowthReportView: View {
         }
         .onDisappear { saveTask?.cancel(); save(); if store.growthFlushKey == window.key { store.flushGrowthReflection = nil; store.growthFlushKey = nil } }
     }
+
+    // MARK: 版式各节
+
+    private var periodLabel: String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年M月d日"
+        let t = DateFormatter(); t.locale = Locale(identifier: "zh_CN"); t.dateFormat = "yyyy年M月d日 HH:mm"
+        let lastDay = window.end.addingTimeInterval(-1)
+        if window.period == .day { return f.string(from: window.start) + (window.end < window.fullEnd ? "（截至 \(t.string(from: window.end).suffix(5))）" : "") }
+        return f.string(from: window.start) + " — " + (window.end < window.fullEnd ? t.string(from: window.end) : f.string(from: lastDay))
+    }
+
+    private func signed(_ n: Int) -> String { n > 0 ? "+\(n)" : (n < 0 ? "−\(-n)" : "0") }
+
+    private func rate(_ now: Int, _ before: Int) -> String {
+        guard before > 0 else { return now > 0 ? "新增" : "—" }
+        let r = Double(now - before) / Double(before) * 100
+        return (r > 0 ? "+" : (r < 0 ? "−" : "")) + String(format: "%.0f%%", abs(r))
+    }
+
+    /// 一、数据概览：表 1 本期与上期同期比较（点选一行，第二节与附录随之切换）
+    private var overviewSection: some View {
+        AcademicSection(number: "一", title: "数据概览",
+                        lead: "表 1 列出本期各项学习数据及其与上期同期的比较。点选任一行，第二节“内容分布”与附录“本期明细”改为显示该项。") {
+            AcademicTable(label: "表 1", title: "本期学习数据与上期同期比较",
+                          note: "摘录和卡片在整个周期内分别去重；同一卡片的多次评分另计。难卡指本周期至少 3 次重来。新增数来自仍保存在库中的创建记录，永久删除后无法追溯。“▸”为当前选中的一项。") {
+                Text("指标")
+                Text("本期").gridColumnAlignment(.trailing)
+                Text("上期同期").gridColumnAlignment(.trailing)
+                Text("增减").gridColumnAlignment(.trailing)
+                Text("变化率").gridColumnAlignment(.trailing)
+            } rows: {
+                ForEach(GrowthMetric.allCases) { item in
+                    let on = metric == item
+                    GridRow {
+                        HStack(spacing: 6) {
+                            Text(on ? "▸" : "　").foregroundStyle(ReviewPalette.accent)
+                            Text(item.title)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("\(current[item])").fontWeight(.semibold)
+                        Text("\(previous[item])").foregroundStyle(ReviewPalette.sub)
+                        Text(signed(current[item] - previous[item]))
+                        Text(rate(current[item], previous[item])).foregroundStyle(ReviewPalette.sub)
+                    }
+                    .monospacedDigit()
+                    .foregroundStyle(on ? ReviewPalette.accent : ReviewPalette.ink)
+                    .academicCell()
+                    .contentShape(Rectangle())
+                    .onTapGesture { metric = item; page = 0 }
+                    .handCursor()
+                }
+            }
+        }
+    }
+
+    /// 二、内容分布：表 2 当前指标按出处、专题或牌组分布
+    private var distributionSection: some View {
+        AcademicSection(number: "二", title: "内容分布",
+                        lead: metric == .days ? "“学习天数”按日期计数，不按出处汇总；逐日记录见附录。"
+                                              : "表 2 按资料当前的归属，汇总本期“\(metric.title)”的来源，回答“本期主要学了什么”。") {
+            if metric != .days {
+                GrowthBreakdownView(window: window, metric: metric, total: current[metric]).id("\(window.key)|\(metric)")
+            }
+        }
+    }
+
+    /// 三、目标与达成：表 3
+    private var goalsSection: some View {
+        AcademicSection(number: "三", title: "目标与达成",
+                        lead: "为本期设定回顾与学习的数量目标；目标为 0 表示暂不设定。各周期独立设定，不改变学习排程。") {
+            AcademicTable(label: "表 3", title: "本期目标与实际完成") {
+                Text("项目")
+                Text("目标").gridColumnAlignment(.trailing)
+                Text("实际").gridColumnAlignment(.trailing)
+                Text("达成").gridColumnAlignment(.trailing)
+                Text("进度")
+            } rows: {
+                goalRow("回顾摘录（条）", goal: $reflection.goalHighlights, actual: current[.highlights])
+                goalRow("学习记忆卡（张）", goal: $reflection.goalCards, actual: current[.cards])
+            }
+            .disabled(!loaded)
+        }
+    }
+
+    private func goalRow(_ title: String, goal: Binding<Int>, actual: Int) -> some View {
+        let g = goal.wrappedValue
+        return GridRow {
+            Text(title).frame(maxWidth: .infinity, alignment: .leading)
+            TextField("0", value: goal, format: .number)
+                .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing).frame(width: 80)
+            Text("\(actual)").fontWeight(.semibold)
+            Text(g > 0 ? "\(Int((Double(actual) / Double(g) * 100).rounded()))%" : "未设定").foregroundStyle(g > 0 ? ReviewPalette.ink : ReviewPalette.sub)
+            DonePendingBar(done: g > 0 ? min(actual, g) : 0, pending: g > 0 ? max(0, g - actual) : 0, height: 5)
+                .frame(minWidth: 120, maxWidth: 200)
+        }
+        .monospacedDigit()
+        .academicCell()
+    }
+
+    /// 四、复盘：收获、困难、下一步
+    private var reflectionSection: some View {
+        AcademicSection(number: "四", title: "复盘", lead: "依次写下本期的收获、困难与下一步，内容自动保存。") {
+            VStack(alignment: .leading, spacing: 18) {
+                if window.period == .month || window.period == .year { PeriodReflectionGuide(window: window, summary: current) }
+                VStack(alignment: .leading, spacing: 8) {
+                    AcademicSubheading(number: "4.1", title: "本期收获", hint: "哪些理解加深了")
+                    RichEditor(text:$reflection.gains,placeholder:"本期收获",autoHeight:true,minHeight:90,slot:"growth-gains").richEditorFrame()
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    AcademicSubheading(number: "4.2", title: "遇到的困难", hint: "哪些问题仍未解决")
+                    RichEditor(text:$reflection.challenges,placeholder:"遇到的困难",autoHeight:true,minHeight:90,slot:"growth-challenges").richEditorFrame()
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    AcademicSubheading(number: "4.3", title: "下一步", hint: "下一阶段关注什么")
+                    if let previousReflection, !previousReflection.nextSteps.isEmpty {
+                        AcademicQuote(label: "对照：上期写下的“下一步”") {
+                            Text(RichText.attributed(previousReflection.nextSteps)).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    RichEditor(text:$reflection.nextSteps,placeholder:"下一步",autoHeight:true,minHeight:90,slot:"growth-next").richEditorFrame()
+                    Button("把下一步转为学习计划…") {
+                        save()
+                        planDraft = LearningPlan(title: reflection.nextSteps, originKey: window.key)
+                    }.disabled(reflection.nextSteps.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || planDraft != nil)
+                    if let planDraft { LearningPlanForm(plan: planDraft) { self.planDraft = nil }.id(planDraft.id) }
+                }
+                if let saveError { Text(saveError).foregroundStyle(.red); Button("重试保存") { save() } }
+            }
+            .disabled(!loaded)
+        }
+    }
+
+    /// 五、计划执行
+    private var plansSection: some View {
+        AcademicSection(number: "五", title: "计划执行",
+                        lead: window.period == .week ? "本期完成的学习计划，以及每周复盘中对未完成计划的决定。" : "本期完成的学习计划，按完成日期归入。") {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    AcademicSubheading(number: "5.1", title: "本期完成的学习计划")
+                    CompletedGrowthPlans(window: window)
+                }
+                if window.period == .week {
+                    VStack(alignment: .leading, spacing: 8) {
+                        AcademicSubheading(number: "5.2", title: "每周复盘：决定下一步")
+                        WeeklyReviewView(window: window).id(window.key)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 附录：当前指标的逐条明细
+    private var appendixSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("附录　本期明细：\(metric.title)").font(AcademicType.section).foregroundStyle(ReviewPalette.ink)
+                Spacer()
+                Text("共 \(details.total) 项").font(AcademicType.note).foregroundStyle(ReviewPalette.sub).monospacedDigit()
+            }
+            if detailsLoading { ProgressView() }
+            else if details.rows.isEmpty { Text("本期暂无这类记录。").font(AcademicType.body).foregroundStyle(ReviewPalette.sub) }
+            else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(details.rows.enumerated()), id: \.element.id) { index, row in
+                        Button {
+                            if let target = row.target { store.learningExplorer = .init(route: .document(target,"")) }
+                            else if metric == .days {
+                                let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.locale = Locale(identifier: "en_US_POSIX")
+                                if let day = formatter.date(from: row.title) { store.learningExplorer = .init(route: .day(day)) }
+                            }
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text("\(page * 50 + index + 1).").font(AcademicType.table).monospacedDigit()
+                                    .foregroundStyle(ReviewPalette.sub).frame(width: 34, alignment: .trailing)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(row.title).font(AcademicType.body).foregroundStyle(ReviewPalette.ink).lineLimit(3)
+                                    Text(row.detail).font(AcademicType.note).foregroundStyle(ReviewPalette.sub)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 7)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(row.target == nil && metric != .days).handCursor()
+                        Rectangle().fill(ReviewPalette.hair).frame(height: 1)
+                    }
+                }
+            }
+            HStack {
+                Text("第 \(page+1) / \(max(1,(details.total+49)/50)) 页").font(AcademicType.note).foregroundStyle(ReviewPalette.sub)
+                Spacer()
+                Button("上一页") { page -= 1 }.disabled(page == 0 || detailsLoading)
+                Button("下一页") { page += 1 }.disabled((page+1)*50 >= details.total || detailsLoading)
+            }
+            .controlSize(.small)
+        }
+    }
+
     private func save() {
         guard loaded, generation == store.growthGeneration, !store.fullBackupBusy else { return }
         do { try store.db.saveProgress(reflection, key: window.key); saveError = nil; store.journeyRevision += 1 }
         catch { saveError = "复盘尚未保存：" + error.localizedDescription; store.errorMessage = saveError }
-    }
-}
-
-struct GrowthMetricGrid: View {
-    let current: GrowthSummary
-    let previous: GrowthSummary
-    let selected: GrowthMetric
-    let onSelect: (GrowthMetric) -> Void
-    var body: some View {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 12) {
-                    ForEach(GrowthMetric.allCases) { item in
-                        Button { onSelect(item) } label: {
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text(item.title).font(.callout)
-                                Text("\(current[item])").font(.title.bold()).monospacedDigit()
-                                Text("上期同期 \(previous[item]) · \(current[item]-previous[item] >= 0 ? "+" : "")\(current[item]-previous[item])")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                                .background(selected == item ? ReviewPalette.accentSoft : ReviewPalette.card, in: RoundedRectangle(cornerRadius: 12))
-                        }.buttonStyle(.plain).handCursor()
-                    }
-                }
     }
 }

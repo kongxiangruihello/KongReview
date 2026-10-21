@@ -40,6 +40,52 @@ enum ReviewPalette {
     static let again = Color.dynamic(NSColor(hex: 0xE5534B), NSColor(hex: 0xF0716A))
     static let hard = Color.dynamic(NSColor(hex: 0xE0913A), NSColor(hex: 0xEBA45A))
     static let easy = Color.dynamic(NSColor(hex: 0x3E9B6A), NSColor(hex: 0x5BB685))
+
+    // 3.14：完成状态的两种颜色——“已”（已回顾、已学）用松绿，“待”（待回顾、待学）用藤黄。
+    // 各处统一，颜色之外始终配文字标签。
+    static let done = Color.dynamic(NSColor(hex: 0x2F7D57), NSColor(hex: 0x5BB685))
+    static let doneSoft = Color.dynamic(NSColor(hex: 0x2F7D57, alpha: 0.12), NSColor(hex: 0x5BB685, alpha: 0.18))
+    static let pending = Color.dynamic(NSColor(hex: 0xB07A12), NSColor(hex: 0xDDAA45))
+    static let pendingSoft = Color.dynamic(NSColor(hex: 0xB07A12, alpha: 0.16), NSColor(hex: 0xDDAA45, alpha: 0.2))
+}
+
+/// 3.14：“已 / 待”的小圆点标签，如“● 已回顾”
+struct ProgressStateLabel: View {
+    enum Kind { case done, pending }
+    let state: Kind
+    let text: String
+    var size: CGFloat = 12
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(state == .done ? ReviewPalette.done : ReviewPalette.pending)
+                .frame(width: size * 0.5, height: size * 0.5)
+            Text(text).font(.system(size: size)).foregroundStyle(ReviewPalette.sub)
+        }
+    }
+}
+
+/// 3.14：已完成（松绿）与待完成（藤黄）并排的进度条；总数为 0 时只显示底线
+struct DonePendingBar: View {
+    let done: Int
+    let pending: Int
+    var height: CGFloat = 6
+
+    var body: some View {
+        GeometryReader { geometry in
+            let total = done + pending
+            let width = geometry.size.width
+            let doneWidth = total == 0 ? 0 : width * CGFloat(done) / CGFloat(total)
+            HStack(spacing: done > 0 && pending > 0 ? 2 : 0) {
+                if done > 0 { Capsule().fill(ReviewPalette.done).frame(width: max(height, doneWidth - (pending > 0 ? 1 : 0))) }
+                if pending > 0 { Capsule().fill(ReviewPalette.pending.opacity(0.75)) }
+                if total == 0 { Capsule().fill(ReviewPalette.hair) }
+            }
+        }
+        .frame(height: height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("已完成 \(done)，待完成 \(pending)")
+    }
 }
 
 /// 白色卡片：圆角 16、细边、两层柔和阴影
