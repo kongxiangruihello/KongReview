@@ -86,6 +86,8 @@ struct IdeaNoteView: View {
     @State private var draftBody = ""
     @State private var picking = false
     @State private var related: [Highlight] = []
+    /// 4.1.1：以本札记为解答的问题、挂着本札记的问题
+    @State private var questions: (answered: [QuestionRef], holding: [QuestionRef]) = ([], [])
 
     var body: some View {
         Group {
@@ -114,7 +116,7 @@ struct IdeaNoteView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle(detail?.note.title ?? "札记")
-        .task(id: "\(noteId)|\(store.ideaNoteRevision)") { await load() }
+        .task(id: "\(noteId)|\(store.ideaNoteRevision)|\(store.questionRevision)") { await load() }
         .onDisappear { if editing { commit() } }
         .sheet(isPresented: $picking) {
             HighlightPickerSheet(excluding: Set(detail?.highlights.compactMap(\.id) ?? [])) { ids in
@@ -128,6 +130,7 @@ struct IdeaNoteView: View {
         do {
             let d = try await store.db.ideaNoteDetail(id: noteId)
             detail = d; missing = false
+            questions = (try? await store.db.questionsForNote(noteId)) ?? ([], [])
             if !editing { draftTitle = d.note.title; draftBody = d.note.body }
             let cited = Set(d.highlights.compactMap(\.id))
             if let index = store.relatedIndex {
@@ -160,6 +163,8 @@ struct IdeaNoteView: View {
                     .buttonStyle(.borderedProminent).controlSize(.small).handCursor()
                     .disabled(editing && WikiLinks.normalize(draftTitle).isEmpty)
                 Menu {
+                    Button("挂到问题…") { store.attachToQuestion(kind: .note, recordId: noteId, preview: d.note.title) }
+                    Divider()
                     Button("删除（可在“已删除”中恢复）", role: .destructive) { store.setIdeaNoteDeleted(noteId, true) }
                 } label: { Image(systemName: "ellipsis.circle") }
                     .menuStyle(.borderlessButton).fixedSize()
@@ -265,6 +270,12 @@ struct IdeaNoteView: View {
                 }
                 ForEach(d.backlinks) { ref in noteLink(ref) }
             }
+            if !questions.answered.isEmpty || !questions.holding.isEmpty {
+                ProjectPanel(title: "相关问题", subtitle: "") {
+                    ForEach(questions.answered) { q in questionLink(q, note: "以本札记为解答") }
+                    ForEach(questions.holding.filter { h in !questions.answered.contains { $0.id == h.id } }) { q in questionLink(q, note: "挂着本札记") }
+                }
+            }
             if !d.outgoing.isEmpty || !d.unresolved.isEmpty {
                 ProjectPanel(title: "本条链接到", subtitle: "") {
                     ForEach(d.outgoing) { ref in noteLink(ref) }
@@ -292,6 +303,16 @@ struct IdeaNoteView: View {
                 Text("按用词相近程度找出，只作提示，不自动引用。").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
             }
         }
+    }
+
+    private func questionLink(_ q: QuestionRef, note: String) -> some View {
+        Button { store.selection = .question(q.id) } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Label(q.title, systemImage: "questionmark.bubble").font(.system(size: 13)).lineLimit(2)
+                Text("\(q.status.title) · \(note)").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+            }
+        }
+        .buttonStyle(.plain).foregroundStyle(ReviewPalette.accent).handCursor()
     }
 
     private func noteLink(_ ref: IdeaNoteRef) -> some View {
@@ -379,11 +400,14 @@ struct IdeaNoteComposerSheet: View {
     }
 }
 
-/// 引用摘录：搜索全部摘录，可多选
+/// 引用摘录：搜索全部摘录，可多选（4.1.1：也用来给问题挂札记、记忆卡）
 struct HighlightPickerSheet: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let excluding: Set<Int64>
+    var kind: GlobalSearchKind = .highlight
+    var title = "引用摘录"
+    var action = "引用"
     let onPick: ([Int64]) -> Void
     @State private var query = ""
     @State private var hits: [GlobalSearchHit] = []
@@ -391,8 +415,8 @@ struct HighlightPickerSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("引用摘录").font(.title2.bold())
-            TextField("搜索原文、译文、按语、出处或标签（繁简通搜）", text: $query).textFieldStyle(.roundedBorder)
+            Text(title).font(.title2.bold())
+            TextField(kind == .highlight ? "搜索原文、译文、按语、出处或标签（繁简通搜）" : "搜索\(kind.title)（繁简通搜）", text: $query).textFieldStyle(.roundedBorder)
             List(hits) { hit in
                 let id = hit.target.recordID
                 let already = excluding.contains(id)
@@ -405,7 +429,7 @@ struct HighlightPickerSheet: View {
                             .foregroundStyle(already ? Color.secondary : Color.accentColor)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(hit.preview).font(.system(size: 13)).lineLimit(3)
-                            Text(hit.title + (hit.context.isEmpty ? "" : " · " + hit.context) + (already ? " · 已引用" : ""))
+                            Text(hit.title + (hit.context.isEmpty ? "" : " · " + hit.context) + (already ? " · 已\(action)" : ""))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -417,7 +441,7 @@ struct HighlightPickerSheet: View {
                 Text(chosen.isEmpty ? "可多选" : "已选 \(chosen.count) 条").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("引用") { onPick(chosen); dismiss() }
+                Button(action) { onPick(chosen); dismiss() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent).disabled(chosen.isEmpty)
             }
@@ -429,7 +453,7 @@ struct HighlightPickerSheet: View {
             guard !Task.isCancelled else { return }
             let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !q.isEmpty else { hits = []; return }
-            hits = (try? await store.db.globalSearch(query: q, kind: .highlight, limit: 50))?.first?.items ?? []
+            hits = (try? await store.db.globalSearch(query: q, kind: kind, limit: 50))?.first?.items ?? []
         }
     }
 }

@@ -65,7 +65,11 @@ final class AppDatabase {
         // 1.2：繁简归一函数。索引触发器在写连接上调用它，所以必须在迁移之前注册。
         try writer.writeWithoutTransaction { db in AppDatabase.registerFunctions(db) }
         if let migration { try migrator.migrate(writer, upTo: migration) }
-        else { try migrator.migrate(writer) }
+        else {
+            try migrator.migrate(writer)
+            // 4.1.1：旧版本或旧备份里遗留的专题问题，打开时补转入问题簿
+            _ = try convertLegacyTopicQuestions()
+        }
     }
 
     /// kr_fold(文本)：繁体转简体、全角转半角、英文转小写（见 ChineseFold），供繁简通搜的索引使用
@@ -89,6 +93,7 @@ final class AppDatabase {
     /// 恢复备份后补跑迁移（备份可能来自旧版本）
     func migrateIfNeeded() throws {
         try migrator.migrate(writer)
+        _ = try convertLegacyTopicQuestions()
     }
 
     static func makeShared() throws -> AppDatabase {
@@ -106,6 +111,7 @@ final class AppDatabase {
         try migrateLegacyDatabase(from: legacy, to: url, configuration: config)
 
         let pool = try DatabasePool(path: url.path, configuration: config)
+        try backupBeforeQuestionBook(pool, directory: dir)
         return try AppDatabase(pool)
     }
 
@@ -120,6 +126,23 @@ final class AppDatabase {
         try source.close()
         try target.close()
         try fm.moveItem(at: temp, to: url)
+    }
+
+    /// 4.1.1：专题问题迁入问题簿不可逆——升级前把整个库复制一份到“升级前备份”文件夹（只在尚未迁移、且有专题问题时做一次）
+    static func backupBeforeQuestionBook(_ pool: DatabasePool, directory: URL) throws {
+        let needed = try pool.read { db -> Bool in
+            guard try db.tableExists("grdb_migrations"), try db.tableExists("app_progress") else { return false }
+            let done = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = 'v18-question-book'") ?? 0
+            let legacy = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM app_progress WHERE key LIKE 'topic-question.%' OR key LIKE 'question-draft.%'") ?? 0
+            return done == 0 && legacy > 0
+        }
+        guard needed else { return }
+        let folder = directory.appendingPathComponent("升级前备份", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyyMMdd-HHmmss"
+        let target = try DatabaseQueue(path: folder.appendingPathComponent("kongreview-4.1.1升级前-\(f.string(from: Date())).sqlite").path)
+        try pool.backup(to: target)
+        try target.close()
     }
 
     /// 内存数据库，供 SwiftUI 预览使用
@@ -409,6 +432,10 @@ final class AppDatabase {
         // 4.1：札记、札记引用的摘录与札记之间的链接
         m.registerMigration("v17-idea-notes") { db in
             try AppDatabase.installIdeaNotes(in: db)
+        }
+        // 4.1.1：问题簿；3.4 的专题问题与草稿转入
+        m.registerMigration("v18-question-book") { db in
+            try AppDatabase.installQuestionBook(in: db)
         }
         return m
     }

@@ -107,15 +107,16 @@ struct PeriodReflectionGuide: View {
     var body: some View {
         GrowthBox(title: window.period == .year ? "年度复盘引导" : "月度复盘引导", quote: true) {
             VStack(alignment:.leading,spacing:10) {
-                Text("本期学习 \(summary[.days]) 天，回顾 \(summary[.highlights]) 条摘录，学习 \(summary[.cards]) 张卡片；完成 \(facts.completed) 项计划，留下 \(facts.outcomes) 项成果，解决 \(facts.solvedQuestions) 个专题问题。")
-                Text("① 哪些理解加深了？结合下方完成计划与成果，填写“收获”。\n② 哪些问题仍未解决？回看专题问题清单，填写“困难”。\n③ 下一阶段关注什么？填写“下一步”，再转成具体计划。").fixedSize(horizontal:false,vertical:true)
+                Text("本期学习 \(summary[.days]) 天，回顾 \(summary[.highlights]) 条摘录，学习 \(summary[.cards]) 张卡片；完成 \(facts.completed) 项计划，留下 \(facts.outcomes) 项成果，解决 \(facts.solvedQuestions) 个问题。")
+                Text("① 哪些理解加深了？结合下方完成计划与成果，填写“收获”。\n② 哪些问题仍未解决？回看问题簿，填写“困难”。\n③ 下一阶段关注什么？填写“下一步”，再转成具体计划。").fixedSize(horizontal:false,vertical:true)
                 HStack {
                     Button("查看本期成果") {
                         let n = store.journeyNavigation
                         n.outcomesUseDates = true; n.outcomesStart = window.start; n.outcomesEnd = window.end.addingTimeInterval(-1)
                         n.outcomesQuery = ""; n.outcomesNotebookID = nil; n.outcomesPage = 0; n.anchors["outcomes"] = nil; n.tab = 7
                     }
-                    Button("查看专题问题") { store.journeyNavigation.showTopicQuestions = true; store.journeyNavigation.tab = 1 }
+                    Button("已解决的问题") { store.openQuestionBook(QuestionFilter(state: .solved)) }
+                    Button("未解决的问题") { store.openQuestionBook(QuestionFilter(state: .unsolved)) }
                 }
                 Text("数字来自已有记录，理解程度由你判断。问题按当前已解决状态及解决日期计入，重新打开的问题不再计入；记录删除或撤销完成后统计会相应变化。").font(.caption).foregroundStyle(.secondary)
                 if let error { Text(error).foregroundStyle(.red) }
@@ -158,133 +159,56 @@ struct EvidenceChooser: View {
     }
 }
 
-struct TopicQuestionForm: View {
-    @Environment(LibraryStore.self) private var store
-    @State var draft: TopicQuestionDraft
-    let onClose: () -> Void
-    @State private var ready = false
-    @State private var generation = -1
-    @State private var closed = false
-    @State private var choosing = false
-    @State private var discard = false
-    @State private var error: String?
-    var body: some View {
-        ScrollView {
-            VStack(alignment:.leading,spacing:14) {
-                Text("专题问题与解答").font(.title2.bold())
-                RichEditor(text:$draft.value.question,placeholder:"需要解决的问题",autoHeight:true,minHeight:90,slot:"topic-question").richEditorFrame()
-                RichEditor(text:$draft.value.answer,placeholder:"答案或解释",autoHeight:true,minHeight:120,slot:"topic-answer").richEditorFrame()
-                Toggle("已解决",isOn:Binding(get:{draft.value.solvedAt != nil},set:{draft.value.solvedAt = $0 ? Date() : nil}))
-                if let evidence = draft.value.evidence { HStack { Text("关联：" + evidence.title).lineLimit(3); Button("移除关联") { draft.value.evidence = nil } } }
-                Button(choosing ? "收起资料选择" : "关联摘录、笔记或记忆卡…") { choosing.toggle() }
-                if choosing { EvidenceChooser { item in draft.value.evidence = item; choosing = false } }
-                Text("输入自动暂存，切换页面或重启后可从本专题“未保存草稿”恢复。标为解决前请填写答案；可以取消勾选，重新打开问题。").font(.caption).foregroundStyle(.secondary)
-                if let error {
-                    Text(error).foregroundStyle(.red)
-                    Button("保留输入，读取最新状态") {
-                        do {
-                            let latest = try store.db.progressValue(TopicQuestion.self,key:draft.value.key)
-                            draft.original = latest; draft.value.solvedAt = latest?.solvedAt; persist()
-                        } catch { self.error = error.localizedDescription }
-                    }
-                }
-                HStack {
-                    Button("保存问题") { save() }.buttonStyle(.borderedProminent)
-                    Button("暂存并关闭") { persist(); if error == nil { closed = true; onClose() } }
-                    Button("丢弃草稿",role:.destructive) { discard = true }
-                }
-            }.padding(24).disabled(!ready || store.fullBackupBusy || generation != store.growthGeneration)
-        }.frame(minWidth:480,idealWidth:620,minHeight:450,idealHeight:650)
-        .confirmationDialog("丢弃未保存的输入？已保存的问题不变。",isPresented:$discard) {
-            Button("丢弃草稿",role:.destructive) {
-                guard generation == store.growthGeneration, !store.fullBackupBusy else { return }
-                do { try store.db.deleteProgress(key:draft.key); closed = true; store.journeyRevision += 1; onClose() }
-                catch { self.error = error.localizedDescription }
-            }
-        }
-        .onAppear {
-            generation = store.growthGeneration
-            do { draft = try store.db.progressValue(TopicQuestionDraft.self,key:draft.key) ?? draft; ready = true }
-            catch { self.error = error.localizedDescription }
-        }
-        .onChange(of:draft.value) { _,_ in persist() }.onDisappear { persist() }
-    }
-    private func persist() {
-        guard ready, !closed, generation == store.growthGeneration, !store.fullBackupBusy else { return }
-        do {
-            let hasInput = !draft.value.question.isEmpty || !draft.value.answer.isEmpty || draft.value.evidence != nil
-            if draft.value != draft.original && hasInput { try store.db.saveProgress(draft,key:draft.key) }
-            else { try store.db.deleteProgress(key:draft.key) }
-            error = nil; store.journeyRevision += 1
-        }
-        catch { self.error = "草稿未保存：" + error.localizedDescription }
-    }
-    private func save() {
-        guard ready, generation == store.growthGeneration, !store.fullBackupBusy else { return }
-        do { try store.db.saveTopicQuestion(draft); closed = true; store.journeyRevision += 1; onClose() }
-        catch { self.error = error.localizedDescription }
-    }
-}
-
+/// 4.1.1：专题页“问题与解答”——问题簿中归入本专题的问题（数据在问题簿，入口保留）
 struct TopicQuestionsView: View {
     @Environment(LibraryStore.self) private var store
     let notebookID: Int64
     private var solved: Bool { get { store.journeyNavigation.questionSolved[notebookID] ?? false } nonmutating set { store.journeyNavigation.questionSolved[notebookID] = newValue } }
     private var query: String { get { store.journeyNavigation.questionQueries[notebookID] ?? "" } nonmutating set { store.journeyNavigation.questionQueries[notebookID] = newValue } }
     private var page: Int { get { store.journeyNavigation.questionPages[notebookID] ?? 0 } nonmutating set { store.journeyNavigation.questionPages[notebookID] = newValue } }
-    @State private var anchor: String?
-    @State private var draftPage = 0
-    @State private var result = GrowthPage<TopicQuestion>(items:[],total:0)
-    @State private var drafts = GrowthPage<TopicQuestionDraft>(items:[],total:0)
-    @State private var editing: TopicQuestionDraft?
+    @State private var anchor: Int64?
+    @State private var result = GrowthPage<QuestionSummary>(items:[],total:0)
+    @State private var drafts: [QuestionDraft] = []
     @State private var error: String?
     @State private var loading = false
+    private var filter: QuestionFilter { QuestionFilter(state: solved ? .solved : .unsolved, query: query, notebookID: notebookID) }
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             HStack {
                 Picker("状态",selection:Binding(get:{solved},set:{solved=$0})) { Text("待解决").tag(false); Text("已解决").tag(true) }.pickerStyle(.segmented)
-                Button("记录问题") { editing = .init(value:.init(notebookID:notebookID)) }
+                Button("记录问题") { store.newQuestion(notebookID:notebookID) }
+                Button("在问题簿中查看") { store.openQuestionBook(QuestionFilter(state: solved ? .solved : .unsolved, notebookID: notebookID)) }
             }
-            TextField("搜索问题或答案",text:Binding(get:{query},set:{query=$0})).textFieldStyle(.roundedBorder)
+            TextField("搜索问题、说明或解答",text:Binding(get:{query},set:{query=$0})).textFieldStyle(.roundedBorder)
+            Text("问题收在问题簿里：一个问题可同时归入几个专题与项目，可挂多条材料。这里列出归入本专题的问题。").font(.caption).foregroundStyle(.secondary)
             if let error { Text(error).foregroundStyle(.red) }
             if loading { ProgressView() }
             ScrollView {
-                LazyVStack(alignment:.leading,spacing:14) {
-                    if drafts.total > 0 {
-                        DisclosureGroup("未保存草稿 · \(drafts.total)") {
-                            ForEach(drafts.items) { item in Button(item.value.question.isEmpty ? "未命名问题" : item.value.question) { editing = item }.lineLimit(2) }
-                            JourneyPager(page:$draftPage,total:drafts.total)
+                LazyVStack(alignment:.leading,spacing:10) {
+                    if !drafts.isEmpty {
+                        DisclosureGroup("未保存的输入 · \(drafts.count)") {
+                            ForEach(drafts) { d in QuestionDraftRow(draft:d) }
                         }
                     }
-                    ForEach(result.items) { item in
-                        GroupBox {
-                            VStack(alignment:.leading,spacing:8) {
-                                Text(RichText.attributed(item.question)).font(.headline).textSelection(.enabled)
-                                if !item.answer.isEmpty { DisclosureGroup("阅读答案与解释") { Text(RichText.attributed(item.answer)).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) } }
-                                if let at = item.solvedAt { Text("解决于 " + at.formatted(date:.abbreviated,time:.omitted)).font(.caption).foregroundStyle(.secondary) }
-                                HStack {
-                                    Button("编辑／补充解答") { editing = .init(value:item,original:item) }
-                                    if let evidence = item.evidence { Button("打开关联资料") { anchor = item.id.uuidString; store.openPlanEvidence(evidence) } }
-                                }
-                            }.frame(maxWidth:.infinity,alignment:.leading).padding(8)
-                        }.id(item.id.uuidString)
-                    }
+                    ForEach(result.items) { item in QuestionRow(q:item).id(item.id) }
                     if result.items.isEmpty && !loading { Text(solved ? "还没有已解决的问题。" : "暂时没有待解决的问题。").foregroundStyle(.secondary) }
                 }.scrollTargetLayout()
             }.scrollPosition(id:$anchor,anchor:.top)
             JourneyPager(page:Binding(get:{page},set:{page=$0}),total:result.total).disabled(loading)
-        }.sheet(item:$editing) { draft in TopicQuestionForm(draft:draft) { editing = nil }.environment(store) }
-        .onChange(of:anchor) { _,value in store.journeyNavigation.anchors["questions.\(notebookID)"] = value }
+        }
+        .onChange(of:anchor) { _,value in store.journeyNavigation.anchors["questions.\(notebookID)"] = value.map(String.init) }
         .onChange(of:solved) { _,_ in page = 0; anchor = nil; store.journeyNavigation.anchors["questions.\(notebookID)"] = nil }
         .onChange(of:query) { _,_ in page = 0; anchor = nil; store.journeyNavigation.anchors["questions.\(notebookID)"] = nil }
-        .task(id:"\(notebookID)|\(solved)|\(query)|\(page)|\(store.journeyRevision)|\(store.growthGeneration)") {
+        .task(id:"\(notebookID)|\(solved)|\(query)|\(page)|\(store.questionRevision)|\(store.journeyRevision)|\(store.growthGeneration)") {
             loading = true
-            do { let value = try await store.db.topicQuestions(notebookID:notebookID,solved:solved,query:query,offset:page*50); try Task.checkCancellation(); result = value; error = nil; loading = false; if anchor == nil { anchor = store.journeyNavigation.anchors["questions.\(notebookID)"] }; if page > 0 && value.items.isEmpty { page = max(0,(value.total-1)/50) } }
+            do {
+                let value = try await store.db.questionPage(filter,offset:page*50); try Task.checkCancellation()
+                result = value; error = nil; loading = false
+                if anchor == nil { anchor = store.journeyNavigation.anchors["questions.\(notebookID)"].flatMap { Int64($0) } }
+                if page > 0 && value.items.isEmpty { page = max(0,(value.total-1)/50) }
+                drafts = try store.db.questionDrafts(notebookID:notebookID)
+            }
             catch is CancellationError {} catch { self.error = error.localizedDescription; loading = false }
-        }
-        .task(id:"\(notebookID)|\(draftPage)|\(store.journeyRevision)|\(store.growthGeneration)") {
-            do { let value = try await store.db.questionDrafts(notebookID:notebookID,offset:draftPage*50); try Task.checkCancellation(); drafts = value; if draftPage > 0 && value.items.isEmpty { draftPage = max(0,(value.total-1)/50) } }
-            catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
     }
 }

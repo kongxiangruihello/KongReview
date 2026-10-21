@@ -128,8 +128,8 @@ struct ResearchProjectOverview: Sendable {
     var cardCount = 0
     /// 下一步：关联到本项目、尚未完成也未取消的学习计划（按日期）
     var pendingPlans: [LearningPlan] = []
-    /// 关联笔记本里尚未解决的专题问题（最近更新的在前）
-    var openQuestions: [TopicQuestion] = []
+    /// 4.1.1：归入本项目、或归入其专题的未解决问题（「常念」在前，再按最近修改）
+    var openQuestions: [QuestionRef] = []
     var stages: [ResearchProjectStageEvent] = []
 }
 
@@ -320,17 +320,7 @@ extension AppDatabase {
                 ORDER BY json_extract(CAST(payload AS TEXT),'$.dueDate'), key LIMIT 50
                 """, arguments: [LearningPlanLinkKind.project.rawValue, id])
             o.pendingPlans = planRows.compactMap { try? JSONDecoder().decode(LearningPlan.self, from: $0) }
-            let notebookIDs = o.links.filter { $0.kind == .notebook }.map(\.recordId)
-            if !notebookIDs.isEmpty {
-                let marks = Array(repeating: "?", count: notebookIDs.count).joined(separator: ",")
-                let rows = try Data.fetchAll(db, sql: """
-                    SELECT payload FROM app_progress WHERE key LIKE 'topic-question.%'
-                      AND json_extract(CAST(payload AS TEXT),'$.notebookID') IN (\(marks))
-                      AND json_extract(CAST(payload AS TEXT),'$.solvedAt') IS NULL
-                    ORDER BY updatedAt DESC, key LIMIT 50
-                    """, arguments: StatementArguments(notebookIDs))
-                o.openQuestions = rows.compactMap { try? JSONDecoder().decode(TopicQuestion.self, from: $0) }
-            }
+            o.openQuestions = try Self.openQuestions(db, projectId: id)
             o.stages = try Row.fetchAll(db, sql: "SELECT id, stage, at, note FROM research_project_stage WHERE projectId = ? ORDER BY at DESC, id DESC", arguments: [id])
                 .compactMap { r in ResearchProject.Stage(rawValue: r["stage"]).map { ResearchProjectStageEvent(id: r["id"], stage: $0, at: r["at"], note: r["note"]) } }
             return o

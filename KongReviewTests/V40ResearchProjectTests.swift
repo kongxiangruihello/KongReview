@@ -136,16 +136,17 @@ final class V40ResearchProjectTests: XCTestCase {
         var done = LearningPlan(title: "已完成", link: link); done.completedAt = now
         var cancelled = LearningPlan(title: "已取消", link: link); cancelled.cancelledAt = now
         for plan in [later, sooner, done, cancelled, LearningPlan(title: "无关计划")] { try db.saveLearningPlan(plan) }
-        let open = TopicQuestion(notebookID: notebook.id!, question: "学与习之别？")
-        var solved = TopicQuestion(notebookID: notebook.id!, question: "已解决"); solved.solvedAt = now
-        let elsewhere = TopicQuestion(notebookID: other.id!, question: "别处的问题")
-        for q in [open, solved, elsewhere] { try db.saveProgress(q, key: q.key) }
+        _ = try db.createQuestion(title: "学与习之别？", scopes: [(.notebook, notebook.id!)], now: now)
+        let solved = try db.createQuestion(title: "已解决", scopes: [(.notebook, notebook.id!)], now: now)
+        try db.saveQuestion(id: solved.id!, title: solved.title, detail: "", answer: "答案"); try db.setQuestionStatus(id: solved.id!, .solved)
+        _ = try db.createQuestion(title: "别处的问题", scopes: [(.notebook, other.id!)], now: now)
+        _ = try db.createQuestion(title: "直接归入项目", scopes: [(.project, p.id!)], now: now.addingTimeInterval(-60))
 
         let o = try await db.researchProjectOverview(id: p.id!)
         XCTAssertEqual(o.highlightCount, 1, "笔记本与出处中的同一条摘录只计一次")
         XCTAssertEqual(o.cardCount, 1)
         XCTAssertEqual(o.pendingPlans.map(\.title), ["核引文", "改第二章"], "只列未完成、未取消的，按日期")
-        XCTAssertEqual(o.openQuestions.map(\.question), ["学与习之别？"])
+        XCTAssertEqual(o.openQuestions.map(\.title), ["学与习之别？", "直接归入项目"], "归入项目或其专题的未解问题")
         let exists = try await db.planLinkExists(link)
         XCTAssertTrue(exists)
         let choices = try await db.planLinkChoices(kind: .project, query: "论语")

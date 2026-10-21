@@ -74,32 +74,28 @@ final class V34GrowthPracticeTests: XCTestCase {
         for i in 0..<105 {
             let p = LearningPlan(title:"成果 \(i)"); try db.saveLearningPlan(p)
             try db.finishPlan(.init(original:p,outcome:.init(gains:"收获 \(i)")),now:date(18))
-            let q = TopicQuestion(notebookID:n.id!,question:"问题 \(i)",answer:"解释",solvedAt:date(18))
-            try db.saveTopicQuestion(.init(value:q))
+            let q = try db.createQuestion(title:"问题 \(i)",scopes:[(.notebook,n.id!)],now:date(18))
+            try db.saveQuestion(id:q.id!,title:q.title,detail:"",answer:"解释",now:date(18)); try db.setQuestionStatus(id:q.id!,.solved,now:date(18))
         }
         let first = try await db.learningOutcomes(), last = try await db.learningOutcomes(offset:100)
         XCTAssertEqual(first.total,105); XCTAssertEqual(first.items.count,50); XCTAssertEqual(last.items.count,5); XCTAssertTrue(Set(first.items.map(\.id)).isDisjoint(with:last.items.map(\.id)))
-        let questions = try await db.topicQuestions(notebookID:n.id!,solved:true,offset:100); XCTAssertEqual(questions.total,105); XCTAssertEqual(questions.items.count,5)
+        let questions = try await db.questionPage(QuestionFilter(state:.solved,notebookID:n.id!),offset:100); XCTAssertEqual(questions.total,105); XCTAssertEqual(questions.items.count,5)
         let facts = try await db.periodReviewFacts(window:GrowthPeriod.month.window(containing:date(18),now:date(19),calendar:calendar))
         XCTAssertEqual(facts.completed,105); XCTAssertEqual(facts.outcomes,105); XCTAssertEqual(facts.solvedQuestions,105)
     }
-    func testQuestionDraftConflictResolutionAndReopeningPreserveAnswer() async throws {
+    func testQuestionSolveRequiresAnswerAndReopeningPreservesAnswer() async throws {
         let db = try AppDatabase(DatabaseQueue()), n = try db.createNotebook(title:"专题")
-        let q = TopicQuestion(notebookID:n.id!,question:"为什么？",answer:"原解释")
-        try db.saveTopicQuestion(.init(value:q),now:date(18))
-        let original = try XCTUnwrap(db.progressValue(TopicQuestion.self,key:q.key))
-        var edit = TopicQuestionDraft(value:original,original:original); edit.value.answer = String(repeating:"充分解释",count:2000); edit.value.solvedAt = date(18)
-        try db.saveProgress(edit,key:edit.key); try db.saveTopicQuestion(edit,now:date(18,12))
-        XCTAssertNil(try db.progressValue(TopicQuestionDraft.self,key:edit.key))
-        XCTAssertThrowsError(try db.saveTopicQuestion(edit))
-        let solved = try XCTUnwrap(db.progressValue(TopicQuestion.self,key:q.key))
-        var reopen = TopicQuestionDraft(value:solved,original:solved); reopen.value.solvedAt = nil
-        try db.saveTopicQuestion(reopen)
-        let pending = try await db.topicQuestions(notebookID:n.id!,solved:false); XCTAssertEqual(pending.total,1); XCTAssertEqual(pending.items[0].answer,edit.value.answer)
-        var invalid = TopicQuestion(notebookID:n.id!,question:"需要解答",solvedAt:date(18))
-        XCTAssertThrowsError(try db.saveTopicQuestion(.init(value:invalid)))
-        invalid.solvedAt = nil; invalid.question = " \n "
-        XCTAssertThrowsError(try db.saveTopicQuestion(.init(value:invalid)))
+        let q = try db.createQuestion(title:"为什么？",scopes:[(.notebook,n.id!)],now:date(18))
+        XCTAssertThrowsError(try db.setQuestionStatus(id:q.id!,.solved),"没有解答不能标为解决")
+        let long = String(repeating:"充分解释",count:2000)
+        try db.saveQuestion(id:q.id!,title:"为什么？",detail:"",answer:long,now:date(18,12))
+        try db.setQuestionStatus(id:q.id!,.solved,now:date(18,12))
+        XCTAssertThrowsError(try db.saveQuestion(id:q.id!,title:"为什么？",detail:"",answer:" "),"已解决的问题不能清空解答")
+        try db.setQuestionStatus(id:q.id!,.lead)
+        let pending = try await db.questionPage(QuestionFilter(state:.unsolved,notebookID:n.id!)); XCTAssertEqual(pending.total,1)
+        let reopened = try XCTUnwrap(try db.question(id:q.id!)); XCTAssertEqual(reopened.answer,long); XCTAssertNil(reopened.solvedAt)
+        XCTAssertThrowsError(try db.createQuestion(title:" \n "))
+        XCTAssertThrowsError(try db.saveQuestion(id:q.id!,title:"",detail:"",answer:""))
     }
     func testQuestionDraftBackupAndRecurringCursorRoundTrip() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -110,18 +106,20 @@ final class V34GrowthPracticeTests: XCTestCase {
         let n = try db.createNotebook(title:"备份专题"), (schedule,plan) = try schedule(db,at:date(4))
         try db.changePlanStatus(id:plan.id,status:.cancelled)
         XCTAssertEqual(try db.materializeWeeklyPlans(now:date(18),calendar:calendar),1)
-        let draft = TopicQuestionDraft(value:.init(notebookID:n.id!,question:"备份草稿",answer:"未保存解释")); try db.saveProgress(draft,key:draft.key)
-        let q = TopicQuestion(notebookID:n.id!,question:"已解决",answer:"答案",solvedAt:date(18)); try db.saveTopicQuestion(.init(value:q))
+        let draft = QuestionDraft(id:UUID().uuidString,title:"备份草稿",answer:"未保存解释",notebookID:n.id!); try db.saveProgress(draft,key:draft.key)
+        let q = try db.createQuestion(title:"已解决",scopes:[(.notebook,n.id!)]); try db.saveQuestion(id:q.id!,title:q.title,detail:"",answer:"答案"); try db.setQuestionStatus(id:q.id!,.solved,now:date(18))
         let backup = dir.appendingPathComponent("test.kongreviewbackup")
         try FullBackupService.create(db:db,draftURL:nil,defaults:prefs,destination:backup)
         let prepared = try FullBackupService.prepare(url:backup); defer { prepared.cleanup() }
         let restored = try AppDatabase(DatabaseQueue()); _ = try FullBackupService.restore(prepared,db:restored,draftURL:nil,defaults:prefs,safetyDirectory:dir)
-        XCTAssertEqual(try restored.progressValue(TopicQuestionDraft.self,key:draft.key),draft)
+        XCTAssertEqual(try restored.progressValue(QuestionDraft.self,key:draft.key),draft)
         XCTAssertEqual(try restored.progressValue(WeeklySchedule.self,key:schedule.key)?.lastOccurrence,date(18))
         XCTAssertEqual(try restored.materializeWeeklyPlans(now:date(18),calendar:calendar),0)
         let pending = try await restored.planPage(status:.pending); XCTAssertEqual(pending.total,1)
-        try restored.saveTopicQuestion(draft)
-        let questions = try await restored.topicQuestions(notebookID:n.id!,solved:false); XCTAssertEqual(questions.total,1)
+        try restored.restoreQuestionDraft(draft)
+        let questions = try await restored.questionPage(QuestionFilter(state:.unsolved,notebookID:n.id!)); XCTAssertEqual(questions.total,1)
+        let solved = try await restored.questionPage(QuestionFilter(state:.solved,notebookID:n.id!)); XCTAssertEqual(solved.total,1)
+        XCTAssertNil(try restored.progressValue(QuestionDraft.self,key:draft.key))
     }
     @MainActor func testHomeEntrypointsAndGrowthReturnStateRemainIndependent() throws {
         let db = try AppDatabase(DatabaseQueue()), store = LibraryStore(db:db,positionDefaults:nil)

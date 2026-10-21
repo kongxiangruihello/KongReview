@@ -25,6 +25,9 @@ enum SidebarItem: Hashable {
     /// 4.1：札记列表与札记页
     case ideaNotes
     case ideaNote(Int64)
+    /// 4.1.1：问题簿与问题页
+    case questionBook
+    case question(Int64)
     case tag(String)
 }
 
@@ -78,6 +81,14 @@ final class LibraryStore {
     var ideaNoteCount = 0
     var ideaNoteRevision = 0
     var ideaNoteComposer: IdeaNoteComposer?
+    /// 4.1.1：未解问题数（侧栏）、改动计数、新建问题与“挂到问题”面板、问题簿的筛选与页码（离开再回来时保留）
+    var openQuestionCount = 0
+    var questionRevision = 0
+    var questionCreator: QuestionCreateRequest?
+    var questionAttach: QuestionAttachRequest?
+    var questionBookFilter = QuestionFilter()
+    var questionBookPage = 0
+    var questionBookAnchor: Int64?
     var notebookQuoteCounts: [Int64: Int] = [:]
     var notebookState = NotebookState()
     /// 1.3：新建笔记本对话框（输入标题）；附带要放进去的摘录
@@ -287,6 +298,7 @@ final class LibraryStore {
             notebookQuoteCounts = try db.notebookQuoteCounts()
             researchProjects = try db.researchProjects()
             ideaNoteCount = try db.ideaNoteCount()
+            openQuestionCount = try db.openQuestionCount()
             refreshLearningFocus()
             revision += 1
             refreshDerived()

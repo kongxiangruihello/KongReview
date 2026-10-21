@@ -103,7 +103,6 @@ struct ResearchProjectView: View {
     @State private var writingSheet = false
     @State private var missing = false
     @State private var planDraft: LearningPlan?
-    @State private var questionDraft: TopicQuestionDraft?
     @State private var confirmDelete = false
 
     var body: some View {
@@ -138,7 +137,6 @@ struct ResearchProjectView: View {
         .sheet(item: Binding(get: { planDraft.map { IdentifiedPlan(plan: $0) } }, set: { planDraft = $0?.plan })) { item in
             LearningPlanForm(plan: item.plan) { planDraft = nil }.environment(store).padding().frame(minWidth: 520, minHeight: 480)
         }
-        .sheet(item: $questionDraft) { draft in TopicQuestionForm(draft: draft) { questionDraft = nil }.environment(store) }
         .sheet(isPresented: $writingSheet) {
             if let p = overview?.project { ManualWritingSheet(project: p, hasExternalTotal: writing?.external != nil).environment(store) }
         }
@@ -262,29 +260,29 @@ struct ResearchProjectView: View {
 
     private func questions(_ o: ResearchProjectOverview) -> some View {
         let notebooks = o.links.filter { $0.kind == .notebook }
-        return ProjectPanel(title: "未解问题", subtitle: notebooks.isEmpty ? "专题问题记在专题笔记本下" : "来自 \(notebooks.count) 本专题笔记本") {
+        return ProjectPanel(title: "未解问题", subtitle: notebooks.isEmpty ? "问题簿中归入本项目的" : "含 \(notebooks.count) 本专题中的") {
             if o.openQuestions.isEmpty {
-                Text(notebooks.isEmpty ? "先把一本专题笔记本归入本项目，就可以在这里记下研究中遇到的问题。" : "暂无未解问题。")
+                Text("暂无未解问题。记下研究中遇到的问题，或在问题簿里把已有问题归入本项目。")
                     .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(o.openQuestions.prefix(8)) { q in
-                Button { questionDraft = TopicQuestionDraft(value: q, original: q) } label: {
+                Button { store.selection = .question(q.id) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "questionmark.circle").font(.system(size: 11)).foregroundStyle(ReviewPalette.pending)
-                        Text(Markdown.plainText(fromHTML: q.question)).font(.system(size: 13)).foregroundStyle(ReviewPalette.ink).lineLimit(2)
+                        Image(systemName: q.pinned ? "star.fill" : q.status.symbol).font(.system(size: 11))
+                            .foregroundStyle(q.pinned ? Color.orange : q.status.color)
+                        Text(q.title).font(.system(size: 13)).foregroundStyle(ReviewPalette.ink).lineLimit(2)
                         Spacer(minLength: 0)
                     }
                 }
-                .buttonStyle(.plain).handCursor().help("补充解答或标为解决")
+                .buttonStyle(.plain).handCursor().help("打开问题：挂材料、写解答、标为解决")
             }
-            if o.openQuestions.count > 8 { Text("另有 \(o.openQuestions.count - 8) 个，见各专题的问题与解答").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub) }
-            if notebooks.count == 1, let n = notebooks.first {
-                addButton("记一个问题") { questionDraft = TopicQuestionDraft(value: TopicQuestion(notebookID: n.recordId), original: nil) }
-            } else if notebooks.count > 1 {
-                Menu {
-                    ForEach(notebooks) { n in Button(n.title) { questionDraft = TopicQuestionDraft(value: TopicQuestion(notebookID: n.recordId), original: nil) } }
-                } label: { Label("记一个问题（选专题）", systemImage: "plus").font(.system(size: 12.5)) }
-                    .menuStyle(.borderlessButton).fixedSize()
+            HStack(spacing: 14) {
+                addButton("记一个问题") { store.newQuestion(projectID: projectId) }
+                    .disabled(o.project.isArchived)
+                Button(o.openQuestions.count > 8 ? "另有 \(o.openQuestions.count - 8) 个，在问题簿中查看" : "在问题簿中查看") {
+                    store.openQuestionBook(QuestionFilter(state: .unsolved, projectID: projectId))
+                }
+                .buttonStyle(.plain).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.accent).handCursor()
             }
         }
     }

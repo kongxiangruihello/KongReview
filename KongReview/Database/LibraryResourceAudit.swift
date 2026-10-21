@@ -29,10 +29,10 @@ struct AuditIssue: Identifiable, Sendable {
     var message: String
 }
 extension AppDatabase {
-    static let resourceAuditTables = ["highlight","card","article","notebook_block","source","app_progress"]
+    static let resourceAuditTables = ["highlight","card","article","notebook_block","source","app_progress","idea_note","question"]
     static func auditCondition(_ kind: String) -> String {
         switch kind {
-        case "highlight","card": return "deletedAt IS NULL"
+        case "highlight","card","idea_note": return "deletedAt IS NULL"
         case "app_progress": return "(key LIKE 'growth.%' OR key LIKE 'learning-plan.%' OR key LIKE 'topic-question.%' OR key LIKE 'weekly-schedule.%' OR key LIKE 'difficult-care.%')"
         default: return "1"
         }
@@ -66,6 +66,8 @@ extension AppDatabase {
                 case "source":
                     result.title = row["title"]
                     if let url: String = row["url"],!url.isEmpty { result.fields = [.init(name:"出处网址",text:"<a href=\""+HTMLSourceCodec.attribute(url)+"\">网址</a>")] }
+                case "idea_note": result.title = row["title"]; result.fields = [field("body","札记正文")]
+                case "question": result.title = row["title"]; result.fields = [field("detail","问题说明"),field("answer","解答")]
                 case "app_progress":
                     result.key = row["key"]; result.title = "个人成长"
                     let data: Data = row["payload"]
