@@ -92,7 +92,15 @@ struct ResearchProject: Codable, Identifiable, Hashable, Sendable, FetchableReco
 struct ResearchProjectLink: Codable, Hashable, Sendable, Identifiable {
     enum Kind: String, Codable, CaseIterable, Sendable {
         case notebook, source
-        var title: String { self == .notebook ? "专题笔记本" : "出处" }
+        /// 4.1：札记
+        case note
+        var title: String {
+            switch self {
+            case .notebook: "专题笔记本"
+            case .source: "出处"
+            case .note: "札记"
+            }
+        }
     }
     var projectId: Int64
     var kind: Kind
@@ -250,14 +258,17 @@ extension AppDatabase {
     static func researchProjectLinks(_ db: Database, projectId: Int64) throws -> [ResearchProjectLink] {
         try Row.fetchAll(db, sql: """
             SELECT l.kind, l.recordId,
-                   CASE l.kind WHEN 'notebook' THEN n.title ELSE s.title END AS title,
+                   CASE l.kind WHEN 'notebook' THEN n.title WHEN 'note' THEN i.title ELSE s.title END AS title,
                    CASE l.kind
                      WHEN 'notebook' THEN (SELECT COUNT(*) FROM notebook_block b WHERE b.notebookId = l.recordId AND b.kind = 'highlight')
+                     WHEN 'note' THEN (SELECT COUNT(*) FROM idea_note_highlight x WHERE x.noteId = l.recordId)
                      ELSE (SELECT COUNT(*) FROM highlight h WHERE h.sourceId = l.recordId AND h.deletedAt IS NULL) END AS n
             FROM research_project_link l
             LEFT JOIN notebook n ON l.kind = 'notebook' AND n.id = l.recordId
             LEFT JOIN source s ON l.kind = 'source' AND s.id = l.recordId
-            WHERE l.projectId = ? ORDER BY l.kind = 'source', l.position, l.recordId
+            LEFT JOIN idea_note i ON l.kind = 'note' AND i.id = l.recordId
+            WHERE l.projectId = ? AND (l.kind != 'note' OR i.deletedAt IS NULL)
+            ORDER BY CASE l.kind WHEN 'notebook' THEN 0 WHEN 'note' THEN 1 ELSE 2 END, l.position, l.recordId
             """, arguments: [projectId]).compactMap { row in
                 guard let kind = ResearchProjectLink.Kind(rawValue: row["kind"]) else { return nil }
                 return ResearchProjectLink(projectId: projectId, kind: kind, recordId: row["recordId"],
@@ -280,7 +291,13 @@ extension AppDatabase {
             SELECT h.id FROM research_project_link l
             JOIN highlight h ON l.kind = 'source' AND h.sourceId = l.recordId AND h.deletedAt IS NULL
             WHERE l.projectId = ?
-            """, arguments: [projectId, projectId]))
+            UNION
+            SELECT x.highlightId FROM research_project_link l
+            JOIN idea_note i ON l.kind = 'note' AND i.id = l.recordId AND i.deletedAt IS NULL
+            JOIN idea_note_highlight x ON x.noteId = i.id
+            JOIN highlight h ON h.id = x.highlightId AND h.deletedAt IS NULL
+            WHERE l.projectId = ?
+            """, arguments: [projectId, projectId, projectId]))
     }
 
     func researchProjectOverview(id: Int64) async throws -> ResearchProjectOverview {

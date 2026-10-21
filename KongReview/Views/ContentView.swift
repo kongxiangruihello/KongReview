@@ -43,6 +43,7 @@ struct ContentView: View {
         }
         .sheet(isPresented:$store.showsResourceAudit) { LibraryResourceAuditView() }
         .sheet(item: $store.researchProjectEditor) { project in ResearchProjectEditor(project: project).environment(store) }
+        .sheet(item: $store.ideaNoteComposer) { composer in IdeaNoteComposerSheet(composer: composer).environment(store) }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
         .modifier(LearningMaterialExportPresentation())
@@ -213,6 +214,10 @@ struct ContentView: View {
             ResearchProjectView(projectId: id).id(id)
         case .projects:
             ResearchProjectListView()
+        case .ideaNotes:
+            IdeaNoteListView()
+        case .ideaNote(let id):
+            IdeaNoteView(noteId: id).id(id)
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -412,8 +417,16 @@ struct SidebarView: View {
                 Text("积累")
             }
 
-            // 1.3：专题笔记本——讲稿、论文草稿、专题综述
+            // 1.3：专题笔记本——讲稿、论文草稿、专题综述；4.1：札记
             Section(isExpanded: store.sidebarGroupBinding("writing")) {
+                HStack {
+                    Label("札记", systemImage: "lightbulb")
+                    Spacer()
+                    if store.ideaNoteCount > 0 { SidebarCount(store.ideaNoteCount) }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.ideaNotes)
+                .contextMenu { Button("新写札记…") { store.composeIdeaNote() } }
                 ForEach(store.notebooks) { n in
                     if let id = n.id {
                         HStack {
@@ -440,7 +453,7 @@ struct SidebarView: View {
                 }
             } header: {
                 HStack {
-                    Text("写作与产出 · 专题笔记本")
+                    Text("写作与产出")
                     Spacer()
                     Button {
                         store.newNotebookRequest = NewNotebookRequest()

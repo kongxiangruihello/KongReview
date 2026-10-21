@@ -4,6 +4,8 @@ import KongReviewCore
 /// 新建 / 编辑摘录。⌘↩ 保存，Esc 取消。
 struct HighlightEditorView: View {
     @Environment(LibraryStore.self) private var store
+    /// 4.1：编辑面板本身是表单，记札记面板从这里弹出
+    @State private var noteComposer: IdeaNoteComposer?
 
     @State private var recognitionNotice: String?
     @State private var attribution: SourceAttribution?
@@ -97,6 +99,25 @@ struct HighlightEditorView: View {
                                autoHeight: true, minHeight: 70, slot: "hl-note",
                                onSubmit: submit, onCancel: cancel)
                         .richEditorFrame()
+                    // 4.1：引用这条摘录的札记；按语可发展为札记
+                    if let hid = draftBinding.wrappedValue.highlight.id {
+                        let notes = store.ideaNotesCiting([hid])[hid] ?? []
+                        HStack(spacing: 8) {
+                            if !notes.isEmpty {
+                                Text("引用它的札记：" + notes.prefix(3).map { "《\($0.title)》" }.joined(separator: "")
+                                     + (notes.count > 3 ? " 等 \(notes.count) 条" : ""))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                            Button("发展为札记…") {
+                                let h = draftBinding.wrappedValue.highlight
+                                noteComposer = LibraryStore.ideaNoteComposer(highlight: h, body: h.note ?? "", fromAnnotation: true)
+                            }
+                                .controlSize(.small)
+                                .disabled((draftBinding.wrappedValue.highlight.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .help("以按语为底稿写一条独立的札记，并引用这条摘录；按语本身不变")
+                        }
+                    }
                 }
 
                 Section("标签") {
@@ -151,6 +172,7 @@ struct HighlightEditorView: View {
             }
         }
         .frame(minWidth: 560, idealWidth: 620, minHeight: 620)
+        .sheet(item: $noteComposer) { composer in IdeaNoteComposerSheet(composer: composer).environment(store) }
     }
 
     private func recognizeAttribution() {

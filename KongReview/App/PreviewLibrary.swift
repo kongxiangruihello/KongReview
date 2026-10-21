@@ -87,6 +87,14 @@ import KongReviewCore
                 _ = try db.insertBlocks([NotebookBlock(notebookId: notebook.id!, position: 0, kind: .text, text: html)],
                                         into: notebook.id!, after: nil, now: day(offset, hour: 21))
             }
+            // 4.1：札记——一条引用两条摘录、链接另一条，并归入当前项目；另一条被链接
+            let selfReliance = try db.createIdeaNote(title: "士之可贵在于不待外物而自立",
+                                                     body: "<p>孟子“无恒产而有恒心者，惟士为能”，与曾子“任重道远”相发明，参见 [[士由身份转为德行]]。</p>",
+                                                     highlightIDs: [highlights[12].id!, highlights[10].id!], now: day(-3))
+            _ = try db.createIdeaNote(title: "士由身份转为德行",
+                                      body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
+                                      highlightIDs: [highlights[0].id!], now: day(-5))
+            try db.linkToResearchProject(project.id!, kind: .note, recordId: selfReliance.id!)
             try db.recordExternalWritingTotal(projectId: project.id!, total: 3_200, day: day(-20), now: day(-20))
             try db.recordExternalWritingTotal(projectId: project.id!, total: 4_650, day: day(-2), note: "第二节初稿（Word）", now: day(-2))
             // 今日回顾：一组 10 条，已回顾 4 条；当前第 5 条为“重读原文”

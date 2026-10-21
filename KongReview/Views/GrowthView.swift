@@ -199,6 +199,9 @@ struct GrowthReportView: View {
     @State private var writingBefore = WritingSummary()
     @State private var projectWriting: WritingSummary?
     @State private var projectStages: [ResearchProjectStageEvent] = []
+    /// 4.1：本期与上期同期新写的札记
+    @State private var notesNow = 0
+    @State private var notesBefore = 0
     var body: some View {
         ScrollView {
             AcademicPaper {
@@ -206,7 +209,7 @@ struct GrowthReportView: View {
                     Spacer()
                     Menu("导出") {
                         Button("本期小结（Markdown）…") { LearningMaterialExport.saveSummary(window: window, summary: current, reflection: reflection, store: store) }
-                        Button("本期札记：收藏与按语（Markdown）…") { LearningMaterialExport.saveNotebook(window: window, store: store) }
+                        Button("本期收藏与按语（Markdown）…") { LearningMaterialExport.saveNotebook(window: window, store: store) }
                     }
                     .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
                 }
@@ -248,6 +251,10 @@ struct GrowthReportView: View {
                 async let w2 = store.db.writingSummary(start: window.previousStart, end: window.previousEnd)
                 let (thisWriting, lastWriting) = try await (w1, w2)
                 try Task.checkCancellation(); writingNow = thisWriting; writingBefore = lastWriting
+                async let n1 = store.db.ideaNotesCreated(start: window.start, end: window.end)
+                async let n2 = store.db.ideaNotesCreated(start: window.previousStart, end: window.previousEnd)
+                let (thisNotes, lastNotes) = try await (n1, n2)
+                try Task.checkCancellation(); notesNow = thisNotes; notesBefore = lastNotes
                 if let focus = store.learningFocus {
                     let progress = try await store.db.focusProgress(focus, start: window.start, end: window.end)
                     try Task.checkCancellation(); focusProgress = progress
@@ -313,7 +320,7 @@ struct GrowthReportView: View {
         AcademicSection(number: "一", title: "数据概览",
                         lead: "表 1 列出本期各项学习数据及其与上期同期的比较。点选任一行，第三节“内容分布”与附录“本期明细”改为显示该项。") {
             AcademicTable(label: "表 1", title: "本期学习数据与上期同期比较",
-                          note: "摘录和卡片在整个周期内分别去重；同一卡片的多次评分另计。难卡指本周期至少 3 次重来。新增数来自仍保存在库中的创建记录，永久删除后无法追溯。写作为专题笔记本中自写文字（文字、小标题、本文批注）的新增字数与项目页手记之和，中文逐字、西文按词；写作两行不可点选。“▸”为当前选中的一项。") {
+                          note: "摘录和卡片在整个周期内分别去重；同一卡片的多次评分另计。难卡指本周期至少 3 次重来。新增数来自仍保存在库中的创建记录，永久删除后无法追溯。写作为专题笔记本中自写文字（文字、小标题、本文批注）、札记正文的新增字数与项目页手记之和，中文逐字、西文按词；写作与札记三行不可点选。“▸”为当前选中的一项。") {
                 Text("指标")
                 Text("本期").gridColumnAlignment(.trailing)
                 Text("上期同期").gridColumnAlignment(.trailing)
@@ -342,6 +349,7 @@ struct GrowthReportView: View {
                 }
                 writingRow("写作（字）", writingNow.added, writingBefore.added)
                 writingRow("写作天数", writingNow.days, writingBefore.days)
+                writingRow("新写札记（条）", notesNow, notesBefore)
             }
         }
     }

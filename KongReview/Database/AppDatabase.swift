@@ -406,6 +406,10 @@ final class AppDatabase {
         m.registerMigration("v16-research-projects") { db in
             try AppDatabase.installResearchProjects(in: db)
         }
+        // 4.1：札记、札记引用的摘录与札记之间的链接
+        m.registerMigration("v17-idea-notes") { db in
+            try AppDatabase.installIdeaNotes(in: db)
+        }
         return m
     }
 }

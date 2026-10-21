@@ -298,10 +298,14 @@ struct ResearchProjectView: View {
             ForEach(o.links) { link in
                 HStack(spacing: 8) {
                     Button {
-                        store.selection = link.kind == .notebook ? .notebook(link.recordId) : .source(link.recordId)
+                        switch link.kind {
+                        case .notebook: store.selection = .notebook(link.recordId)
+                        case .source: store.selection = .source(link.recordId)
+                        case .note: store.selection = .ideaNote(link.recordId)
+                        }
                     } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: link.kind == .notebook ? "text.book.closed" : "book").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).frame(width: 16)
+                            Image(systemName: link.kind == .notebook ? "text.book.closed" : (link.kind == .note ? "lightbulb" : "book")).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).frame(width: 16)
                             Text(link.title.isEmpty ? "（已删除）" : link.title).font(.system(size: 13)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
                             Spacer(minLength: 6)
                             Text("\(link.highlightCount) 条").font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub)
@@ -328,10 +332,15 @@ struct ResearchProjectView: View {
             Section("专题笔记本") {
                 ForEach(notebooks) { n in Button(n.title) { if let id = n.id { store.linkToResearchProject(o.project, kind: .notebook, recordId: id) } } }
             }
+            Section("札记（最近修改的 40 条）") {
+                ForEach(((try? store.db.recentIdeaNotes(limit: 40)) ?? []).filter { !linked.contains("note.\($0.id)") }) { n in
+                    Button(n.title) { store.linkToResearchProject(o.project, kind: .note, recordId: n.id) }
+                }
+            }
             Section("出处（按摘录数，前 60 种；也可在出处页的“项目”菜单归入）") {
                 ForEach(sources.prefix(60)) { s in Button(s.title) { if let id = s.id { store.linkToResearchProject(o.project, kind: .source, recordId: id) } } }
             }
-        } label: { Label("归入笔记本或出处", systemImage: "plus").font(.system(size: 12.5)) }
+        } label: { Label("归入笔记本、札记或出处", systemImage: "plus").font(.system(size: 12.5)) }
             .menuStyle(.borderlessButton).fixedSize()
             .disabled(store.fullBackupBusy || o.project.isArchived)
     }
@@ -368,7 +377,7 @@ struct ResearchProjectView: View {
                     ForEach(w.entries) { e in
                         HStack(spacing: 8) {
                             Text(e.day).font(.system(size: 11.5).monospacedDigit()).foregroundStyle(ReviewPalette.sub).frame(width: 78, alignment: .leading)
-                            Text(e.manual ? (e.note.isEmpty ? "手记" : e.note) : "笔记本《\(e.notebookTitle ?? "已删除")》")
+                            Text(e.manual ? (e.note.isEmpty ? "手记" : e.note) : (e.ideaNoteTitle.map { "札记《\($0)》" } ?? "笔记本《\(e.notebookTitle ?? "已删除")》"))
                                 .font(.system(size: 12)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
                             Spacer(minLength: 6)
                             Text("+\(e.added)" + (e.removed > 0 ? " / −\(e.removed)" : "")).font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub)

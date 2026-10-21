@@ -4,9 +4,12 @@ import KongReviewCore
 
 enum GlobalSearchKind: String, CaseIterable, Identifiable, Hashable, Sendable {
     case highlight, card, article, source
+    /// 4.1：札记
+    case note
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .note: return "札记"
         case .highlight: return "摘录"
         case .card: return "记忆卡"
         case .article: return "网页存档"
@@ -19,6 +22,7 @@ enum GlobalSearchKind: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .card: return "rectangle.on.rectangle"
         case .article: return "doc.richtext"
         case .source: return "books.vertical"
+        case .note: return "lightbulb"
         }
     }
 }
@@ -162,6 +166,13 @@ extension AppDatabase {
                     OR kr_fold(a.url) LIKE :pattern ESCAPE '\\'
                     OR kr_fold(kr_search_plain(\(body))) LIKE :pattern ESCAPE '\\'
                 """, " ORDER BY a.savedAt DESC, a.id DESC")
+        case .note:
+            return ("""
+                SELECT n.id, n.title, \(snippet("n.body")) AS preview, '' AS context, NULL AS badge
+                """, " FROM idea_note n", """
+                 WHERE n.deletedAt IS NULL AND (kr_fold(n.title) LIKE :pattern ESCAPE '\\'
+                    OR kr_fold(kr_search_plain(n.body)) LIKE :pattern ESCAPE '\\')
+                """, " ORDER BY n.updatedAt DESC, n.id DESC")
         case .source:
             return ("""
                 SELECT s.id, s.title,

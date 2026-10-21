@@ -36,12 +36,12 @@ struct LearningMaterialExportRequest: Identifiable {
     }
 }
 extension LearningMaterialExport {
-    /// 3.15：本期札记——收藏或写过按语的摘录，按出处汇总，原文、按语与位置一并导出，可直接作讲稿或论文素材
+    /// 3.15：本期收藏与按语（4.1 前称“本期札记”，改名以免与独立的札记混淆）——收藏或写过按语的摘录，按出处汇总，原文、按语与位置一并导出，可直接作讲稿或论文素材
     static func saveNotebook(window: GrowthWindow, store: LibraryStore) {
         let entries: [NotebookEntry]
         do { entries = try store.db.notebookEntries(start: window.start, end: window.end) } catch { store.report(error); return }
         guard !entries.isEmpty else { store.infoMessage = "本期还没有收藏或写过按语的摘录。"; return }
-        let panel = NSSavePanel(); panel.allowedContentTypes = [.plainText]; panel.nameFieldStringValue = "\(window.period.title)札记.md"
+        let panel = NSSavePanel(); panel.allowedContentTypes = [.plainText]; panel.nameFieldStringValue = "\(window.period.title)收藏与按语.md"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try notebookMarkdown(entries: entries, window: window).write(to: url, atomically: true, encoding: .utf8) }
         catch { store.report(error) }
@@ -49,7 +49,7 @@ extension LearningMaterialExport {
 
     nonisolated static func notebookMarkdown(entries: [NotebookEntry], window: GrowthWindow) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年M月d日"
-        var lines = ["# \(window.period.title)札记", "",
+        var lines = ["# \(window.period.title)收藏与按语", "",
                      "\(f.string(from: window.start)) — \(f.string(from: window.end.addingTimeInterval(-1)))　共 \(entries.count) 条（收藏 \(entries.filter(\.favorited).count)，写按语 \(entries.filter(\.noted).count)）", ""]
         func plain(_ s: String) -> String { Markdown.plainText(fromHTML: Card.renderHTML(s)).trimmingCharacters(in: .whitespacesAndNewlines) }
         var currentSource: String?? = .none

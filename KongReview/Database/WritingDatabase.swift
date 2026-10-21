@@ -34,6 +34,8 @@ struct WritingEntry: Identifiable, Equatable, Sendable {
     var manual: Bool
     var notebookTitle: String?
     var note: String
+    /// 4.1：来自札记的写作
+    var ideaNoteTitle: String? = nil
 }
 
 /// Word 等外部稿件最近一次登记的全文字数
@@ -67,20 +69,23 @@ extension AppDatabase {
     static func ownWords(_ block: NotebookBlock) -> Int { ownWords(block.kind, text: block.text, note: block.note) }
 
     /// 记入写作量。笔记本自动记录按“笔记本＋日期”合并为一行；手记每次一行
-    static func logWriting(_ db: Database, notebookId: Int64? = nil, projectId: Int64? = nil, manual: Bool = false,
+    static func logWriting(_ db: Database, notebookId: Int64? = nil, noteId: Int64? = nil, projectId: Int64? = nil, manual: Bool = false,
                            added: Int, removed: Int, note: String = "", now: Date = Date(), day: Date? = nil) throws {
         guard added > 0 || removed > 0 else { return }
         let key = ReminderPlan.dayKey(day ?? now)
-        if !manual, let notebookId {
+        // 4.1：札记的写作按“札记＋日期”合并为一行（origin = note）
+        let origin = manual ? "manual" : (noteId != nil ? "note" : "notebook")
+        if !manual, let recordId = noteId ?? notebookId {
+            let column = noteId != nil ? "noteId" : "notebookId"
             try db.execute(sql: """
                 UPDATE writing_log SET added = added + ?, removed = removed + ?
-                WHERE origin = 'notebook' AND notebookId = ? AND day = ?
-                """, arguments: [added, removed, notebookId, key])
+                WHERE origin = ? AND \(column) = ? AND day = ?
+                """, arguments: [added, removed, origin, recordId, key])
             if db.changesCount > 0 { return }
         }
         try db.execute(sql: """
-            INSERT INTO writing_log(projectId, notebookId, day, added, removed, origin, note, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, arguments: [projectId, notebookId, key, added, removed, manual ? "manual" : "notebook", note, now])
+            INSERT INTO writing_log(projectId, notebookId, noteId, day, added, removed, origin, note, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, arguments: [projectId, notebookId, noteId, key, added, removed, origin, note, now])
     }
 
     /// 某个笔记本里自己写的字数
@@ -137,7 +142,9 @@ extension AppDatabase {
     /// 属于某个项目的写作记录：手记直接属于项目；笔记本的自动记录按笔记本当前所归的项目计
     private static let projectFilter = """
         (w.projectId = ? OR (w.origin = 'notebook' AND w.notebookId IN
-            (SELECT recordId FROM research_project_link WHERE projectId = ? AND kind = 'notebook')))
+            (SELECT recordId FROM research_project_link WHERE projectId = ? AND kind = 'notebook'))
+         OR (w.origin = 'note' AND w.noteId IN
+            (SELECT recordId FROM research_project_link WHERE projectId = ? AND kind = 'note')))
         """
 
     /// 全库一段时间的写作量（学习小结表 1）
@@ -154,7 +161,7 @@ extension AppDatabase {
         let (a, b) = dayRange(start, end)
         var sql = "SELECT COALESCE(SUM(w.added),0) AS added, COALESCE(SUM(w.removed),0) AS removed, COUNT(DISTINCT CASE WHEN w.added > 0 THEN w.day END) AS days FROM writing_log w WHERE w.day >= ? AND w.day <= ?"
         var args: [any DatabaseValueConvertible] = [a, b]
-        if let projectId { sql += " AND " + projectFilter; args += [projectId, projectId] }
+        if let projectId { sql += " AND " + projectFilter; args += [projectId, projectId, projectId] }
         let row = try Row.fetchOne(db, sql: sql, arguments: StatementArguments(args))
         return WritingSummary(added: row?["added"] ?? 0, removed: row?["removed"] ?? 0, days: row?["days"] ?? 0)
     }
@@ -170,7 +177,7 @@ extension AppDatabase {
             let rows = try Row.fetchAll(db, sql: """
                 SELECT w.day, SUM(w.added) AS added FROM writing_log w
                 WHERE w.day >= ? AND w.day <= ? AND \(Self.projectFilter) GROUP BY w.day
-                """, arguments: [a, b, projectId, projectId])
+                """, arguments: [a, b, projectId, projectId, projectId])
             var byWeek: [Date: Int] = [:]
             var days = 0, added = 0
             let parser = DateFormatter(); parser.calendar = calendar; parser.timeZone = calendar.timeZone; parser.dateFormat = "yyyy-MM-dd"
@@ -187,12 +194,14 @@ extension AppDatabase {
             out.notebookWords = try notebookIDs.reduce(0) { $0 + (try Self.notebookOwnWords(db, $1)) }
             out.external = try Self.readProgress(ExternalWritingTotal.self, key: ExternalWritingTotal.key(projectId), in: db)
             out.entries = try Row.fetchAll(db, sql: """
-                SELECT w.id, w.day, w.added, w.removed, w.origin, w.note, n.title AS notebookTitle FROM writing_log w
+                SELECT w.id, w.day, w.added, w.removed, w.origin, w.note, n.title AS notebookTitle, i.title AS ideaTitle FROM writing_log w
                 LEFT JOIN notebook n ON n.id = w.notebookId
+                LEFT JOIN idea_note i ON i.id = w.noteId
                 WHERE \(Self.projectFilter) ORDER BY w.day DESC, w.id DESC LIMIT 8
-                """, arguments: [projectId, projectId]).map {
+                """, arguments: [projectId, projectId, projectId]).map {
                     WritingEntry(id: $0["id"], day: $0["day"], added: $0["added"], removed: $0["removed"],
-                                 manual: ($0["origin"] as String?) == "manual", notebookTitle: $0["notebookTitle"], note: $0["note"] ?? "")
+                                 manual: ($0["origin"] as String?) == "manual", notebookTitle: $0["notebookTitle"], note: $0["note"] ?? "",
+                                 ideaNoteTitle: $0["ideaTitle"])
                 }
             return out
         }
