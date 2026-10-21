@@ -105,6 +105,23 @@ extension LibraryStore {
         do { try db.unlinkFromResearchProject(id, kind: kind, recordId: recordId); afterResearchProjectChange() } catch { report(error) }
     }
 
+    /// 记一笔写作；byTotal 时按外部稿件全文字数与上次登记的差计
+    @discardableResult
+    func recordWriting(_ project: ResearchProject, words: Int, byTotal: Bool, day: Date, note: String) -> Bool {
+        guard !fullBackupBusy, let id = project.id else { return false }
+        do {
+            if byTotal { try db.recordExternalWritingTotal(projectId: id, total: words, day: day, note: note) }
+            else { try db.addManualWriting(projectId: id, words: words, day: day, note: note) }
+            afterResearchProjectChange()
+            return true
+        } catch { report(error); return false }
+    }
+
+    func deleteWritingEntry(_ id: Int64) {
+        guard !fullBackupBusy else { return }
+        do { try db.deleteWritingEntry(id); afterResearchProjectChange() } catch { report(error) }
+    }
+
     /// 某笔记本或出处所属的项目（工具栏“归入项目”菜单用）
     func researchProjects(containing kind: ResearchProjectLink.Kind, recordId: Int64) -> [ResearchProject] {
         _ = researchProjectRevision

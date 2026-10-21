@@ -76,6 +76,19 @@ import KongReviewCore
                 try db.saveProgress(question, key: question.key)
             }
             _ = try db.saveResearchProject(ResearchProject(title: "《论语》导读讲稿", kind: .course, stage: .material), now: day(-3))
+            // 4.0 第二步：写作量——专题里分几天写的文字，另有一笔 Word 稿的手记
+            let drafts: [(Int, String)] = [(-40, "<p>士之为士，先在其志。孔子言“士志于道”，以道自任，非以身份自居。</p>"),
+                                           (-26, "<p>曾子“士不可以不弘毅”一章，弘言其量，毅言其守，二者相须。</p>"),
+                                           (-12, "<h2>一、从身份到德行</h2>"),
+                                           (-11, "<p>春秋以前之士，多指封建等级中最低一层；至孔门，士乃成为一种自我期许。</p>"),
+                                           (-4, "<p>孟子言“无恒产而有恒心者，惟士为能”，士之可贵，正在其不待外物而自立。</p>"),
+                                           (-1, "<p>本节拟以《论语》《孟子》为主线，旁及《荀子·修身》。</p>")]
+            for (offset, html) in drafts {
+                _ = try db.insertBlocks([NotebookBlock(notebookId: notebook.id!, position: 0, kind: .text, text: html)],
+                                        into: notebook.id!, after: nil, now: day(offset, hour: 21))
+            }
+            try db.recordExternalWritingTotal(projectId: project.id!, total: 3_200, day: day(-20), now: day(-20))
+            try db.recordExternalWritingTotal(projectId: project.id!, total: 4_650, day: day(-2), note: "第二节初稿（Word）", now: day(-2))
             // 今日回顾：一组 10 条，已回顾 4 条；当前第 5 条为“重读原文”
             let others = highlights.prefix(10).compactMap(\.id).filter { $0 != highlights[5].id! }
             let ids = Array(others.prefix(4)) + [highlights[5].id!] + Array(others.dropFirst(4).prefix(5))
