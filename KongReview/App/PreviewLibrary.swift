@@ -57,7 +57,25 @@ import KongReviewCore
             _ = try db.insertBlocks(highlights.enumerated().filter { $0.offset % 3 == 0 }.map {
                 NotebookBlock(notebookId: notebook.id!, position: Double($0.offset + 1), kind: .highlight, highlightId: $0.element.id)
             }, into: notebook.id!, after: nil)
-            try db.setLearningFocus(LearningFocus(kind: .notebook, id: notebook.id!, title: notebook.title, startedAt: day(-2)))
+            // 4.0：当前项目——论文，处于“初稿”；归入专题“何以为士”与《中国近三百年学术史》，有两项下一步、两个未解问题
+            var project = try db.saveResearchProject(ResearchProject(title: "何以为士：先秦儒家的士人观", kind: .paper, stage: .idea,
+                                                                       question: "“士”的自我期许如何从身份转为德行？",
+                                                                       dueDate: calendar.startOfDay(for: day(71)), targetWords: 20_000), now: day(-30))
+            try db.setResearchProjectStage(id: project.id!, stage: .material, now: day(-20))
+            try db.setResearchProjectStage(id: project.id!, stage: .draft, now: day(-6))
+            project = try db.researchProject(id: project.id!)!
+            try db.linkToResearchProject(project.id!, kind: .notebook, recordId: notebook.id!)
+            try db.linkToResearchProject(project.id!, kind: .source, recordId: sources[2].id!)
+            try db.setLearningFocus(LearningFocus(kind: .project, id: project.id!, title: project.title, startedAt: day(-6)))
+            let projectLink = LearningPlanLink(kind: .project, recordID: project.id!, title: project.title)
+            var next1 = LearningPlan(title: "补齐第三节引文页码", link: projectLink); next1.dueDate = day(2)
+            var next2 = LearningPlan(title: "改写第二节结论", link: projectLink); next2.dueDate = day(5)
+            try db.saveLearningPlan(next1); try db.saveLearningPlan(next2)
+            for q in ["“士志于道”与“士不可以不弘毅”能否互证？", "梁启超论清代学术的“经世”一义出处待核"] {
+                let question = TopicQuestion(notebookID: notebook.id!, question: "<p>\(q)</p>")
+                try db.saveProgress(question, key: question.key)
+            }
+            _ = try db.saveResearchProject(ResearchProject(title: "《论语》导读讲稿", kind: .course, stage: .material), now: day(-3))
             // 今日回顾：一组 10 条，已回顾 4 条；当前第 5 条为“重读原文”
             let others = highlights.prefix(10).compactMap(\.id).filter { $0 != highlights[5].id! }
             let ids = Array(others.prefix(4)) + [highlights[5].id!] + Array(others.dropFirst(4).prefix(5))

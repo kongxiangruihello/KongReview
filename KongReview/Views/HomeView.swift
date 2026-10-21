@@ -25,7 +25,7 @@ struct HomeView: View {
 
                 TodayWorkBar(summary: store.homeLearningSummary, focus: store.learningFocus,
                              onStart: { store.startTodayWork() },
-                             onFocus: { store.journeyNavigation.tab = 0; store.selection = .growth })
+                             onFocus: { store.selection = store.currentProjectID.map(SidebarItem.project) ?? .projects })
 
                 HomeLearningDashboard(summary: store.homeLearningSummary,
                                       quote: store.dailyReviewQuote(),

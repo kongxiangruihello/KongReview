@@ -183,6 +183,12 @@ struct HighlightListView: View {
             Text("会清空全部最近删除，包括其他页和搜索未显示的摘录。此操作无法撤销（每日自动备份中仍保留删除前的数据）。")
         }
         .toolbar {
+            if let sourceId = filter.sourceId, !filter.deletedOnly {
+                ToolbarItem {
+                    // 4.0：出处页可归入研究项目
+                    ResearchProjectLinkMenu(kind: .source, recordId: sourceId)
+                }
+            }
             if !filter.deletedOnly {
                 ToolbarItem {
                     Button {

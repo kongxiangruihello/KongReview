@@ -402,6 +402,10 @@ final class AppDatabase {
             try db.create(index:"card_entry_record_date",on:"card_entry_record",columns:["recordedAt","cardId"])
             try AppDatabase.installCardEntryOrganizationUndoTracking(in:db)
         }
+        // 4.0：研究项目、关联、阶段记录与写作量；本期焦点转为当前项目
+        m.registerMigration("v16-research-projects") { db in
+            try AppDatabase.installResearchProjects(in: db)
+        }
         return m
     }
 }

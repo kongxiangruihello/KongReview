@@ -35,9 +35,11 @@ struct GrowthHistoryEntry: Identifiable, Sendable {
 struct GrowthPage<T: Sendable>: Sendable { var items: [T]; var total: Int }
 
 enum LearningPlanLinkKind: String, CaseIterable, Codable, Identifiable, Sendable {
+    /// 原始值同时是表名（关联选择与存在检查直接按表查询）
     case notebook, source, card
+    case project = "research_project"
     var id: String { rawValue }
-    var title: String { switch self { case .notebook: "笔记本"; case .source: "出处"; case .card: "记忆卡" } }
+    var title: String { switch self { case .notebook: "笔记本"; case .source: "出处"; case .card: "记忆卡"; case .project: "研究项目" } }
 }
 struct LearningPlanLink: Codable, Equatable, Identifiable, Sendable {
     var kind: LearningPlanLinkKind

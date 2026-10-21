@@ -354,7 +354,7 @@ struct DeckTile: View {
                                 .foregroundStyle(ReviewPalette.accent)
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(ReviewPalette.accentSoft, in: Capsule())
-                                .help("本牌组有 \(n) 张卡片来自本期焦点\(focus.label)，学习时优先出现")
+                                .help("本牌组有 \(n) 张卡片来自\(focus.kind == .project ? "当前" : "本期焦点")\(focus.label)，学习时优先出现")
                                 .fixedSize()
                         }
                     }

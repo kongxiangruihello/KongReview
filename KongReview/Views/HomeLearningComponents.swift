@@ -455,14 +455,14 @@ struct TodayWorkBar: View {
                 Spacer(minLength: 8)
                 if let focus {
                     Button(action: onFocus) {
-                        Label("本期焦点：\(focus.label)", systemImage: "scope").lineLimit(1)
+                        Label(focus.kind == .project ? "当前\(focus.label)" : "本期焦点：\(focus.label)", systemImage: "scope").lineLimit(1)
                     }
                     .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
-                    .help("在个人成长的学习小结第四节更换或取消焦点").handCursor()
+                    .help("打开当前项目：阶段、下一步、未解问题与材料").handCursor()
                 } else {
-                    Button("设定本期焦点…", action: onFocus).buttonStyle(.plain)
+                    Button("设定当前项目…", action: onFocus).buttonStyle(.plain)
                         .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).handCursor()
-                        .help("在个人成长的学习小结第四节选一个专题或一本书作为焦点")
+                        .help("新建或选择一个研究项目；回顾与记忆卡会侧重它的材料")
                 }
             }
             ViewThatFits(in: .horizontal) {
