@@ -27,7 +27,8 @@ final class V41IdeaNoteTests: XCTestCase {
         try db.saveIdeaNote(id: b.id!, title: "汉宋之争", body: "", now: now)
         let renamed = try XCTUnwrap(try db.ideaNote(id: a.id!))
         XCTAssertTrue(renamed.body.contains("[[汉宋之争]]"), "改题目时，指向它的链接一并改写")
-        XCTAssertEqual(try await db.ideaNoteDetail(id: a.id!).outgoing.map(\.title), ["汉宋之争"])
+        let afterRename = try await db.ideaNoteDetail(id: a.id!)
+        XCTAssertEqual(afterRename.outgoing.map(\.title), ["汉宋之争"])
         XCTAssertThrowsError(try db.createIdeaNote(title: "   "))
         XCTAssertThrowsError(try db.saveIdeaNote(id: a.id!, title: "", body: ""))
     }
@@ -52,11 +53,13 @@ final class V41IdeaNoteTests: XCTestCase {
         try db.setIdeaNoteDeleted(note.id!, deleted: true)
         let active = try await db.ideaNoteSummaries()
         XCTAssertEqual(active.map(\.id), [linker.id!])
-        XCTAssertEqual(try await db.ideaNoteSummaries(deleted: true).map(\.id), [note.id!])
+        let deleted = try await db.ideaNoteSummaries(deleted: true)
+        XCTAssertEqual(deleted.map(\.id), [note.id!])
         XCTAssertTrue(try db.ideaNotesCiting(highlightIDs: [h1.id!]).isEmpty, "已删除的札记不再提示")
         XCTAssertEqual(try db.ideaNoteCount(), 1)
         try db.setIdeaNoteDeleted(note.id!, deleted: false)
-        XCTAssertEqual(try await db.ideaNoteDetail(id: note.id!).backlinks.map(\.id), [linker.id!], "恢复后反向链接仍在")
+        let restored = try await db.ideaNoteDetail(id: note.id!)
+        XCTAssertEqual(restored.backlinks.map(\.id), [linker.id!], "恢复后反向链接仍在")
         try db.purgeIdeaNote(note.id!)
         XCTAssertTrue(try db.ideaNotesCiting(highlightIDs: [h1.id!]).isEmpty)
         await XCTAssertThrowsErrorAsync(try await db.ideaNoteDetail(id: note.id!))
@@ -67,7 +70,7 @@ final class V41IdeaNoteTests: XCTestCase {
         let h = try db.save(Highlight(text: "士不可以不弘毅"))
         let note = try db.createIdeaNote(title: "弘毅", body: "<p>弘言其量</p>", highlightIDs: [h.id!], now: day(-1))
         try db.saveIdeaNote(id: note.id!, title: "弘毅", body: "<p>弘言其量，毅言其守</p>", now: day(-1))
-        let rows = try db.writer.read { try Row.fetchAll($0, sql: "SELECT origin, noteId, added FROM writing_log") }
+        let rows = try await db.writer.read { try Row.fetchAll($0, sql: "SELECT origin, noteId, added FROM writing_log") }
         XCTAssertEqual(rows.count, 1, "同一札记同一天合并")
         XCTAssertEqual(rows.first?["origin"] as String?, "note")
         XCTAssertEqual(rows.first?["added"] as Int?, 8)
@@ -86,7 +89,7 @@ final class V41IdeaNoteTests: XCTestCase {
         XCTAssertTrue(try db.researchProjectLinks(projectId: p.id!).isEmpty, "已删除的札记不在项目材料里显示")
         try db.setIdeaNoteDeleted(note.id!, deleted: false)
         try db.purgeIdeaNote(note.id!)
-        let remaining = try db.writer.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM research_project_link WHERE kind = 'note'") }
+        let remaining = try await db.writer.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM research_project_link WHERE kind = 'note'") }
         XCTAssertEqual(remaining, 0, "彻底删除时去掉项目关联")
 
         _ = try db.createIdeaNote(title: "經世致用", body: "<p>顾炎武</p>", now: now)
@@ -94,7 +97,8 @@ final class V41IdeaNoteTests: XCTestCase {
         XCTAssertEqual(found.map(\.title), ["經世致用"], "繁简通搜")
         let pages = try await db.globalSearch(query: "顾炎武", kind: .note)
         XCTAssertEqual(pages.first?.items.map(\.title), ["經世致用"])
-        XCTAssertEqual(try await db.ideaNotesCreated(start: day(-1), end: day(2)), 1)
+        let created = try await db.ideaNotesCreated(start: day(-1), end: day(2))
+        XCTAssertEqual(created, 1)
     }
 
     func testStoreComposerLinksAndNavigation() throws {
