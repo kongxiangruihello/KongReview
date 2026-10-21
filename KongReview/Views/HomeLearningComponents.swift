@@ -459,10 +459,6 @@ struct TodayWorkBar: View {
                     }
                     .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
                     .help("打开当前项目：阶段、下一步、未解问题与材料").handCursor()
-                } else {
-                    Button("设定当前项目…", action: onFocus).buttonStyle(.plain)
-                        .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).handCursor()
-                        .help("新建或选择一个研究项目；回顾与记忆卡会侧重它的材料")
                 }
             }
             ViewThatFits(in: .horizontal) {

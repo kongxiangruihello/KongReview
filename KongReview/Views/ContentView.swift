@@ -238,7 +238,8 @@ struct SidebarView: View {
                 else { store.selection = destination }
             }
         )) {
-            Section {
+            // 4.0：侧栏按学术工作的环节分六组——今日、研究、阅读、积累、写作与产出、成长；各组可折叠，记住状态
+            Section(isExpanded: store.sidebarGroupBinding("today")) {
                 Label("首页", systemImage: "house")
                     .sidebarMenuRow()
                     .tag(SidebarItem.home)
@@ -251,12 +252,6 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .sidebarMenuRow()
                 .tag(SidebarItem.review)
-                Label("全部摘录", systemImage: "text.quote")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.all)
-                Label("收藏", systemImage: "star")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.favorites)
                 Button { store.openCardsHome() } label: {
                     HStack {
                         Label("记忆卡", systemImage: "brain")
@@ -271,85 +266,12 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .sidebarMenuRow()
                 .tag(SidebarItem.cards)
-                Label("个人成长", systemImage: "leaf")
-                    .tag(SidebarItem.growth)
-                Label("回顾统计", systemImage: "chart.bar.xaxis")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.stats)
-                Label("未归类", systemImage: "tray")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.unsorted)
-                HStack {
-                    Label("网页存档", systemImage: "globe")
-                    Spacer()
-                    if store.articleCount > 0 {
-                        SidebarCount(store.articleCount)
-                    }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.articles)
-                Label("出处管理", systemImage: "books.vertical")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.sourceManager)
-                HStack {
-                    Label("最近删除", systemImage: "trash")
-                    Spacer()
-                    if store.trashCount > 0 {
-                        SidebarCount(store.trashCount)
-                    }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.trash)
-                Label("使用说明", systemImage: "questionmark.circle")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.help)
-            }
-
-            // 出处默认折叠（点“出处”标题旁的箭头展开；记住上次状态）
-            Section(isExpanded: Bindable(store).sourcesExpanded) {
-                ForEach(store.sources) { source in
-                    if let id = source.id {
-                        HStack {
-                            Label(source.title, systemImage: icon(for: source.kind))
-                                .lineLimit(1)
-                            Spacer()
-                            SidebarCount(store.highlightCounts[id] ?? 0)
-                        }
-                        .sidebarMenuRow()
-                        .tag(SidebarItem.source(id))
-                        .contextMenu {
-                            Button("编辑出处…") { store.editingSource = source }
-                            Button("在此出处下新建摘录") { store.newHighlight(in: id) }
-                            Divider()
-                            Button("导出为 Markdown…") { ExportService.export(source: source, store: store) }
-                            Divider()
-                            Button("删除出处（保留摘录）…", role: .destructive) { store.sourcePendingDeletion = source }
-                        }
-                    }
-                }
             } header: {
-                HStack {
-                    Text("出处")
-                    Spacer()
-                    Menu {
-                        Picker("排序", selection: Bindable(store).sourceSort) {
-                            ForEach(SourceSort.allCases, id: \.self) { Text($0.label).tag($0) }
-                        }
-                        .pickerStyle(.inline)
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .handCursor()
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("出处排序：\(store.sourceSort.label)")
-                }
+                Text("今日")
             }
 
-
-            // 4.0：研究项目（在研，按截止日期）
-            Section {
+            // 研究项目（在研，按截止日期）
+            Section(isExpanded: store.sidebarGroupBinding("research")) {
                 ForEach(store.researchProjects) { p in
                     if let id = p.id {
                         HStack(spacing: 6) {
@@ -375,7 +297,7 @@ struct SidebarView: View {
                     .tag(SidebarItem.projects)
             } header: {
                 HStack {
-                    Text("研究项目")
+                    Text("研究")
                     Spacer()
                     Button { store.newResearchProject() } label: { Image(systemName: "plus") }
                         .buttonStyle(.borderless)
@@ -384,8 +306,114 @@ struct SidebarView: View {
                 }
             }
 
-            // 1.3：专题笔记本
-            Section {
+            Section(isExpanded: store.sidebarGroupBinding("reading")) {
+                Label("出处管理", systemImage: "books.vertical")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.sourceManager)
+                HStack {
+                    Label("网页存档", systemImage: "globe")
+                    Spacer()
+                    if store.articleCount > 0 {
+                        SidebarCount(store.articleCount)
+                    }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.articles)
+                // 出处列表默认折叠（记住上次状态）
+                DisclosureGroup(isExpanded: Bindable(store).sourcesExpanded) {
+                    ForEach(store.sources) { source in
+                        if let id = source.id {
+                            HStack {
+                                Label(source.title, systemImage: icon(for: source.kind))
+                                    .lineLimit(1)
+                                Spacer()
+                                SidebarCount(store.highlightCounts[id] ?? 0)
+                            }
+                            .sidebarMenuRow()
+                            .tag(SidebarItem.source(id))
+                            .contextMenu {
+                                Button("编辑出处…") { store.editingSource = source }
+                                Button("在此出处下新建摘录") { store.newHighlight(in: id) }
+                                Divider()
+                                Button("导出为 Markdown…") { ExportService.export(source: source, store: store) }
+                                Divider()
+                                Button("删除出处（保留摘录）…", role: .destructive) { store.sourcePendingDeletion = source }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Label("出处", systemImage: "book")
+                        Spacer()
+                        SidebarCount(store.sources.count)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("阅读")
+                    Spacer()
+                    Menu {
+                        Picker("出处排序", selection: Bindable(store).sourceSort) {
+                            ForEach(SourceSort.allCases, id: \.self) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .handCursor()
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("出处排序：\(store.sourceSort.label)")
+                }
+            }
+
+            Section(isExpanded: store.sidebarGroupBinding("collect")) {
+                Label("全部摘录", systemImage: "text.quote")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.all)
+                Label("收藏", systemImage: "star")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.favorites)
+                Label("未归类", systemImage: "tray")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.unsorted)
+                ForEach(store.savedSearches) { s in
+                    Label(s.name, systemImage: "bookmark")
+                        .sidebarMenuRow()
+                        .tag(SidebarItem.saved(s.id))
+                        .contextMenu {
+                            Button("删除已存搜索", role: .destructive) { store.deleteSavedSearch(s.id) }
+                        }
+                }
+                if !store.tags.isEmpty {
+                    // 标签默认折叠（记住上次状态）；1.1 起按“/”分层显示，右键可改名、合并、删除
+                    DisclosureGroup(isExpanded: Bindable(store).tagsExpanded) {
+                        OutlineGroup(store.tagTree, children: \.childrenOrNil) { node in
+                            TagSidebarRow(node: node)
+                                .sidebarMenuRow()
+                        }
+                    } label: {
+                        HStack {
+                            Label("标签", systemImage: "tag")
+                            Spacer()
+                            Button {
+                                store.showTagManager = true
+                            } label: {
+                                Image(systemName: "slider.horizontal.3")
+                            }
+                            .buttonStyle(.borderless)
+                            .handCursor()
+                            .help("整理标签：改名、合并、删除、分层")
+                        }
+                    }
+                }
+            } header: {
+                Text("积累")
+            }
+
+            // 1.3：专题笔记本——讲稿、论文草稿、专题综述
+            Section(isExpanded: store.sidebarGroupBinding("writing")) {
                 ForEach(store.notebooks) { n in
                     if let id = n.id {
                         HStack {
@@ -412,7 +440,7 @@ struct SidebarView: View {
                 }
             } header: {
                 HStack {
-                    Text("专题笔记本")
+                    Text("写作与产出 · 专题笔记本")
                     Spacer()
                     Button {
                         store.newNotebookRequest = NewNotebookRequest()
@@ -425,40 +453,31 @@ struct SidebarView: View {
                 }
             }
 
-            if !store.savedSearches.isEmpty {
-                Section("已存搜索") {
-                    ForEach(store.savedSearches) { s in
-                        Label(s.name, systemImage: "bookmark")
-                            .sidebarMenuRow()
-                            .tag(SidebarItem.saved(s.id))
-                            .contextMenu {
-                                Button("删除已存搜索", role: .destructive) { store.deleteSavedSearch(s.id) }
-                            }
-                    }
-                }
+            Section(isExpanded: store.sidebarGroupBinding("growth")) {
+                Label("个人成长", systemImage: "leaf")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.growth)
+                Label("回顾统计", systemImage: "chart.bar.xaxis")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.stats)
+            } header: {
+                Text("成长")
             }
 
-            if !store.tags.isEmpty {
-                // 标签默认折叠（记住上次状态）；1.1 起按“/”分层显示，右键可改名、合并、删除
-                Section(isExpanded: Bindable(store).tagsExpanded) {
-                    OutlineGroup(store.tagTree, children: \.childrenOrNil) { node in
-                        TagSidebarRow(node: node)
-                            .sidebarMenuRow()
-                    }
-                } header: {
-                    HStack {
-                        Text("标签")
-                        Spacer()
-                        Button {
-                            store.showTagManager = true
-                        } label: {
-                            Image(systemName: "slider.horizontal.3")
-                        }
-                        .buttonStyle(.borderless)
-                        .handCursor()
-                        .help("整理标签：改名、合并、删除、分层")
+            // 不常用的两项放在最后
+            Section {
+                HStack {
+                    Label("最近删除", systemImage: "trash")
+                    Spacer()
+                    if store.trashCount > 0 {
+                        SidebarCount(store.trashCount)
                     }
                 }
+                .sidebarMenuRow()
+                .tag(SidebarItem.trash)
+                Label("使用说明", systemImage: "questionmark.circle")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.help)
             }
         }
         .listStyle(.sidebar)

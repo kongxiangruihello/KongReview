@@ -300,7 +300,7 @@ struct GrowthReportView: View {
         return f.string(from: window.start) + " — " + (window.end < window.fullEnd ? t.string(from: window.end) : f.string(from: lastDay))
     }
 
-    private func signed(_ n: Int) -> String { n > 0 ? "+\(n)" : (n < 0 ? "−\(-n)" : "0") }
+    private func signed(_ n: Int) -> String { n > 0 ? "+\(n.formatted())" : (n < 0 ? "−\((-n).formatted())" : "0") }
 
     private func rate(_ now: Int, _ before: Int) -> String {
         guard before > 0 else { return now > 0 ? "新增" : "—" }
