@@ -563,9 +563,10 @@ extension AppDatabase {
             let (where_, args) = Self.filterSQL(filter)
             let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM question q" + where_, arguments: StatementArguments(args)) ?? 0
             var orderArgs: [any DatabaseValueConvertible] = []
-            var prefer = "0"
+            // 注意：ORDER BY 里的整数常量会被当成列序号，所以没有当前项目时整项省去
+            var prefer = ""
             if let p = preferProjectID {
-                prefer = "CASE WHEN " + Self.projectScopeSQL + " THEN 1 ELSE 0 END"
+                prefer = "CASE WHEN " + Self.projectScopeSQL + " THEN 1 ELSE 0 END DESC, "
                 orderArgs = [p, p]
             }
             let rows = try Row.fetchAll(db, sql: """
@@ -576,7 +577,7 @@ extension AppDatabase {
                             UNION ALL
                             SELECT p.title FROM question_scope s JOIN research_project p ON p.id = s.recordId WHERE s.questionId = q.id AND s.kind = 'project')) AS scopes
                 FROM question q\(where_)
-                ORDER BY q.pinned DESC, \(prefer) DESC, q.updatedAt DESC, q.id DESC
+                ORDER BY q.pinned DESC, \(prefer)q.updatedAt DESC, q.id DESC
                 LIMIT ? OFFSET ?
                 """, arguments: StatementArguments(args + orderArgs + [max(1, limit), max(0, offset)]))
             let items = rows.map { row in
