@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import KongReviewCore
 
 // MARK: - 4.0：研究项目
@@ -10,6 +11,14 @@ struct ResearchProjectPendingLink: Equatable, Sendable {
 }
 
 extension LibraryStore {
+    /// 侧栏某一组的展开状态（today、research、reading、collect、writing、growth）
+    func sidebarGroupBinding(_ key: String) -> Binding<Bool> {
+        Binding(get: { !self.sidebarCollapsedGroups.contains(key) },
+                set: { expanded in
+                    if expanded { self.sidebarCollapsedGroups.remove(key) } else { self.sidebarCollapsedGroups.insert(key) }
+                })
+    }
+
     /// 当前项目（沿用 3.15 本期焦点的存储，kind = project）
     var currentProjectID: Int64? {
         guard let focus = learningFocus, focus.kind == .project else { return nil }

@@ -19,13 +19,17 @@ struct HomeView: View {
                 } else {
                 Button("查看个人成长 · 日／周／月／年小结") { store.selection = .growth }.handCursor()
                 HomeLearningHeader(summary: store.homeLearningSummary, day: store.today)
+                SidebarRegroupNotice()
 
                 DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
                                     onOpen: { store.showsDraftRecovery = true })
 
-                TodayWorkBar(summary: store.homeLearningSummary, focus: store.learningFocus,
+                TodayWorkBar(summary: store.homeLearningSummary, focus: nil,
                              onStart: { store.startTodayWork() },
                              onFocus: { store.selection = store.currentProjectID.map(SidebarItem.project) ?? .projects })
+
+                // 4.0：当前项目——阶段、截止、下一步、未解问题、本周写作
+                CurrentProjectCard()
 
                 HomeLearningDashboard(summary: store.homeLearningSummary,
                                       quote: store.dailyReviewQuote(),

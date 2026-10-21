@@ -571,3 +571,119 @@ struct ResearchProjectLinkMenu: View {
         .disabled(store.fullBackupBusy)
     }
 }
+
+/// 4.0：首页“当前项目”卡——题目、阶段、截止前剩余天数、第一条下一步、未解问题、本周写作
+struct CurrentProjectCard: View {
+    @Environment(LibraryStore.self) private var store
+    @State private var overview: ResearchProjectOverview?
+    @State private var weekWriting = WritingSummary()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label("当前项目", systemImage: "scope").font(.system(size: 13, weight: .semibold)).foregroundStyle(ReviewPalette.accent)
+                Spacer(minLength: 8)
+                if !store.researchProjects.isEmpty {
+                    Button("全部项目") { store.selection = .projects }.buttonStyle(.plain)
+                        .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).handCursor()
+                }
+            }
+            if let project = store.currentProject {
+                currentBody(project)
+            } else if store.researchProjects.isEmpty {
+                Text("把一篇论文、一部书稿、一门课或一组讲座建成研究项目，归入相关的专题笔记本与出处；回顾与记忆卡会侧重它的材料，学习小结报告它的进展。")
+                    .font(.system(size: 13)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+                Button { store.newResearchProject() } label: { Label("新建研究项目", systemImage: "plus") }
+                    .handCursor()
+            } else {
+                Text("尚未设定当前项目。选一个，回顾与记忆卡会侧重它的材料。")
+                    .font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                HStack(spacing: 8) {
+                    ForEach(store.researchProjects.prefix(3)) { p in
+                        Button(p.title) { store.setCurrentProject(p) }.lineLimit(1).handCursor()
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 22).padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ReviewPalette.hair))
+        .task(id: "\(store.currentProjectID ?? 0)|\(store.researchProjectRevision)|\(store.journeyRevision)|\(store.revision)") { await load() }
+    }
+
+    private func load() async {
+        guard let id = store.currentProjectID else { overview = nil; weekWriting = .init(); return }
+        let week = GrowthPeriod.week.window(containing: Date())
+        overview = try? await store.db.researchProjectOverview(id: id)
+        weekWriting = (try? await store.db.projectWritingSummary(projectId: id, start: week.start, end: week.end)) ?? .init()
+    }
+
+    @ViewBuilder private func currentBody(_ p: ResearchProject) -> some View {
+        Button { if let id = p.id { store.selection = .project(id) } } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(p.title).font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                Text(ResearchProjectText.meta(p)).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
+            }
+        }
+        .buttonStyle(.plain).handCursor().help("打开项目页")
+        let overdue = p.daysLeft().map { $0 < 0 } ?? false
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 18) { facts(p, overdue: overdue) }
+            VStack(alignment: .leading, spacing: 8) { facts(p, overdue: overdue) }
+        }
+    }
+
+    @ViewBuilder private func facts(_ p: ResearchProject, overdue: Bool) -> some View {
+        fact("下一步") {
+            if let plan = overview?.pendingPlans.first {
+                let late = Calendar.current.startOfDay(for: plan.dueDate) <= Calendar.current.startOfDay(for: Date())
+                Text(Markdown.plainText(fromHTML: plan.title)).lineLimit(1).foregroundStyle(ReviewPalette.ink)
+                Text(plan.dueDate.formatted(.dateTime.month().day())).foregroundStyle(late ? ReviewPalette.pending : ReviewPalette.sub)
+            } else {
+                Text("还没有计划").foregroundStyle(ReviewPalette.sub)
+            }
+        }
+        fact("未解问题") {
+            let n = overview?.openQuestions.count ?? 0
+            Text("\(n) 个").foregroundStyle(n > 0 ? ReviewPalette.pending : ReviewPalette.sub)
+        }
+        fact("本周写作") {
+            Text("\(weekWriting.added.formatted()) 字").foregroundStyle(ReviewPalette.ink)
+            if weekWriting.days > 0 { Text("\(weekWriting.days) 天").foregroundStyle(ReviewPalette.sub) }
+        }
+        if overdue {
+            fact("截止") { Text("已过截止日期").foregroundStyle(ReviewPalette.pending) }
+        }
+    }
+
+    private func fact<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
+            HStack(spacing: 6) { content() }.font(.system(size: 13).monospacedDigit())
+        }
+    }
+}
+
+/// 4.0：侧栏改为六组后，首页显示一次说明
+struct SidebarRegroupNotice: View {
+    @AppStorage("sidebar.v4.noticeDismissed") private var dismissed = false
+
+    var body: some View {
+        if !dismissed {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sidebar.left").foregroundStyle(ReviewPalette.accent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("侧栏已按学术工作的环节分为六组").font(.system(size: 13, weight: .semibold)).foregroundStyle(ReviewPalette.ink)
+                    Text("今日（首页、今日回顾、记忆卡）、研究（研究项目）、阅读（出处、网页存档）、积累（摘录、收藏、标签）、写作与产出（专题笔记本）、成长（个人成长、统计）。原有入口都还在，最近删除与使用说明在侧栏最后；点组名旁的箭头可折叠。")
+                        .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Button("知道了") { dismissed = true }.controlSize(.small).handCursor()
+            }
+            .padding(14)
+            .background(ReviewPalette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+}

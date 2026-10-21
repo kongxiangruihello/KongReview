@@ -166,6 +166,10 @@ final class LibraryStore {
     var sourcesExpanded: Bool = UserDefaults.standard.bool(forKey: "sidebar.sourcesExpanded") {
         didSet { UserDefaults.standard.set(sourcesExpanded, forKey: "sidebar.sourcesExpanded") }
     }
+    /// 4.0：侧栏六组中被折叠的组（默认全部展开；记住上次状态）
+    var sidebarCollapsedGroups: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "sidebar.collapsedGroups") ?? []) {
+        didSet { UserDefaults.standard.set(sidebarCollapsedGroups.sorted(), forKey: "sidebar.collapsedGroups") }
+    }
     /// 侧边栏“标签”分组是否展开（默认折叠）
     var tagsExpanded: Bool = UserDefaults.standard.bool(forKey: "sidebar.tagsExpanded") {
         didSet { UserDefaults.standard.set(tagsExpanded, forKey: "sidebar.tagsExpanded") }
