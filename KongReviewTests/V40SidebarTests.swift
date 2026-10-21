@@ -1,5 +1,6 @@
 import XCTest
 import GRDB
+import KongReviewCore
 @testable import KongReview
 
 /// 4.0-c：侧栏六组的折叠状态记住；首页当前项目卡依赖的数据
