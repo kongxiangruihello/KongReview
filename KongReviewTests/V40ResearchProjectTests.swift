@@ -146,7 +146,8 @@ final class V40ResearchProjectTests: XCTestCase {
         XCTAssertEqual(o.cardCount, 1)
         XCTAssertEqual(o.pendingPlans.map(\.title), ["核引文", "改第二章"], "只列未完成、未取消的，按日期")
         XCTAssertEqual(o.openQuestions.map(\.question), ["学与习之别？"])
-        XCTAssertTrue(try await db.planLinkExists(link))
+        let exists = try await db.planLinkExists(link)
+        XCTAssertTrue(exists)
         let choices = try await db.planLinkChoices(kind: .project, query: "论语")
         XCTAssertEqual(choices.items.map(\.recordID), [p.id!])
     }
