@@ -310,6 +310,22 @@ struct StudyView: View {
                         if study.showingAnswer, study.showContext, let hid = card.highlightId {
                             CardContextPanel(highlightId: hid)
                         }
+                        // 4.1.2：由摘录做成的卡，显示答案后提示引用其原摘录的札记，与“原文语境”并列
+                        if study.showingAnswer, let hid = card.highlightId,
+                           let notes = store.ideaNotesCiting([hid])[hid], !notes.isEmpty {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: "lightbulb").font(.system(size: 11)).foregroundStyle(ReviewPalette.accent)
+                                Text("原摘录用在札记中：").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+                                ForEach(notes.prefix(3)) { ref in
+                                    Button("《\(ref.title)》") { store.selection = .ideaNote(ref.id) }
+                                        .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(ReviewPalette.accent)
+                                        .lineLimit(1).handCursor()
+                                }
+                                if notes.count > 3 { Text("等 \(notes.count) 条").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub) }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 20).padding(.bottom, 10)
+                        }
                     }
                     // 1.8：左侧书脊用牌组的传统色
                     .overlay {

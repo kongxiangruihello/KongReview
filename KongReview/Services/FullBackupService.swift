@@ -270,9 +270,9 @@ enum FullBackupService {
         defer { try? queue.close() }
         // 格式 1 只接收本版本已认识的完整结构，不运行备份内未知触发器或更高版本迁移。
         let identifiers = try queue.read { try String.fetchAll($0, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier") }
-        // 先和已知历史版本的结构逐项比较，验证后才在恢复目标执行本机迁移。
-        let targetMigration: String? = identifiers.contains("v15-card-entry-workflows") ? nil
-            : identifiers.contains("v14-growth-progress") ? "v14-growth-progress" : "v13-event-card-state"
+        // 先和备份所在版本的结构逐项比较，验证后才在恢复目标执行本机迁移。
+        // 4.1.2：按备份里已完成的迁移定位版本（3.16 起每版新增迁移，以前只认最新结构，旧版备份会被拒绝）
+        let targetMigration = try backupMigrationTarget(identifiers)
         let reference = try AppDatabase(DatabaseQueue(), upTo:targetMigration)
         let schema = try reference.writer.read { try schemaSignature($0) }
         return try queue.read { db in
@@ -293,6 +293,17 @@ enum FullBackupService {
                 media: count("card_media") + count("image_cache") + count("source_cover"),
                 highlightDrafts: drafts.0, cardDrafts: drafts.1, settings: settings)
         }
+    }
+
+    /// 备份已完成的迁移必须恰好是本机迁移序列的一个前缀；返回该前缀的最后一项（与本机相同时为 nil）。
+    /// 含本机不认识的迁移（更新版本的备份）或不成前缀时，视为不支持。
+    static func backupMigrationTarget(_ identifiers: [String]) throws -> String? {
+        let known = AppDatabase.makeEmpty().migrationIdentifiers
+        let applied = Set(identifiers)
+        guard !applied.isEmpty, applied.isSubset(of: Set(known)) else { throw BackupError.unsupported }
+        let prefix = Array(known.prefix(applied.count))
+        guard Set(prefix) == applied, let last = prefix.last else { throw BackupError.unsupported }
+        return last == known.last ? nil : last
     }
 
     private static func schemaSignature(_ db: Database) throws -> [String] {

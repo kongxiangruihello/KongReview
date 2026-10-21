@@ -94,6 +94,15 @@ public enum NotebookDocx {
                     let lead: [NotebookExporter.Span] = k == 0 ? [.init("按：", bold: true)] : []
                     body.append(para("Comment", runs(lead + pr.spans)))
                 }
+            case .essay(let t, let cites):
+                let paras = NotebookExporter.essayParagraphs(t)
+                for (k, pr) in paras.enumerated() {
+                    var content = runs(pr.spans)
+                    if k == paras.count - 1, !cites.isEmpty {
+                        content += options.footnotes ? cites.map { noteRef($0) }.joined() : runs([.init("（" + cites.joined(separator: "；") + "）")])
+                    }
+                    body.append(para(nil, content))
+                }
             }
         }
         if !options.bibliography.isEmpty {

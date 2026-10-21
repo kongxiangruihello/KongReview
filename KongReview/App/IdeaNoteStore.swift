@@ -24,6 +24,9 @@ extension LibraryStore {
 
     private func afterIdeaNoteChange() {
         refreshIdeaNotes()
+        // 4.1.2：打开的笔记本里的札记块显示最新正文；札记也同步到 Obsidian
+        refreshNotebookHighlights()
+        scheduleObsidianSync()
         // 当前项目的札记所引摘录计入回顾加权
         refreshLearningFocus()
         researchProjectRevision += 1
@@ -111,6 +114,23 @@ extension LibraryStore {
             return true
         }
         return false
+    }
+
+    /// 4.1.2：编辑札记时输入 [[ 的候选：题目繁简归一后包含输入的（以输入开头的在前，其次最近改过的），最多 8 条；
+    /// 输入了还不存在的题目时，末尾给出“新题目”（链接先显示为未建，点它即可新建）
+    func wikiSuggestions(_ query: String, excluding: Int64? = nil) -> [WikiSuggestion] {
+        let key = WikiLinks.key(query)
+        let notes = ((try? db.recentIdeaNotes(limit: 2_000)) ?? []).filter { $0.id != excluding }
+        var head: [IdeaNoteRef] = [], rest: [IdeaNoteRef] = []
+        for n in notes {
+            let k = WikiLinks.key(n.title)
+            if key.isEmpty { head.append(n) } else if k.hasPrefix(key) { head.append(n) } else if k.contains(key) { rest.append(n) }
+        }
+        var out = (head + rest).prefix(8).map { WikiSuggestion(t: $0.title) }
+        if !key.isEmpty, !notes.contains(where: { WikiLinks.key($0.title) == key }) {
+            out.append(WikiSuggestion(t: WikiLinks.normalize(query), h: "新题目，尚未建立"))
+        }
+        return out
     }
 
     /// 回顾、编辑面板用：引用了这些摘录的札记

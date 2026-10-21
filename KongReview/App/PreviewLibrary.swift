@@ -91,6 +91,9 @@ import KongReviewCore
                                       body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
                                       highlightIDs: [highlights[0].id!], now: day(-5))
             try db.linkToResearchProject(project.id!, kind: .note, recordId: selfReliance.id!)
+            // 4.1.2：专题笔记本末尾放一个札记块
+            _ = try db.insertBlocks([NotebookBlock(notebookId: notebook.id!, position: 0, kind: .note, text: selfReliance.body, noteId: selfReliance.id!)],
+                                    into: notebook.id!, after: nil, now: day(-2, hour: 21))
             // 4.1.1：问题簿——一个「常念」、挂着今日回顾当前摘录；一个刚记下；一个已解决（解答指向札记）；一个搁置
             let pinned = try db.createQuestion(title: "“士志于道”与“士不可以不弘毅”能否互证？", scopes: [(.notebook, notebook.id!)], now: day(-9))
             try db.setQuestionPinned(id: pinned.id!, true)

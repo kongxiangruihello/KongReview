@@ -72,6 +72,29 @@ public enum WikiLinks {
         return out
     }
 
+    /// 导出成文时把 [[题目]]、[[题目|显示文字]] 换成显示的文字（不带括号）
+    public static func plain(_ text: String) -> String {
+        replacing(text) { _, display in escapeIfHTML(text, display) }
+    }
+
+    /// 逐个改写链接：transform(题目, 显示文字) 返回替换后的整段文字
+    public static func replacing(_ text: String, _ transform: (_ title: String, _ display: String) -> String) -> String {
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return text }
+        let ns = text as NSString
+        var out = text
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let title = normalize(unescape(ns.substring(with: m.range(at: 1))))
+            guard !title.isEmpty else { continue }
+            let display = m.range(at: 2).location == NSNotFound ? title : normalize(unescape(ns.substring(with: m.range(at: 2))))
+            out = (out as NSString).replacingCharacters(in: m.range, with: transform(title, display))
+        }
+        return out
+    }
+
+    private static func escapeIfHTML(_ text: String, _ s: String) -> String {
+        Markdown.containsHTMLTag(text) ? escape(s) : s
+    }
+
     static func unescape(_ s: String) -> String {
         s.replacingOccurrences(of: "&lt;", with: "<").replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&quot;", with: "\"").replacingOccurrences(of: "&#39;", with: "'")

@@ -63,6 +63,8 @@ extension AppDatabase {
         switch kind {
         case .text, .heading: return WritingCount.count(html: text)
         case .highlight: return WritingCount.count(html: note ?? "")
+        // 4.1.2：札记块的正文已在写札记时计入，不重复计
+        case .note: return 0
         }
     }
 

@@ -85,6 +85,11 @@ public enum NotebookPptx {
                 lastQuote = (q, cite)
             case .comment(let cm):
                 if lastQuote != nil { pendingComments.append(cm) }
+            case .essay(let t, _):
+                // 演示稿里札记按文字页处理，出处不另出
+                flushQuote()
+                let paras = NotebookExporter.paragraphs(fromMarkdown: t).filter { $0.headingLevel == 0 }
+                if !paras.isEmpty { slides += textSlides(paras, p) }
             }
         }
         flushQuote()

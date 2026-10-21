@@ -281,7 +281,7 @@ private struct DataSettings: View {
                     Button("立即同步") { store.syncObsidianNow() }
                         .disabled(ObsidianSync.folder == nil)
                 }
-                Text("每个出处一个 .md 文件（YAML 头 + 引用块 + 按语、出处、标签），建议选 Obsidian 库里的一个子文件夹，如“KongReview”。只在内容变化时写入；这些文件由 KongReview 生成，在 Obsidian 里的改动会在下次同步时被覆盖。"
+                Text("每个出处一个 .md 文件（YAML 头 + 引用块 + 按语、出处、标签）；札记写在“札记”子文件夹里，一条一个文件，文件名即题目，[[题目]] 链接在 Obsidian 里可直接跳转。建议选 Obsidian 库里的一个子文件夹，如“KongReview”。只在内容变化时写入；这些文件由 KongReview 生成，在 Obsidian 里的改动会在下次同步时被覆盖。"
                      + ((UserDefaults.standard.object(forKey: ObsidianSync.lastSyncKey) as? Date).map { "上次同步：\($0.formatted(date: .abbreviated, time: .shortened))。" } ?? ""))
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

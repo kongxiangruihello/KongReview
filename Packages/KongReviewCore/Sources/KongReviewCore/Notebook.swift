@@ -26,6 +26,8 @@ public struct NotebookBlock: Codable, Identifiable, Hashable, Sendable {
         case text
         /// 小标题（纯文字）
         case heading
+        /// 4.1.2：引用一条札记（noteId），显示其最新正文；text 存加入时的正文，札记被彻底删除后仍可显示
+        case note
     }
 
     public var id: Int64?
@@ -37,11 +39,13 @@ public struct NotebookBlock: Codable, Identifiable, Hashable, Sendable {
     public var text: String
     /// 1.5：本文批注——只属于这本笔记本，不改原摘录的按语（只用于摘录块）
     public var note: String?
+    /// 4.1.2：札记块引用的札记
+    public var noteId: Int64?
     public var createdAt: Date
     public var updatedAt: Date
 
     public init(id: Int64? = nil, notebookId: Int64, position: Double, kind: Kind, highlightId: Int64? = nil,
-                text: String = "", note: String? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
+                text: String = "", note: String? = nil, noteId: Int64? = nil, createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.notebookId = notebookId
         self.position = position
@@ -49,6 +53,7 @@ public struct NotebookBlock: Codable, Identifiable, Hashable, Sendable {
         self.highlightId = highlightId
         self.text = text
         self.note = note
+        self.noteId = noteId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -75,6 +80,8 @@ public struct NotebookPiece: Sendable {
         case quote(String, cite: String)
         /// 1.4：摘录的按语（导出时可选附上，排在该摘录之后）
         case comment(String)
+        /// 4.1.2：札记——按普通段落输出，所引摘录的出处作脚注，附在最后一段末尾（不用脚注时写在括号里）
+        case essay(String, cites: [String])
     }
     public var kind: Kind
     public init(_ kind: Kind) { self.kind = kind }
@@ -126,6 +133,15 @@ public enum NotebookExporter {
             case .comment(let c):
                 let c = c.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !c.isEmpty { out += ["**按：**" + c.replacingOccurrences(of: "\n\n", with: "\n\n　　"), ""] }
+            case .essay(let t, let cites):
+                var t = essayMarkdown(t).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty || !cites.isEmpty else { continue }
+                if options.footnotes {
+                    for c in cites { notes.append(c); t += "[^\(notes.count)]" }
+                } else if !cites.isEmpty {
+                    t += "（" + cites.joined(separator: "；") + "）"
+                }
+                out += [t, ""]
             }
         }
         if !options.bibliography.isEmpty {
@@ -246,6 +262,18 @@ public enum NotebookExporter {
         return out
     }
 
+    /// 札记正文（编辑器存的是 HTML）→ Markdown：段与段之间空一行，免得几段连成一段
+    public static func essayMarkdown(_ t: String) -> String {
+        guard Markdown.containsHTMLTag(t) else { return t }
+        return Markdown.markdown(fromHTMLFragments: Markdown.replace(t, #"(?i)</(p|div|h[1-6]|blockquote|ul|ol)\s*>"#, "$0\n\n"))
+    }
+
+    /// 札记的各段；脚注附在最后一段末尾
+    public static func essayParagraphs(_ t: String) -> [Paragraph] {
+        let paras = paragraphs(fromMarkdown: essayMarkdown(t))
+        return paras.isEmpty ? [Paragraph(spans: [])] : paras
+    }
+
     public static func plain(_ md: String) -> String {
         paragraphs(fromMarkdown: md).map { $0.spans.map(\.text).joined() }.joined(separator: "\n")
     }
@@ -295,6 +323,15 @@ public enum NotebookExporter {
                 for (k, para) in paragraphs(fromMarkdown: c).enumerated() {
                     let lead = k == 0 ? "{\\b " + RTFWriter.escape("按：") + "}" : ""
                     body.append("\\pard\\plain\\f0\\fs21\\li720\\sa120 " + lead + runs(para.spans) + "\\par")
+                }
+            case .essay(let t, let cites):
+                let paras = essayParagraphs(t)
+                for (k, para) in paras.enumerated() {
+                    var line = normal + runs(para.spans)
+                    if k == paras.count - 1, !cites.isEmpty {
+                        line += options.footnotes ? cites.map(note).joined() : RTFWriter.escape("（" + cites.joined(separator: "；") + "）")
+                    }
+                    body.append(line + "\\par")
                 }
             }
         }

@@ -88,6 +88,8 @@ struct IdeaNoteView: View {
     @State private var related: [Highlight] = []
     /// 4.1.1：以本札记为解答的问题、挂着本札记的问题
     @State private var questions: (answered: [QuestionRef], holding: [QuestionRef]) = ([], [])
+    /// 4.1.2：收入了这条札记的专题笔记本
+    @State private var notebooks: [Notebook] = []
 
     var body: some View {
         Group {
@@ -131,6 +133,7 @@ struct IdeaNoteView: View {
             let d = try await store.db.ideaNoteDetail(id: noteId)
             detail = d; missing = false
             questions = (try? await store.db.questionsForNote(noteId)) ?? ([], [])
+            notebooks = (try? store.db.notebooksContaining(noteId: noteId)) ?? []
             if !editing { draftTitle = d.note.title; draftBody = d.note.body }
             let cited = Set(d.highlights.compactMap(\.id))
             if let index = store.relatedIndex {
@@ -187,7 +190,8 @@ struct IdeaNoteView: View {
     @ViewBuilder private func main(_ d: IdeaNoteDetail) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             if editing {
-                RichEditor(text: $draftBody, placeholder: "用自己的话写下这个观点；输入 [[题目]] 链接其他札记", autoHeight: true, minHeight: 180, slot: "idea-note-body")
+                RichEditor(text: $draftBody, placeholder: "用自己的话写下这个观点；输入 [[ 即可选择要链接的札记", autoHeight: true, minHeight: 180, slot: "idea-note-body",
+                           wikiCompletion: { [noteId] q in store.wikiSuggestions(q, excluding: noteId) })
                     .richEditorFrame()
                 HStack(spacing: 12) {
                     Menu {
@@ -196,7 +200,7 @@ struct IdeaNoteView: View {
                         }
                     } label: { Label("链接札记…", systemImage: "link") }
                         .menuStyle(.borderlessButton).fixedSize()
-                        .help("在正文末尾加上 [[题目]]，可再剪切到合适的位置；也可直接在正文里输入 [[题目]]")
+                        .help("在正文末尾加上 [[题目]]；更方便的是直接在正文里输入 [[，从列表中选")
                     Text("⌘↩ 完成").font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                 }
             } else if d.note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -274,6 +278,17 @@ struct IdeaNoteView: View {
                 ProjectPanel(title: "相关问题", subtitle: "") {
                     ForEach(questions.answered) { q in questionLink(q, note: "以本札记为解答") }
                     ForEach(questions.holding.filter { h in !questions.answered.contains { $0.id == h.id } }) { q in questionLink(q, note: "挂着本札记") }
+                }
+            }
+            if !notebooks.isEmpty {
+                ProjectPanel(title: "收入专题", subtitle: "\(notebooks.count) 本") {
+                    ForEach(notebooks) { n in
+                        Button { if let id = n.id { store.selection = .notebook(id) } } label: {
+                            Label(n.title, systemImage: "book.closed").font(.system(size: 13)).lineLimit(2)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(ReviewPalette.accent).handCursor()
+                    }
+                    Text("笔记本里的札记块随这里的正文更新。").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
                 }
             }
             if !d.outgoing.isEmpty || !d.unresolved.isEmpty {
@@ -367,8 +382,9 @@ struct IdeaNoteComposerSheet: View {
             } else {
                 TextField("题目：一句话的观点（如“乾嘉考据并非一味反理学”）", text: $composer.title)
                     .textFieldStyle(.roundedBorder).font(.system(size: 15))
-                RichEditor(text: $composer.body, placeholder: "用自己的话写；输入 [[题目]] 链接其他札记（可先空着，以后再写）",
-                           autoHeight: true, minHeight: 140, slot: "idea-note-composer")
+                RichEditor(text: $composer.body, placeholder: "用自己的话写；输入 [[ 即可选择要链接的札记（可先空着，以后再写）",
+                           autoHeight: true, minHeight: 140, slot: "idea-note-composer",
+                           wikiCompletion: { q in store.wikiSuggestions(q) })
                     .richEditorFrame()
                 if composer.fromAnnotation {
                     Text("按语本身不变；新札记以按语为底稿，并引用这条摘录。").font(.caption).foregroundStyle(.secondary)
