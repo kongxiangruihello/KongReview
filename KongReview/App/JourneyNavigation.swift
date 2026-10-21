@@ -39,6 +39,7 @@ extension LibraryStore {
                 case .notebook: selection = .notebook(link.recordID)
                 case .source: learningExplorer = .init(route: .document(.init(kind:.source,recordID:link.recordID),""))
                 case .card: learningExplorer = .init(route: .document(.init(kind:.card,recordID:link.recordID),""))
+                case .project: selection = .project(link.recordID)
                 }
             } catch { report(error) }
         }

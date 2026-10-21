@@ -389,15 +389,15 @@ struct GrowthReportView: View {
 
     /// 四、焦点进展：表 4；在这里设定或更换本期焦点
     private var focusSection: some View {
-        AcademicSection(number: "四", title: "焦点进展",
-                        lead: "选定一个专题或一本书作为本期焦点后，全库回顾会更常抽到其中的摘录，记忆卡也优先出现它的卡片；这一节报告本期在焦点上的进展。",
+        AcademicSection(number: "四", title: "项目进展",
+                        lead: "设定当前研究项目后，全库回顾会更常抽到项目材料中的摘录，记忆卡也优先出现其卡片；这一节报告本期在当前项目上的进展。",
                         trailing: AnyView(focusMenu)) {
             if let focus = store.learningFocus, let p = focusProgress {
-                AcademicTable(label: "表 4", title: "本期焦点\(focus.label)的进展",
-                              note: "焦点自 \(focus.startedAt.formatted(date: .abbreviated, time: .omitted)) 起生效。回顾抽样中焦点摘录的权重为平时的 \(Int(ReviewBias.focusBoost)) 倍；记忆卡在同为可学时优先焦点卡片，不突破每日上限。") {
+                AcademicTable(label: "表 4", title: focus.kind == .project ? "当前\(focus.label)的进展" : "本期焦点\(focus.label)的进展",
+                              note: "自 \(focus.startedAt.formatted(date: .abbreviated, time: .omitted)) 起生效。\(focus.kind == .project ? "材料为项目中全部专题笔记本与出处的摘录（去重）。" : "")回顾抽样中这些摘录的权重为平时的 \(Int(ReviewBias.focusBoost)) 倍；记忆卡在同为可学时优先其卡片，不突破每日上限。") {
                     Text("项目")
                     Text("本期").gridColumnAlignment(.trailing)
-                    Text("焦点总量").gridColumnAlignment(.trailing)
+                    Text("材料总量").gridColumnAlignment(.trailing)
                     Text("覆盖").gridColumnAlignment(.trailing)
                 } rows: {
                     focusRow("回顾过的摘录（条）", p.reviewedHighlights, p.totalHighlights)
@@ -406,7 +406,7 @@ struct GrowthReportView: View {
                     focusRow("新增摘录（条）", p.newHighlights, nil)
                 }
             } else {
-                Text("尚未设定焦点。点右上角“设为焦点”，从专题笔记本或出处中选一个。")
+                Text(store.researchProjects.isEmpty ? "还没有研究项目。点右上角菜单新建一个，再把专题笔记本和出处归进来。" : "尚未设定当前项目。点右上角菜单，从在研项目中选一个。")
                     .font(AcademicType.body).foregroundStyle(ReviewPalette.sub)
             }
         }
@@ -424,17 +424,19 @@ struct GrowthReportView: View {
     }
 
     private var focusMenu: some View {
-        Menu(store.learningFocus == nil ? "设为焦点…" : "更换焦点…") {
-            let choices = store.focusChoices
-            Section("专题笔记本") {
-                ForEach(choices.filter { $0.kind == .notebook }, id: \.id) { c in Button(c.title) { store.setLearningFocus(c) } }
+        Menu(store.learningFocus == nil ? "设为当前项目…" : "更换当前项目…") {
+            Section("在研项目") {
+                ForEach(store.researchProjects) { p in
+                    Button { store.setCurrentProject(p) } label: {
+                        if p.id == store.currentProjectID { Label(p.title, systemImage: "checkmark") } else { Text(p.title) }
+                    }
+                }
             }
-            Section("出处") {
-                ForEach(choices.filter { $0.kind == .source }.prefix(40), id: \.id) { c in Button(c.title) { store.setLearningFocus(c) } }
-            }
+            Divider()
+            Button("新建项目…") { store.newResearchProject() }
+            if let id = store.currentProjectID { Button("打开当前项目") { store.selection = .project(id) } }
             if store.learningFocus != nil {
-                Divider()
-                Button("取消焦点") { store.setLearningFocus(nil) }
+                Button("取消当前项目") { store.setLearningFocus(nil) }
             }
         }
         .menuStyle(.borderlessButton).fixedSize().controlSize(.small)

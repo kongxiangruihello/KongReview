@@ -8,16 +8,22 @@ import KongReviewCore
 // 2. 分工互补：已在记忆卡中熟记（间隔 ≥ 21 天）的摘录在回顾中降权；近 7 天重来 ≥ 3 次的卡片，原摘录回到回顾“重读原文”。
 // 3. 按语计入成果；4. 学习质量指标；6. 札记导出所需的查询。
 
-/// 本期焦点：一个专题笔记本或一个出处
+/// 本期焦点：一个专题笔记本或一个出处；4.0 起为“当前项目”（kind = project，范围是项目全部材料）
 struct LearningFocus: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case notebook, source }
+    enum Kind: String, Codable, Sendable { case notebook, source, project }
     var kind: Kind
     var id: Int64
     var title: String
     var startedAt = Date()
 
     static let progressKey = "learning.focus"
-    var label: String { kind == .notebook ? "专题《\(title)》" : "出处《\(title)》" }
+    var label: String {
+        switch kind {
+        case .notebook: "专题《\(title)》"
+        case .source: "出处《\(title)》"
+        case .project: "项目《\(title)》"
+        }
+    }
 }
 
 /// 回顾抽样的调整
@@ -103,6 +109,8 @@ extension AppDatabase {
                 """, arguments: [focus.id]))
         case .source:
             return Set(try Int64.fetchAll(db, sql: "SELECT id FROM highlight WHERE sourceId = ? AND deletedAt IS NULL", arguments: [focus.id]))
+        case .project:
+            return try researchProjectHighlightIDs(db, projectId: focus.id)
         }
     }
 
@@ -117,6 +125,7 @@ extension AppDatabase {
             switch focus.kind {
             case .notebook: return try String.fetchOne(db, sql: "SELECT title FROM notebook WHERE id = ?", arguments: [focus.id])
             case .source: return try String.fetchOne(db, sql: "SELECT title FROM source WHERE id = ?", arguments: [focus.id])
+            case .project: return try String.fetchOne(db, sql: "SELECT title FROM research_project WHERE id = ? AND archivedAt IS NULL", arguments: [focus.id])
             }
         }
         guard let title else { return nil }

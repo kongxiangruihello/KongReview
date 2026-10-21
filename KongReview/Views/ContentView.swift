@@ -42,6 +42,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented:$store.showsResourceAudit) { LibraryResourceAuditView() }
+        .sheet(item: $store.researchProjectEditor) { project in ResearchProjectEditor(project: project).environment(store) }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
         .modifier(LearningMaterialExportPresentation())
@@ -208,6 +209,10 @@ struct ContentView: View {
             }
         case .notebook(let id):
             NotebookView(notebookId: id).id(id)
+        case .project(let id):
+            ResearchProjectView(projectId: id).id(id)
+        case .projects:
+            ResearchProjectListView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -342,6 +347,42 @@ struct SidebarView: View {
                 }
             }
 
+
+            // 4.0：研究项目（在研，按截止日期）
+            Section {
+                ForEach(store.researchProjects) { p in
+                    if let id = p.id {
+                        HStack(spacing: 6) {
+                            Label(p.title, systemImage: p.kind.icon).lineLimit(1)
+                            Spacer()
+                            if id == store.currentProjectID {
+                                Image(systemName: "scope").font(.system(size: 10)).foregroundStyle(.secondary)
+                                    .help("当前项目")
+                            }
+                        }
+                        .sidebarMenuRow()
+                        .tag(SidebarItem.project(id))
+                        .contextMenu {
+                            if id != store.currentProjectID { Button("设为当前项目") { store.setCurrentProject(p) } }
+                            Button("编辑…") { store.editResearchProject(p) }
+                            Button("归档") { store.setResearchProjectArchived(p, true) }
+                        }
+                    }
+                }
+                Label(store.researchProjects.isEmpty ? "新建或查看项目…" : "全部项目", systemImage: "square.stack.3d.up")
+                    .foregroundStyle(.secondary)
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.projects)
+            } header: {
+                HStack {
+                    Text("研究项目")
+                    Spacer()
+                    Button { store.newResearchProject() } label: { Image(systemName: "plus") }
+                        .buttonStyle(.borderless)
+                        .handCursor()
+                        .help("新建研究项目")
+                }
+            }
 
             // 1.3：专题笔记本
             Section {

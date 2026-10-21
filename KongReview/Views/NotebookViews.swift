@@ -88,6 +88,10 @@ struct NotebookView: View {
                 .disabled(st.quoteCount == 0)
             }
             ToolbarItem {
+                // 4.0：归入研究项目
+                ResearchProjectLinkMenu(kind: .notebook, recordId: notebookId)
+            }
+            ToolbarItem {
                 Button { store.openNotebookPicker(after: st.blocks.last?.id) } label: {
                     Label("插入摘录", systemImage: "text.quote")
                 }

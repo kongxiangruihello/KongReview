@@ -36,7 +36,7 @@ struct LearningPlanForm: View {
                 if let link = plan.link {
                     HStack { Text("关联\(link.kind.title)：\(link.title)").lineLimit(3); Button("移除关联") { plan.link = nil } }
                 }
-                Button(choosing ? "收起关联选择" : "关联笔记本、出处或记忆卡…") { choosing.toggle() }
+                Button(choosing ? "收起关联选择" : "关联研究项目、笔记本、出处或记忆卡…") { choosing.toggle() }
                 if choosing {
                     Picker("关联类型", selection: $kind) { ForEach(LearningPlanLinkKind.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                     TextField("搜索名称或卡片正面", text: $query).textFieldStyle(.roundedBorder)

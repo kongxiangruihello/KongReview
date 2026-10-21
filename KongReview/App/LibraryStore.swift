@@ -19,6 +19,9 @@ enum SidebarItem: Hashable {
     case saved(String)
     case notebook(Int64)
     case source(Int64)
+    /// 4.0：研究项目页与全部项目
+    case project(Int64)
+    case projects
     case tag(String)
 }
 
@@ -62,6 +65,12 @@ final class LibraryStore {
     var bibliographyRequest: BibliographyRequest?
     /// 1.3：专题笔记本列表、各本摘录数、当前打开的笔记本
     var notebooks: [Notebook] = []
+    /// 4.0：在研项目（未归档）
+    var researchProjects: [ResearchProject] = []
+    var researchProjectEditor: ResearchProject?
+    var researchProjectPendingDeletion: ResearchProject?
+    var researchProjectPendingLink: ResearchProjectPendingLink?
+    var researchProjectRevision = 0
     var notebookQuoteCounts: [Int64: Int] = [:]
     var notebookState = NotebookState()
     /// 1.3：新建笔记本对话框（输入标题）；附带要放进去的摘录
@@ -265,6 +274,7 @@ final class LibraryStore {
             coverIDs = try db.coverSourceIDs()
             notebooks = try db.notebooks()
             notebookQuoteCounts = try db.notebookQuoteCounts()
+            researchProjects = try db.researchProjects()
             refreshLearningFocus()
             revision += 1
             refreshDerived()

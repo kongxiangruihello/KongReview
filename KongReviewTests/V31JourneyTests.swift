@@ -82,6 +82,7 @@ final class V31JourneyTests: XCTestCase {
     func testPlanLinksResolveAndDeletedTargetsDoNotErasePlans() async throws {
         let db = try AppDatabase(DatabaseQueue())
         let source = try db.save(Source(title:"图书")), notebook = try db.createNotebook(title:"专题"), card = try db.save(Card(front:"概念"))
+        _ = try db.saveResearchProject(ResearchProject(title:"项目")) // 4.0：计划也可关联研究项目
         for kind in LearningPlanLinkKind.allCases {
             let values = try await db.planLinkChoices(kind:kind,query:"")
             XCTAssertEqual(values.total,1)

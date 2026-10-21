@@ -400,7 +400,7 @@ struct DailyReviewView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 18)
             } else if state.theme == nil, store.focusHighlightIDs.contains(card.id), let focus = store.learningFocus {
-                Label("本期焦点：\(focus.label)", systemImage: "scope")
+                Label(focus.kind == .project ? "当前\(focus.label)" : "本期焦点：\(focus.label)", systemImage: "scope")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(ReviewPalette.accent)
                     .padding(.bottom, 14)
