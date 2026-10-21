@@ -28,7 +28,7 @@ final class V411QuestionBookTests: XCTestCase {
         var edit = TopicQuestionDraft(value: open, original: open); edit.value.answer = "<p>改了一半的解释</p>"
         for d in [newDraft, edit] { try old.saveProgress(d, key: d.key) }
         try old.saveProgress(Data("坏数据".utf8), key: "topic-question.broken")
-        try queue.write { db in try db.execute(sql: "DELETE FROM notebook WHERE id = ?", arguments: [gone.id!]) }
+        try await queue.write { db in try db.execute(sql: "DELETE FROM notebook WHERE id = ?", arguments: [gone.id!]) }
 
         let db = try AppDatabase(queue)
         let all = try await db.questionPage(QuestionFilter(state: .all))
