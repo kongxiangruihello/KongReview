@@ -28,6 +28,9 @@ extension AppDatabase {
                 return try Article.fetchOne(db, key: target.recordID).map { .article($0) }
             case .source:
                 return try Source.fetchOne(db, key: target.recordID).map { .source($0) }
+            case .note:
+                // 札记在应用内打开（openGlobalSearchResult 先行处理），不进入学习资料浏览
+                return nil
             }
         }
     }
@@ -58,6 +61,11 @@ extension LibraryStore {
     /// 搜索面板已经关闭后才弹出编辑面板，避免多个 sheet 同时争用主窗口。
     func openGlobalSearchResult(_ target: GlobalSearchTarget) {
         guard canShowGlobalSearch, !globalSearch.isPresented else { return }
+        if target.kind == .note {
+            review.leaveCurrentEditor()
+            selection = .ideaNote(target.recordID)
+            return
+        }
         let token = UUID()
         globalSearch.navigationID = token
         let db = self.db

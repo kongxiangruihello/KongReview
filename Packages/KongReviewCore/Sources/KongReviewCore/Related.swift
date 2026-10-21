@@ -25,6 +25,8 @@ public struct RelatedIndex: Sendable {
     private var docTerms: [[String: Double]] = []           // 文档序号 → 词 → 权重（已归一化）
     private var docs: [Doc] = []
     private var indexOf: [Int64: Int] = [:]
+    /// 4.1：进入索引的词的逆文档频率（用于任意一段文字的相关查询）
+    private var idf: [String: Double] = [:]
 
     public var count: Int { docs.count }
 
@@ -81,7 +83,9 @@ public struct RelatedIndex: Sendable {
             for (t, c) in tf {
                 let d = df[t] ?? 1
                 guard d >= 2, d <= maxDF else { continue }   // 只出现一次的词也无从“相关”
-                let v = (1 + log(Double(c))) * log(n / Double(d))
+                let weight = log(n / Double(d))
+                idf[t] = weight
+                let v = (1 + log(Double(c))) * weight
                 w[t] = v
                 norm += v * v
             }
@@ -90,6 +94,31 @@ public struct RelatedIndex: Sendable {
             for (t, v) in w { postings[t, default: []].append((i, v)) }
             docTerms.append(w)
         }
+    }
+
+    /// 4.1：与任意一段文字（如札记正文）最相近的摘录，排除已引用的；只按用词相近程度（余弦相似度）
+    public func related(toText text: String, excluding: Set<Int64> = [], limit: Int = 5, minScore: Double = 0.12) -> [Hit] {
+        var tf: [String: Int] = [:]
+        for t in Self.terms(text) where idf[t] != nil { tf[t, default: 0] += 1 }
+        var query: [String: Double] = [:]
+        var norm = 0.0
+        for (t, c) in tf {
+            let v = (1 + log(Double(c))) * (idf[t] ?? 0)
+            query[t] = v
+            norm += v * v
+        }
+        norm = sqrt(norm)
+        guard norm > 0 else { return [] }
+        var scores: [Int: Double] = [:]
+        for (t, w) in query {
+            for (j, v) in postings[t] ?? [] { scores[j, default: 0] += w / norm * v }
+        }
+        var hits: [Hit] = []
+        for (j, s) in scores where s >= minScore && !excluding.contains(docs[j].id) {
+            hits.append(Hit(id: docs[j].id, score: s, sharedTags: [], sameSource: false))
+        }
+        hits.sort { $0.score != $1.score ? $0.score > $1.score : $0.id < $1.id }
+        return Array(hits.prefix(limit))
     }
 
     /// 与某条摘录最相关的若干条（余弦相似度 + 同标签 0.08/个 + 同出处 0.03）

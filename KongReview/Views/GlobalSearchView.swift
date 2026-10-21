@@ -190,6 +190,7 @@ struct GlobalSearchView: View {
         case .card: return "打开记忆卡，可查看与编辑"
         case .article: return "阅读已存档的完整网页"
         case .source: return "打开出处及其摘录"
+        case .note: return "打开札记"
         }
     }
 }

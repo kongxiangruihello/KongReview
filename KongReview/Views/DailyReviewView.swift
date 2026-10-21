@@ -421,7 +421,30 @@ struct DailyReviewView: View {
                     RichWebText(text: n, style: .note, slot: "review-note-\(card.id)")
                 }
                 .padding(.top, 18)
+                // 4.1：按语发展为札记（按语本身不变）
+                if !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button { store.developAnnotation(h) } label: {
+                        Label("发展为札记", systemImage: "lightbulb").font(.system(size: 11.5))
+                    }
+                    .buttonStyle(.plain).foregroundStyle(ReviewPalette.sub).handCursor()
+                    .help("以这段按语为底稿写一条独立的札记，并引用这条摘录")
+                    .padding(.top, 6).padding(.leading, 13)
+                }
             }
+            }
+            // 4.1：引用了这条摘录的札记——旧观点与新材料相遇
+            if let hid = h.id, let notes = store.ideaNotesCiting([hid])[hid], !notes.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "lightbulb").font(.system(size: 11)).foregroundStyle(ReviewPalette.accent)
+                    Text("你曾在札记中用过它：").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+                    ForEach(notes.prefix(3)) { ref in
+                        Button("《\(ref.title)》") { store.selection = .ideaNote(ref.id) }
+                            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(ReviewPalette.accent).handCursor()
+                            .lineLimit(1)
+                    }
+                    if notes.count > 3 { Text("等 \(notes.count) 条").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub) }
+                }
+                .padding(.top, 14)
             }
 
             if state.showDetails {
@@ -487,6 +510,9 @@ struct DailyReviewView: View {
             }
             .keyboardShortcut(key("n"))
             .disabled(editingNote)
+            CardIconButton(icon: "lightbulb", help: "记札记（Z）：新写一条引用这条摘录的札记，或加入已有札记") {
+                store.composeIdeaNote(highlight: h)
+            }
             CardIconButton(icon: "square.and.pencil", help: "就地编辑（E）；按住 ⌥ 点击打开编辑面板") {
                 if NSEvent.modifierFlags.contains(.option) { store.edit(h) } else { startInlineEdit(h) }
             }
@@ -627,6 +653,7 @@ struct DailyReviewView: View {
                     .keyboardShortcut((editingNote || store.learningExplorer != nil) ? nil : KeyboardShortcut("e", modifiers: .option))
                 Button("") { store.startCloze(for: card.highlight) }.keyboardShortcut(key("c"))
                 Button("") { state.showRelated.toggle() }.keyboardShortcut(key("r"))
+                Button("") { store.composeIdeaNote(highlight: card.highlight) }.keyboardShortcut(key("z"))
             }
             .opacity(0)
             .allowsHitTesting(false)

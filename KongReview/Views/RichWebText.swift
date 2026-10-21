@@ -16,16 +16,20 @@ struct RichWebText: View {
     var style: Style = .preview
     /// 显示位置的标识（如“回顾-原文”）：内容变了也沿用上次的高度，避免跳动
     var slot: String
+    /// 4.1：渲染后的再加工（札记正文把 [[题目]] 换成链接）
+    var linkify: ((String) -> String)? = nil
     @Environment(LibraryStore.self) private var store
 
-    init(text: String, style: Style = .preview, slot: String? = nil) {
+    init(text: String, style: Style = .preview, slot: String? = nil, linkify: ((String) -> String)? = nil) {
         self.text = text
         self.style = style
         self.slot = slot ?? style.rawValue
+        self.linkify = linkify
     }
 
     var body: some View {
-        RichWebViewRep(shell: RichWebText.shell(style: style), content: RichWebText.bodyHTML(text), key: slot, store: store)
+        let html = RichWebText.bodyHTML(text)
+        RichWebViewRep(shell: RichWebText.shell(style: style), content: linkify?(html) ?? html, key: slot, store: store)
             .frame(height: max(18, WebHeights.shared.values[slot] ?? 24))
     }
 
@@ -107,6 +111,7 @@ struct RichWebViewRep: NSViewRepresentable {
 
     func updateNSView(_ wv: PassThroughWebView, context: Context) {
         let c = context.coordinator
+        c.store = store
         c.key = key
         c.body = content
         if c.shell != shell {
@@ -132,6 +137,7 @@ struct RichWebViewRep: NSViewRepresentable {
         var shown: String?
         var ready = false
         var key = ""
+        weak var store: LibraryStore?
 
         func show(in wv: WKWebView) {
             shown = body
@@ -152,6 +158,8 @@ struct RichWebViewRep: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
             if action.navigationType == .linkActivated, let url = action.request.url {
+                // 4.1：札记链接在应用内打开
+                if store?.openIdeaNoteLink(url) == true { return .cancel }
                 NSWorkspace.shared.open(url)
                 return .cancel
             }
