@@ -24,7 +24,7 @@ struct HomeView: View {
                 DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
                                     onOpen: { store.showsDraftRecovery = true })
 
-                TodayWorkBar(summary: store.homeLearningSummary, focus: nil,
+                TodayWorkBar(summary: store.homeLearningSummary, revisit: store.revisitCounts, focus: nil,
                              onStart: { store.startTodayWork() },
                              onFocus: { store.selection = store.currentProjectID.map(SidebarItem.project) ?? .projects })
 

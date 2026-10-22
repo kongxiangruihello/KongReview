@@ -87,9 +87,9 @@ import KongReviewCore
             let selfReliance = try db.createIdeaNote(title: "士之可贵在于不待外物而自立",
                                                      body: "<p>孟子“无恒产而有恒心者，惟士为能”，与曾子“任重道远”相发明，参见 [[士由身份转为德行]]。</p>",
                                                      highlightIDs: [highlights[12].id!, highlights[10].id!], now: day(-3))
-            _ = try db.createIdeaNote(title: "士由身份转为德行",
-                                      body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
-                                      highlightIDs: [highlights[0].id!], now: day(-5))
+            let identity = try db.createIdeaNote(title: "士由身份转为德行",
+                                                 body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
+                                                 highlightIDs: [highlights[0].id!], now: day(-40))
             try db.linkToResearchProject(project.id!, kind: .note, recordId: selfReliance.id!)
             // 4.1.2：专题笔记本末尾放一个札记块
             _ = try db.insertBlocks([NotebookBlock(notebookId: notebook.id!, position: 0, kind: .note, text: selfReliance.body, noteId: selfReliance.id!)],
@@ -109,6 +109,11 @@ import KongReviewCore
             }
             let shelved = try db.createQuestion(title: "“士”与“君子”在《论语》中如何分用？", detail: "<p>待读完《论语》全书再看。</p>", now: day(-20))
             try db.setQuestionStatus(id: shelved.id!, .shelved, now: day(-15))
+            // 5.0.0：重温——“士由身份转为德行”与「常念」问题今天到期
+            try db.writer.write { d in
+                try d.execute(sql: "UPDATE idea_note_review SET dueDay = ? WHERE noteId = ?", arguments: [AppDatabase.revisitDay(now), identity.id!])
+                try d.execute(sql: "INSERT OR REPLACE INTO question_review(questionId, dueDay) VALUES (?, ?)", arguments: [pinned.id!, AppDatabase.revisitDay(now)])
+            }
             try db.recordExternalWritingTotal(projectId: project.id!, total: 3_200, day: day(-20), now: day(-20))
             try db.recordExternalWritingTotal(projectId: project.id!, total: 4_650, day: day(-2), note: "第二节初稿（Word）", now: day(-2))
             // 今日回顾：一组 10 条，已回顾 4 条；当前第 5 条为“重读原文”

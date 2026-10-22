@@ -444,6 +444,10 @@ final class AppDatabase {
         m.registerMigration("v19-notebook-note-blocks") { db in
             try AppDatabase.installNotebookNoteBlocks(in: db)
         }
+        // 5.0.0：重温——札记排程与修订历史、常念问题轮流、重温记录
+        m.registerMigration("v20-revisit") { db in
+            try AppDatabase.installRevisit(in: db)
+        }
         return m
     }
 }

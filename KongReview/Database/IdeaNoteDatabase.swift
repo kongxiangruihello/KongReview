@@ -137,6 +137,8 @@ extension AppDatabase {
         var note = IdeaNote(title: clean, body: body, createdAt: now, updatedAt: now)
         try note.insert(db)
         guard let id = note.id else { return note }
+        // 5.0.0：第一次重温在 7 天后（v20 之前的结构里没有排程表，如完整备份恢复的中途）
+        if try db.tableExists("idea_note_review") { try scheduleNewIdeaNote(db, id: id, now: now) }
         for (i, h) in highlightIDs.enumerated() {
             try db.execute(sql: "INSERT OR IGNORE INTO idea_note_highlight(noteId, highlightId, position, addedAt) VALUES (?, ?, ?, ?)",
                            arguments: [id, h, Double(i + 1), now])
@@ -154,6 +156,8 @@ extension AppDatabase {
         return try writer.write { db in
             guard var note = try IdeaNote.fetchOne(db, key: id) else { throw IdeaNoteError.missing }
             let oldTitle = note.title
+            // 5.0.0：改了题目或正文就记下上一版，重温从头算
+            try Self.noteIdeaNoteRevised(db, before: note, title: clean, body: body, now: now)
             let d = WritingCount.delta(from: WritingCount.count(html: note.body), to: WritingCount.count(html: body))
             note.title = clean
             note.body = body

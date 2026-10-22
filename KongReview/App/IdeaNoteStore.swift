@@ -24,6 +24,7 @@ extension LibraryStore {
 
     private func afterIdeaNoteChange() {
         refreshIdeaNotes()
+        refreshRevisit()
         // 4.1.2：打开的笔记本里的札记块显示最新正文；札记也同步到 Obsidian
         refreshNotebookHighlights()
         scheduleObsidianSync()

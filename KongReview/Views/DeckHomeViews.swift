@@ -204,6 +204,12 @@ struct DeckHomeView: View {
                     }
                 }
                 HStack(spacing: 10) {
+                    if remaining == 0 && store.revisitCounts.left > 0 {
+                        // 5.0.0：记忆卡学完，接着重温
+                        PillButton(icon: "arrow.counterclockwise.circle", title: "今日功课第三步：重温 · \(store.revisitCounts.left)", style: .primary) {
+                            store.openRevisit()
+                        }
+                    }
                     if let d = suggestedDeck {
                         PillButton(icon: "play.fill", title: "开始复习：\(DeckOverview.split(d.name).leaf)", style: .primary) {
                             store.startStudy(deck: d.name)

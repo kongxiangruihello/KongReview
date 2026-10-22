@@ -28,6 +28,8 @@ enum SidebarItem: Hashable {
     /// 4.1.1：问题簿与问题页
     case questionBook
     case question(Int64)
+    /// 5.0.0：重温（今日功课第三步）
+    case revisit
     case tag(String)
 }
 
@@ -89,6 +91,9 @@ final class LibraryStore {
     var questionBookFilter = QuestionFilter()
     var questionBookPage = 0
     var questionBookAnchor: Int64?
+    /// 5.0.0：今天剩下的重温（首页功课、侧栏计数）与改动计数
+    var revisitCounts = RevisitCounts()
+    var revisitRevision = 0
     var notebookQuoteCounts: [Int64: Int] = [:]
     var notebookState = NotebookState()
     /// 1.3：新建笔记本对话框（输入标题）；附带要放进去的摘录
@@ -299,6 +304,7 @@ final class LibraryStore {
             researchProjects = try db.researchProjects()
             ideaNoteCount = try db.ideaNoteCount()
             openQuestionCount = try db.openQuestionCount()
+            refreshRevisit()
             refreshLearningFocus()
             revision += 1
             refreshDerived()

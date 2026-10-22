@@ -28,6 +28,7 @@ extension LibraryStore {
 
     private func afterQuestionChange() {
         refreshQuestions()
+        refreshRevisit()
         // 项目页“未解问题”、专题页“问题与解答”、复盘引导都读问题簿
         researchProjectRevision += 1
         journeyRevision += 1

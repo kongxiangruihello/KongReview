@@ -34,23 +34,26 @@ extension LibraryStore {
         return notebooksChoices + sourceChoices
     }
 
-    // MARK: 今日功课：先回顾，再记忆卡
+    // MARK: 今日功课：先回顾，再记忆卡，最后重温（5.0.0）
 
-    /// 回顾约 30 秒一条；记忆卡沿用牌组页的估算
-    nonisolated static func todayWorkMinutes(reviewPending: Int, cards: StudyQueue.Counts) -> Int {
-        let seconds = reviewPending * 30 + DeckOverview.estimatedMinutes(cards) * 60
+    /// 回顾约 30 秒一条；记忆卡沿用牌组页的估算；重温约 1 分钟一张
+    nonisolated static func todayWorkMinutes(reviewPending: Int, cards: StudyQueue.Counts, revisit: Int = 0) -> Int {
+        let seconds = reviewPending * 30 + DeckOverview.estimatedMinutes(cards) * 60 + revisit * 60
         return seconds == 0 ? 0 : max(1, Int((Double(seconds) / 60).rounded()))
     }
 
-    /// 按顺序进入今天还没完成的功课：先回顾，回顾完成后进入记忆卡（两个以上牌组有卡时混合学习）
+    /// 按顺序进入今天还没完成的功课：先回顾，回顾完成后进入记忆卡（两个以上牌组有卡时混合学习），最后重温
     func startTodayWork() {
         checkDayChange()
         refreshDerived()
+        refreshRevisit()
         if homeLearningSummary.reviewPendingCount > 0 {
             openTodayReview()
         } else if todayCardPending.total > 0 {
             if deckSummaryCache.filter({ $0.counts.total > 0 }).count > 1 { startStudyAllDecks() } else { startSuggestedStudy() }
             selection = .cards
+        } else if revisitCounts.left > 0 {
+            openRevisit()
         } else {
             openTodayReview()
         }

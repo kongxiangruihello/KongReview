@@ -538,7 +538,9 @@ struct StudyView: View {
                                            globalStudiedCards: store.learningActivitySummary.today.cards,
                                            globalRatingCount: store.learningActivitySummary.today.cardRatings,
                                            onReturn: { store.openCardsHome() },
-                                           onResume: { store.nextCard(); store.refreshDerived() })
+                                           onResume: { store.nextCard(); store.refreshDerived() },
+                                           revisitLeft: store.revisitCounts.left,
+                                           onRevisit: { store.openRevisit() })
                     .padding(24)
                     .frame(maxWidth: .infinity)
             } else {

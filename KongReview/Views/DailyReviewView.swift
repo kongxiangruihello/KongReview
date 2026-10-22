@@ -330,10 +330,15 @@ struct DailyReviewView: View {
                 else { store.startSuggestedStudy() }
             }
         }
+        let revisitLeft = store.revisitCounts.left
+        if due == 0 && revisitLeft > 0 {
+            // 5.0.0：没有待学的记忆卡时，接着重温札记与常念的问题
+            PillButton(icon: "arrow.counterclockwise.circle", title: "今日功课第三步：重温 · \(revisitLeft)", style: .primary) { store.openRevisit() }
+        }
         if !state.cards.isEmpty {
             PillButton(title: "从头再看") { state.position = 0; persist() }
         }
-        PillButton(title: "再抽一组", style: due > 0 ? .normal : .primary) { loadSession(forceNew: true) }
+        PillButton(title: "再抽一组", style: due > 0 || revisitLeft > 0 ? .normal : .primary) { loadSession(forceNew: true) }
     }
 
     /// 今日一句：今天这组里收藏的那条；没有收藏就按日期固定取一条（同一天总是同一句）
