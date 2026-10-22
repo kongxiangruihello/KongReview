@@ -210,6 +210,13 @@ struct SourceManagerView: View {
                 .width(70)
             TableColumn("摘录", value: \.count) { r in Text("\(r.count)").monospacedDigit() }
                 .width(60)
+            // 4.2.0：书架上的状态与进度
+            TableColumn("状态") { r in
+                if let st = store.readings[r.id] { Text(st.status.title).foregroundStyle(st.status.color) } else { Text("") }
+            }
+            .width(50)
+            TableColumn("进度") { r in Text(store.readings[r.id]?.progressText ?? "").foregroundStyle(.secondary).monospacedDigit().lineLimit(1) }
+                .width(min: 70, ideal: 100)
             TableColumn("添加时间", value: \.createdAt) { r in
                 Text(r.createdAt.formatted(date: .numeric, time: .omitted))
             }
@@ -349,6 +356,14 @@ struct SourceManagerView: View {
             }
             Button(ids.count == 1 ? "生成参考文献条目…" : "生成参考文献表（\(ids.count) 种）…") {
                 store.showBibliography(sourceIDs: ids, title: "出处管理")
+            }
+            Menu("书架") {
+                if ids.count == 1 { ReadingStatusMenuItems(sourceId: ids[0]) }
+                else {
+                    ForEach([SourceReading.Status.want, .reading, .finished]) { st in
+                        Button("这 \(ids.count) 个都设为\(st.title)") { for id in ids { store.setReadingStatus(id, st) } }
+                    }
+                }
             }
             Menu("类型改为") {
                 ForEach(SourceKind.allCases, id: \.self) { k in

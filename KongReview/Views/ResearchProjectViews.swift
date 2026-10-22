@@ -305,6 +305,11 @@ struct ResearchProjectView: View {
                         HStack(spacing: 8) {
                             Image(systemName: link.kind == .notebook ? "text.book.closed" : (link.kind == .note ? "lightbulb" : "book")).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).frame(width: 16)
                             Text(link.title.isEmpty ? "（已删除）" : link.title).font(.system(size: 13)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+                            // 4.2.0：出处在书架上的状态与进度
+                            if link.kind == .source, let r = store.readings[link.recordId] {
+                                Text([r.status.title, r.status == .reading ? r.progressText : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.system(size: 11.5)).foregroundStyle(r.status.color).lineLimit(1)
+                            }
                             Spacer(minLength: 6)
                             Text("\(link.highlightCount) 条").font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub)
                         }

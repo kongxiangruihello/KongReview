@@ -444,6 +444,10 @@ final class AppDatabase {
         m.registerMigration("v19-notebook-note-blocks") { db in
             try AppDatabase.installNotebookNoteBlocks(in: db)
         }
+        // 4.2.0：书目状态、读书进度与读书记录
+        m.registerMigration("v20-reading") { db in
+            try AppDatabase.installReading(in: db)
+        }
         return m
     }
 }
@@ -466,13 +470,19 @@ extension AppDatabase {
             var h = highlight
             h.updatedAt = Date()
             try h.save(db)
+            // 4.2.0：页码超过书架上这本书的进度时推进进度
+            try Self.advanceReading(db, for: h, now: h.updatedAt)
             return h
         }
     }
 
     func save(_ highlights: [Highlight]) throws {
         try writer.write { db in
-            for var h in highlights { try h.save(db) }
+            let now = Date()
+            for var h in highlights {
+                try h.save(db)
+                try Self.advanceReading(db, for: h, now: now)
+            }
         }
     }
 

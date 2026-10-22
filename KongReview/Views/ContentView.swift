@@ -45,6 +45,8 @@ struct ContentView: View {
         .sheet(item: $store.researchProjectEditor) { project in ResearchProjectEditor(project: project).environment(store) }
         .sheet(item: $store.ideaNoteComposer) { composer in IdeaNoteComposerSheet(composer: composer).environment(store) }
         .sheet(item: $store.questionCreator) { request in QuestionCreateSheet(request: request).environment(store) }
+        .sheet(item: $store.readingEditor) { request in ReadingEditSheet(request: request).environment(store) }
+        .sheet(item: $store.readingLogRequest) { request in ReadingLogSheet(request: request).environment(store) }
         .sheet(item: $store.questionAttach) { request in QuestionAttachSheet(request: request) { store.questionAttach = nil }.environment(store) }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
@@ -222,6 +224,8 @@ struct ContentView: View {
             IdeaNoteView(noteId: id).id(id)
         case .questionBook:
             QuestionBookView()
+        case .bookshelf:
+            BookshelfView()
         case .question(let id):
             QuestionView(questionId: id).id(id)
         case .source(let id):
@@ -327,6 +331,14 @@ struct SidebarView: View {
             }
 
             Section(isExpanded: store.sidebarGroupBinding("reading")) {
+                // 4.2.0：书架——行尾为在读本数
+                HStack {
+                    Label("书架", systemImage: "books.vertical.fill")
+                    Spacer()
+                    if store.readingCount > 0 { SidebarCount(store.readingCount) }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.bookshelf)
                 Label("出处管理", systemImage: "books.vertical")
                     .sidebarMenuRow()
                     .tag(SidebarItem.sourceManager)

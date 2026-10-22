@@ -28,6 +28,8 @@ enum SidebarItem: Hashable {
     /// 4.1.1：问题簿与问题页
     case questionBook
     case question(Int64)
+    /// 4.2.0：书架
+    case bookshelf
     case tag(String)
 }
 
@@ -89,6 +91,11 @@ final class LibraryStore {
     var questionBookFilter = QuestionFilter()
     var questionBookPage = 0
     var questionBookAnchor: Int64?
+    /// 4.2.0：书架上的阅读状态（出处 id → 状态与进度）、改动计数、编辑进度与记一笔面板
+    var readings: [Int64: SourceReading] = [:]
+    var readingRevision = 0
+    var readingEditor: ReadingEditRequest?
+    var readingLogRequest: ReadingLogRequest?
     var notebookQuoteCounts: [Int64: Int] = [:]
     var notebookState = NotebookState()
     /// 1.3：新建笔记本对话框（输入标题）；附带要放进去的摘录
@@ -299,6 +306,7 @@ final class LibraryStore {
             researchProjects = try db.researchProjects()
             ideaNoteCount = try db.ideaNoteCount()
             openQuestionCount = try db.openQuestionCount()
+            readings = try db.readingStatuses()
             refreshLearningFocus()
             revision += 1
             refreshDerived()
@@ -633,6 +641,8 @@ final class LibraryStore {
 
     func revisionBump() {
         revision += 1
+        // 4.2.0：录摘录可能推动了书架上的进度
+        if let latest = try? db.readingStatuses(), latest != readings { readings = latest; readingRevision += 1 }
         refreshDerived()
     }
 

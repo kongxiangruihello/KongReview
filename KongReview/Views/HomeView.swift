@@ -31,6 +31,9 @@ struct HomeView: View {
                 // 4.0：当前项目——阶段、截止、下一步、未解问题、本周写作
                 CurrentProjectCard()
 
+                // 4.2.0：在读的书
+                HomeReadingCard()
+
                 HomeLearningDashboard(summary: store.homeLearningSummary,
                                       quote: store.dailyReviewQuote(),
                                       onReview: { store.openTodayReview() },

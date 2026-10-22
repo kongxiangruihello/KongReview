@@ -36,6 +36,10 @@ struct SourcePageHeader: View {
                     if stats.favorites > 0 { stat("\(stats.favorites)", "条收藏") }
                 }
                 .padding(.top, 2)
+                // 4.2.0：阅读状态、进度、记一笔
+                SourceReadingBar(sourceId: sourceId,
+                                 chapterTotal: source?.isClassic == true ? ((try? store.db.chapterProgress(sourceId)) ?? []).count : nil)
+                    .padding(.top, 2)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 8) {

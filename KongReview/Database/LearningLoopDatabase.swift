@@ -39,6 +39,8 @@ struct ReviewBias: Sendable, Equatable {
 
     /// 焦点摘录加权倍数、熟记卡片对应摘录的降权倍数
     static let focusBoost = 3.0
+    /// 4.2.0：读完不到 7 天的书
+    static let finishedBookBoost = 2.0
     static let matureDamping = 0.3
     /// 熟记：卡片间隔 ≥ 21 天（与牌组熟练度条一致）
     static let matureDays = DeckMaturity.matureDays
@@ -140,6 +142,14 @@ extension AppDatabase {
             var bias = ReviewBias()
             if let focus {
                 for id in try Self.focusHighlightIDs(db, focus) { bias.multipliers[id] = ReviewBias.focusBoost }
+            }
+            // 4.2.0：读完不到 7 天的书，其摘录加权（低于当前项目），便于趁热把全书理一遍
+            let finished = try Self.recentlyFinishedSourceIDs(db, now: now)
+            if !finished.isEmpty {
+                let marks = Array(repeating: "?", count: finished.count).joined(separator: ",")
+                for id in try Int64.fetchAll(db, sql: "SELECT id FROM highlight WHERE deletedAt IS NULL AND sourceId IN (\(marks))", arguments: StatementArguments(finished)) {
+                    bias.multipliers[id] = max(bias.multipliers[id] ?? 1, ReviewBias.finishedBookBoost)
+                }
             }
             let mature = try Int64.fetchAll(db, sql: """
                 SELECT DISTINCT highlightId FROM card
