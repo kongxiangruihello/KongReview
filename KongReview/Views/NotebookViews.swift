@@ -147,6 +147,10 @@ struct NotebookView: View {
             }
         }
         .sheet(item: Bindable(st).picker) { _ in NotebookPickerView() }
+        // 4.1.2：插入札记
+        .sheet(item: Bindable(st).notePicker) { p in
+            NotebookNotePickerView(picker: p).environment(store)
+        }
     }
 
     private var header: some View {
@@ -167,7 +171,7 @@ struct NotebookView: View {
                     if st.titleDraft == t { store.renameNotebook(notebookId, to: t) }
                 }
             }
-            Text("把摘录与自己的文字编排成一篇长文。两块之间点“＋”插入文字、小标题或摘录；拖动左侧把手或用 ↑↓ 调整顺序。导出 Word 时摘录出处自动成为脚注。")
+            Text("把摘录与自己的文字编排成一篇长文。两块之间点“＋”插入文字、小标题、摘录或札记；拖动左侧把手或用 ↑↓ 调整顺序。导出 Word 时摘录出处自动成为脚注。")
                 .font(.system(size: 12))
                 .foregroundStyle(ReviewPalette.sub)
                 .fixedSize(horizontal: false, vertical: true)
@@ -185,6 +189,7 @@ struct NotebookView: View {
                 PillButton(icon: "text.quote", title: "插入摘录…") { store.openNotebookPicker(after: nil) }
                 PillButton(icon: "text.alignleft", title: "写一段文字") { store.insertNotebookBlock(.text, after: nil) }
                 PillButton(icon: "textformat.size", title: "小标题") { store.insertNotebookBlock(.heading, after: nil) }
+                PillButton(icon: "lightbulb", title: "札记…") { store.notebookState.notePicker = NotebookNotePicker(after: nil) }
             }
         }
         .frame(maxWidth: .infinity)
@@ -207,6 +212,7 @@ struct InsertBar: View {
                 Button("文字") { store.insertNotebookBlock(.text, after: after, atStart: atStart) }
                 Button("小标题") { store.insertNotebookBlock(.heading, after: after, atStart: atStart) }
                 Button("摘录…") { store.openNotebookPicker(after: after, atStart: atStart) }
+                Button("札记…") { store.notebookState.notePicker = NotebookNotePicker(after: after, atStart: atStart) }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .bold))
@@ -221,7 +227,7 @@ struct InsertBar: View {
             .fixedSize()
             .handCursor()
             .opacity(hovered ? 1 : 0)
-            .help("在这里插入文字、小标题或摘录")
+            .help("在这里插入文字、小标题、摘录或札记")
             Rectangle().fill(hovered ? ReviewPalette.accent.opacity(0.35) : Color.clear).frame(height: 1)
         }
         .frame(height: 22)
@@ -281,9 +287,12 @@ struct NotebookBlockRow: View {
     }
 
     private var dragPreview: String {
-        let t = block.kind == .highlight
-            ? (block.highlightId.flatMap { store.notebookState.highlights[$0]?.text } ?? block.text)
-            : block.text
+        let t: String
+        switch block.kind {
+        case .highlight: t = block.highlightId.flatMap { store.notebookState.highlights[$0]?.text } ?? block.text
+        case .note: t = block.noteId.flatMap { store.notebookState.ideaNotes[$0]?.title } ?? block.text
+        case .text, .heading: t = block.text
+        }
         return String(NotebookExporter.plain(t).prefix(40))
     }
 
@@ -308,7 +317,43 @@ struct NotebookBlockRow: View {
                minHeight: 44, focus: block.text.isEmpty, slot: "nb-\(id)")
         case .highlight:
             quote
+        case .note:
+            ideaNote
         }
+    }
+
+    /// 4.1.2：札记块——显示札记的最新正文；改正文到札记页去改，各处同步
+    private var ideaNote: some View {
+        let n = block.noteId.flatMap { store.notebookState.ideaNotes[$0] }
+        let body = n?.body ?? block.text
+        let cites = (n?.highlightIDs ?? []).compactMap { store.notebookState.highlights[$0] }
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "lightbulb").font(.system(size: 12)).foregroundStyle(ReviewPalette.accent).padding(.top, 3)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(n.map { "札记《\($0.title)》" } ?? "札记已彻底删除（保留加入时的正文）")
+                        .font(.system(size: 11.5, weight: .medium)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+                    if n?.deleted == true {
+                        Text("札记在“已删除”中").font(.system(size: 11)).foregroundStyle(ReviewPalette.pending)
+                    }
+                    Spacer(minLength: 4)
+                    if let id = n?.id, n?.deleted == false {
+                        Button("打开札记") { store.selection = .ideaNote(id) }
+                            .buttonStyle(.link).font(.system(size: 11.5)).handCursor()
+                            .help("正文在札记页修改，这里随之更新")
+                    }
+                }
+                RichWebText(text: WikiLinks.plain(body), style: .preview, slot: "nb-idea-\(block.id ?? 0)")
+                if !cites.isEmpty {
+                    Text("引用摘录 \(cites.count) 条，导出时出处作脚注：" + cites.prefix(3).compactMap { h in store.source(for: h).map { "《\($0.title)》" } }.joined(separator: ""))
+                        .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background(ReviewPalette.soft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(ReviewPalette.accent.opacity(0.25)))
     }
 
     /// 有本文批注，或刚点了“＋ 本文批注”
@@ -370,6 +415,55 @@ struct NotebookBlockRow: View {
         .padding(.horizontal, 14)
         .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(ReviewPalette.hair))
+    }
+}
+
+/// 4.1.2：插入札记——搜索札记题目与正文，点选一条插入
+struct NotebookNotePickerView: View {
+    @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let picker: NotebookNotePicker
+    @State private var query = ""
+    @State private var items: [IdeaNoteSummary] = []
+
+    var body: some View {
+        let used = Set(store.notebookState.blocks.compactMap(\.noteId))
+        VStack(alignment: .leading, spacing: 12) {
+            Text("插入札记").font(.title2.bold())
+            Text("札记块显示札记的最新正文；导出 Word 时按普通段落输出，所引摘录的出处作脚注。").font(.caption).foregroundStyle(.secondary)
+            TextField("搜索札记题目与正文（繁简通搜）", text: $query).textFieldStyle(.roundedBorder)
+            List(items) { n in
+                Button {
+                    store.insertNotebookIdeaNote(n.id, after: picker.after, atStart: picker.atStart)
+                    close()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(n.title).font(.system(size: 13.5, weight: .medium)).lineLimit(2)
+                        Text(["引用摘录 \(n.highlightCount)", "修改于 \(n.updatedAt.formatted(.dateTime.month().day()))", used.contains(n.id) ? "本笔记本已收入" : ""]
+                                .filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain).handCursor()
+            }
+            .frame(minHeight: 260)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) { close() }.keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 520, idealWidth: 600, minHeight: 440)
+        .task(id: query) {
+            try? await Task.sleep(nanoseconds: query.isEmpty ? 0 : 200_000_000)
+            guard !Task.isCancelled else { return }
+            items = Array(((try? await store.db.ideaNoteSummaries(query: query)) ?? []).prefix(80))
+        }
+    }
+
+    private func close() {
+        store.notebookState.notePicker = nil
+        dismiss()
     }
 }
 

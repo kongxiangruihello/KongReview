@@ -212,8 +212,9 @@ extension LibraryStore {
     func notebookCitationCheck(export: CitationCheckRequest.Export? = nil) -> CitationCheckRequest? {
         flushNotebookSaves()
         let st = notebookState
-        let items: [CitationCheck.Item] = st.blocks.compactMap { b in
-            guard b.kind == .highlight, let hid = b.highlightId, let h = st.highlights[hid] else { return nil }
+        // 4.1.2：札记块所引的摘录也核对（导出时它们是脚注）
+        let items: [CitationCheck.Item] = st.quotedHighlightIDs.compactMap { hid in
+            guard let h = st.highlights[hid] else { return nil }
             // 2.1：改用别的版本且有该版页码时，按那个版本核对
             if let c = editionChoice(for: h), let loc = c.location {
                 var alt = h

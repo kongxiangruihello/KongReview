@@ -23,6 +23,8 @@ struct RichEditor: View {
     @State private var toolsMode: EditorToolMode?
     @State private var localHandle = RichEditorHandle()
     var onAttribution: (() -> Void)? = nil
+    /// 4.1.2：札记编辑器——输入 [[ 后列出札记题目（只在文字编辑模式下）
+    var wikiCompletion: ((String) -> [WikiSuggestion])? = nil
     @State private var measuredHeight: CGFloat = 70
     @State private var showsSource = false
     @State private var switching = false
@@ -83,7 +85,7 @@ struct RichEditor: View {
                 VisualEditorRep(text:$text,mode:.card,font:font,placeholder:placeholder,toolbar:toolbar,
                     autoHeight:autoHeight,focus:focus,slot:"visual-" + slot,
                     onSubmit:onSubmit,onCancel:onCancel,onTab:onTab,handle:handle ?? localHandle,
-                    formatting:formatting,fieldName:fieldName,store:store)
+                    formatting:formatting,fieldName:fieldName,store:store,wikiCompletion:wikiCompletion)
                     .frame(minHeight:contentMinimum)
                     .frame(height:autoHeight ? max(contentMinimum,WebHeights.shared.values["visual-" + slot] ?? contentMinimum) : nil)
             }

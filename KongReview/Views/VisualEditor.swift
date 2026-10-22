@@ -25,6 +25,7 @@ struct VisualEditorRep: NSViewRepresentable {
     let formatting: CardFormattingState?
     let fieldName: String
     let store: LibraryStore?
+    var wikiCompletion: ((String) -> [WikiSuggestion])? = nil
     @Environment(\.isEnabled) private var enabled
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -38,6 +39,10 @@ struct VisualEditorRep: NSViewRepresentable {
         config.userContentController.addUserScript(WKUserScript(source:EditorIntakeScript.source,injectionTime:.atDocumentEnd,forMainFrameOnly:true))
         if formatting != nil {
             config.userContentController.addUserScript(WKUserScript(source: CardFormattingScript.source,
+                injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
+        if wikiCompletion != nil {
+            config.userContentController.addUserScript(WKUserScript(source: WikiCompletionScript.source,
                 injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         }
         LocalSchemeHandler.register(on: config, store: store)
@@ -170,6 +175,11 @@ struct VisualEditorRep: NSViewRepresentable {
                 p.onTab?(type == "backtab")
             case "open":
                 if let s = body["value"] as? String, let url = URL(string: s) { NSWorkspace.shared.open(url) }
+            case "wiki-query":
+                guard let provider = p.wikiCompletion, let q = body["value"] as? String,
+                      let n = (body["seq"] as? NSNumber)?.intValue,
+                      let data = try? JSONEncoder().encode(provider(q)), let json = String(data: data, encoding: .utf8) else { return }
+                webView?.evaluateJavaScript("krWikiShow(\(json), \(n));", completionHandler: nil)
             default:
                 break
             }

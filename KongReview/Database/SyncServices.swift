@@ -67,8 +67,42 @@ enum ObsidianSync {
             try write(MarkdownExporter.export(source: Source(title: "未归类"), highlights: Array(unsorted), exportedAt: stamp, style: style),
                       name: "未归类.md")
         }
+        try syncIdeaNotes(db: db, to: folder.appendingPathComponent(ideaNoteFolder, isDirectory: true), style: style, report: &report)
         UserDefaults.standard.set(Date(), forKey: lastSyncKey)
         return report
+    }
+
+    /// 4.1.2：札记写在“札记”子文件夹里，一条一个文件，文件名即题目
+    static let ideaNoteFolder = "札记"
+
+    /// 写出全部札记；改了题目或删除的札记，其旧文件（带 kongreview-note 标记的）一并清理，别的文件不动
+    static func syncIdeaNotes(db: AppDatabase, to folder: URL, style: CitationStyle, report: inout Report) throws {
+        let fm = FileManager.default
+        let notes = try db.ideaNotesForObsidian(style: style)
+        let existing = ((try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "md" }
+        guard !notes.isEmpty || !existing.isEmpty else { return }
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stems = IdeaNoteMarkdown.fileStems(for: notes)
+        var byKey: [String: String] = [:]
+        for n in notes.sorted(by: { $0.updatedAt > $1.updatedAt }) where byKey[WikiLinks.key(n.title)] == nil {
+            byKey[WikiLinks.key(n.title)] = stems[n.id]
+        }
+        var written = Set<String>()
+        for n in notes {
+            guard let stem = stems[n.id] else { continue }
+            let name = stem + ".md"
+            written.insert(name)
+            let text = IdeaNoteMarkdown.markdown(n) { byKey[WikiLinks.key($0)] }
+            let url = folder.appendingPathComponent(name)
+            if let old = try? String(contentsOf: url, encoding: .utf8), old == text { report.unchanged += 1; continue }
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            report.written += 1
+        }
+        for url in existing where !written.contains(url.lastPathComponent) {
+            if let text = try? String(contentsOf: url, encoding: .utf8), IdeaNoteMarkdown.isGenerated(text) {
+                try? fm.removeItem(at: url)
+            }
+        }
     }
 }
 

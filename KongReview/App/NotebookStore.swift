@@ -10,8 +10,12 @@ import KongReviewCore
 final class NotebookState {
     var notebookId: Int64?
     var blocks: [NotebookBlock] = []
-    /// 块里引用的摘录（最新文字）
+    /// 块里引用的摘录（最新文字）；4.1.2 起也包括札记块所引的摘录（导出脚注、引文核对、参考文献用）
     var highlights: [Int64: Highlight] = [:]
+    /// 4.1.2：札记块引用的札记（最新题目与正文）
+    var ideaNotes: [Int64: NotebookIdeaNote] = [:]
+    /// 4.1.2：插入札记面板（插到哪一块之后）
+    var notePicker: NotebookNotePicker?
     var titleDraft = ""
     /// 插入摘录面板
     var picker: NotebookPicker?
@@ -47,6 +51,28 @@ final class NotebookState {
     var editingNote: Int64?
 
     var quoteCount: Int { blocks.filter { $0.kind == .highlight }.count }
+
+    /// 摘录块与札记块所引的全部摘录（按出现顺序，不重复）
+    var quotedHighlightIDs: [Int64] {
+        var seen = Set<Int64>(), out: [Int64] = []
+        for b in blocks {
+            let ids: [Int64]
+            switch b.kind {
+            case .highlight: ids = b.highlightId.map { [$0] } ?? []
+            case .note: ids = b.noteId.flatMap { ideaNotes[$0]?.highlightIDs } ?? []
+            case .text, .heading: ids = []
+            }
+            for id in ids where seen.insert(id).inserted { out.append(id) }
+        }
+        return out
+    }
+}
+
+/// 4.1.2：插入札记面板
+struct NotebookNotePicker: Identifiable {
+    let id = UUID()
+    var after: Int64?
+    var atStart = false
 }
 
 /// 插入摘录面板：搜索、勾选、插到某块之后
@@ -146,10 +172,12 @@ extension LibraryStore {
         st.notebookId = id
         st.titleDraft = notebooks.first { $0.id == id }?.title ?? ""
         st.blocks = (try? db.notebookBlocks(id)) ?? []
-        let ids = st.blocks.compactMap(\.highlightId)
+        st.ideaNotes = (try? db.notebookIdeaNotes(ids: st.blocks.compactMap(\.noteId))) ?? [:]
+        let ids = st.quotedHighlightIDs
         let hs = (try? db.highlights(ids: ids)) ?? []
         st.highlights = Dictionary(hs.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
         st.picker = nil
+        st.notePicker = nil
         st.editingNote = nil
         st.exportEditions = NotebookEditionChoice.load(id)
         st.editionPages = (try? db.editionPages(highlightIds: ids)) ?? [:]
@@ -159,7 +187,8 @@ extension LibraryStore {
     func refreshNotebookHighlights() {
         let st = notebookState
         guard st.notebookId != nil else { return }
-        let ids = st.blocks.compactMap(\.highlightId)
+        st.ideaNotes = (try? db.notebookIdeaNotes(ids: st.blocks.compactMap(\.noteId))) ?? [:]
+        let ids = st.quotedHighlightIDs
         let hs = (try? db.highlights(ids: ids)) ?? []
         st.highlights = Dictionary(hs.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
         st.editionPages = (try? db.editionPages(highlightIds: ids)) ?? [:]
@@ -178,6 +207,21 @@ extension LibraryStore {
         } catch {
             report(error)
             return nil
+        }
+    }
+
+    /// 4.1.2：插入札记块（显示札记的最新正文；加入时的正文留作底稿）
+    func insertNotebookIdeaNote(_ noteId: Int64, after: Int64?, atStart: Bool = false) {
+        let st = notebookState
+        guard let nid = st.notebookId, !fullBackupBusy else { return }
+        do {
+            guard let note = try db.ideaNote(id: noteId) else { return }
+            try db.insertBlocks([NotebookBlock(notebookId: nid, position: 0, kind: .note, text: note.body, noteId: noteId)],
+                                into: nid, after: after, atStart: atStart)
+            st.blocks = (try? db.notebookBlocks(nid)) ?? st.blocks
+            refreshNotebookHighlights()
+        } catch {
+            report(error)
         }
     }
 
@@ -331,6 +375,12 @@ extension LibraryStore {
                     out.append(NotebookPiece(.comment(n)))
                 }
                 return out
+            case .note:
+                // 4.1.2：札记按普通段落输出，[[链接]] 只留文字；所引摘录的出处作脚注
+                let n = b.noteId.flatMap { st.ideaNotes[$0] }
+                let body = WikiLinks.plain(n?.body ?? b.text)
+                let cites = (n?.highlightIDs ?? []).compactMap { st.highlights[$0] }.map { notebookCitation(for: $0) }.filter { !$0.isEmpty }
+                return [NotebookPiece(.essay(body, cites: cites))]
             }
         }
     }
@@ -338,9 +388,9 @@ extension LibraryStore {
     func notebookBibliography() -> [String] {
         let st = notebookState
         var ids: [Int64] = []
-        for b in st.blocks {
-            // 2.1：参考文献表也按导出所用的版本
-            if let hid = b.highlightId, let h = st.highlights[hid],
+        for hid in st.quotedHighlightIDs {
+            // 2.1：参考文献表也按导出所用的版本；4.1.2：含札记块所引的摘录
+            if let h = st.highlights[hid],
                let sid = editionChoice(for: h).flatMap({ $0.location == nil ? nil : $0.source.id }) ?? h.sourceId,
                !ids.contains(sid) { ids.append(sid) }
         }

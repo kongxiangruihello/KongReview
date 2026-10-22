@@ -95,7 +95,7 @@ extension LearningMaterialExport {
         for d in notes {
             lines += ["## " + d.note.title, "",
                       "写于 \(f.string(from: d.note.createdAt))　修改于 \(f.string(from: d.note.updatedAt))", ""]
-            let body = Markdown.markdown(fromHTMLFragments: d.note.body).trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = NotebookExporter.essayMarkdown(d.note.body).trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty { lines += [body, ""] }
             if !d.highlights.isEmpty {
                 lines += ["引用摘录：", ""]

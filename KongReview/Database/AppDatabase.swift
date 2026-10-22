@@ -91,6 +91,9 @@ final class AppDatabase {
     }
 
     /// 恢复备份后补跑迁移（备份可能来自旧版本）
+    /// 4.1.2：已登记的迁移（按登记先后），完整备份恢复时据此判断备份来自哪一版
+    var migrationIdentifiers: [String] { migrator.migrations }
+
     func migrateIfNeeded() throws {
         try migrator.migrate(writer)
         _ = try convertLegacyTopicQuestions()
@@ -436,6 +439,10 @@ final class AppDatabase {
         // 4.1.1：问题簿；3.4 的专题问题与草稿转入
         m.registerMigration("v18-question-book") { db in
             try AppDatabase.installQuestionBook(in: db)
+        }
+        // 4.1.2：专题笔记本中的札记块
+        m.registerMigration("v19-notebook-note-blocks") { db in
+            try AppDatabase.installNotebookNoteBlocks(in: db)
         }
         return m
     }

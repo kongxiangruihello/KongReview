@@ -100,6 +100,19 @@ public enum NotebookHTML {
                 for (k, pr) in NotebookExporter.paragraphs(fromMarkdown: c).enumerated() {
                     body.append("<p class=\"comment\">\(k == 0 ? "<b>按：</b>" : "")\(inline(pr.spans))</p>")
                 }
+            case .essay(let t, let cites):
+                let paras = NotebookExporter.essayParagraphs(t)
+                for (k, pr) in paras.enumerated() {
+                    var s = inline(pr.spans)
+                    if k == paras.count - 1, !cites.isEmpty {
+                        if options.footnotes {
+                            for c in cites { notes.append(c); s += "<sup class=\"ref\">\(circled(notes.count))</sup>" }
+                        } else {
+                            s += "<span class=\"cite\">（\(esc(cites.joined(separator: "；")))）</span>"
+                        }
+                    }
+                    body.append("<p>\(s)</p>")
+                }
             }
         }
         flushNotes()
