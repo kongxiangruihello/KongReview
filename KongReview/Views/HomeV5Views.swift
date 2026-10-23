@@ -12,8 +12,11 @@ struct PinnedQuestionsHomeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Label("常念的问题", systemImage: "star.fill").labelStyle(.titleAndIcon)
-                    .font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                HStack(spacing: 6) {
+                    Image(systemName: "star.fill").foregroundStyle(Color.orange)
+                    Text("常念的问题").foregroundStyle(ReviewPalette.ink)
+                }
+                .font(.system(size: 15, weight: .semibold, design: .serif))
                 if total > 0 { Text("\(total) 个").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub) }
                 Spacer()
                 Button(total > items.count ? "全部 \(total) 个" : "问题簿") { store.openQuestionBook(QuestionFilter(state: .unsolved)) }
@@ -57,15 +60,13 @@ struct PinnedQuestionsHomeCard: View {
     }
 }
 
-/// 去年今日：有就显示一条，可展开全部；没有就不显示
+/// 去年今日：有就显示一条，可展开全部；没有就不显示（由首页读取，空时首页不放这张卡）
 struct OnThisDayHomeCard: View {
     @Environment(LibraryStore.self) private var store
-    @State private var items: [OnThisDayItem] = []
+    let items: [OnThisDayItem]
     @State private var expanded = false
 
     var body: some View {
-        Group {
-            if !items.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("去年今日").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
@@ -82,11 +83,6 @@ struct OnThisDayHomeCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ReviewPalette.hair))
-            }
-        }
-        .task(id: "\(store.today)|\(store.revision)|\(store.ideaNoteRevision)|\(store.questionRevision)") {
-            items = (try? store.db.onThisDay()) ?? []
-        }
     }
 
     private func row(_ item: OnThisDayItem) -> some View {

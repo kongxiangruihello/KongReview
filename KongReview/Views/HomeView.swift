@@ -6,6 +6,8 @@ import KongReviewCore
 struct HomeView: View {
     @Environment(LibraryStore.self) private var store
     @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
+    /// 5.0.3：去年今日（空时不放卡片）
+    @State private var onThisDay: [OnThisDayItem] = []
 
     var body: some View {
         ScrollView {
@@ -37,7 +39,7 @@ struct HomeView: View {
 
                 // 5.0.3：常念的问题（前三个）、去年今日
                 PinnedQuestionsHomeCard()
-                OnThisDayHomeCard()
+                if !onThisDay.isEmpty { OnThisDayHomeCard(items: onThisDay) }
 
                 HomeLearningDashboard(summary: store.homeLearningSummary,
                                       quote: store.dailyReviewQuote(),
@@ -57,6 +59,9 @@ struct HomeView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle("首页")
+        .task(id: "\(store.today)|\(store.revision)|\(store.ideaNoteRevision)|\(store.questionRevision)") {
+            onThisDay = (try? store.db.onThisDay()) ?? []
+        }
         .onAppear {
             store.checkDayChange()
             store.refreshDerived()
