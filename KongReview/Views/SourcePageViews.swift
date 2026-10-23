@@ -14,6 +14,7 @@ struct SourcePageHeader: View {
         let _ = store.revision
         let source = store.sources.first { $0.id == sourceId }
         let stats = (try? store.db.sourcePageStats(sourceId)) ?? SourcePageStats()
+        VStack(spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             SourceThumb(source: source, size: CGSize(width: 52, height: 70))
             VStack(alignment: .leading, spacing: 5) {
@@ -125,6 +126,9 @@ struct SourcePageHeader: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(ReviewPalette.card)
+        // 5.1：精简提要
+        BookSummaryStrip(sourceId: sourceId)
+        }
         .sheet(item: Bindable(store).pageRange) { draft in
             PageRangeSheet(draft: draft)
         }

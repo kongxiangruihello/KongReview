@@ -19,16 +19,19 @@ struct RevisitView: View {
     private enum Item: Equatable {
         case note(RevisitNoteItem)
         case question(RevisitQuestionItem)
+        case book(RevisitBookItem)
         var key: String {
             switch self {
             case .note(let n): "n\(n.id)"
             case .question(let q): "q\(q.id)"
+            case .book(let b): "b\(b.id)"
             }
         }
     }
 
     private var current: Item? {
         if let n = queue.notes.first { return .note(n) }
+        if let b = queue.books.first { return .book(b) }
         if let q = queue.questions.first { return .question(q) }
         return nil
     }
@@ -43,6 +46,7 @@ struct RevisitView: View {
                     switch item {
                     case .note(let n): noteCard(n)
                     case .question(let q): questionCard(q)
+                    case .book(let b): RevisitBookCard(book: b, revealed: $revealed, key: key)
                     }
                 } else {
                     finished
@@ -68,7 +72,7 @@ struct RevisitView: View {
     }
 
     private static func key(_ q: RevisitQueue) -> String {
-        (q.notes.first.map { "n\($0.id)" } ?? q.questions.first.map { "q\($0.id)" }) ?? ""
+        q.notes.first.map { "n\($0.id)" } ?? q.books.first.map { "b\($0.id)" } ?? q.questions.first.map { "q\($0.id)" } ?? ""
     }
 
     private func resetCard() {
@@ -86,7 +90,7 @@ struct RevisitView: View {
         case .question(let q):
             let text = q.title + "\n" + Markdown.plainText(fromHTML: q.detail)
             fresh = store.revisitNewHighlights(text: text, since: q.since, excluding: q.highlightIDs, limit: 5)
-        case nil:
+        case .book, nil:
             fresh = []
         }
     }

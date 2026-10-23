@@ -452,6 +452,10 @@ final class AppDatabase {
         m.registerMigration("v21-progress") { db in
             try AppDatabase.installProgress(in: db)
         }
+        // 5.1：精简提要（读完的书）
+        m.registerMigration("v22-book-summary") { db in
+            try AppDatabase.installBookSummary(in: db)
+        }
         return m
     }
 }

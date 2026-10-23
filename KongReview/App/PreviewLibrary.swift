@@ -91,6 +91,10 @@ import KongReviewCore
                                                  body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
                                                  highlightIDs: [highlights[0].id!], now: day(-40))
             try db.linkToResearchProject(project.id!, kind: .note, recordId: selfReliance.id!)
+            // 5.1：《国史大纲》一个月前读完，今天第一次重温其提要
+            try db.saveBookSummary(sourceId: sources[1].id!, oneLine: "国史须以温情与敬意读之，治史者当知本国文化之所以然。",
+                                   body: "<p>引论列“信念”四条；以民族文化为主线，通论自上古至清末。</p>",
+                                   finishedAt: day(-30), now: day(-30))
             // 5.0.3：去年今日——一年前的今天写的札记
             _ = try db.createIdeaNote(title: "读书先须识字，识字先须明音", body: "<p>乾嘉学者以小学为治经之门径。</p>",
                                       now: calendar.date(byAdding: .year, value: -1, to: day(0, hour: 20))!)
