@@ -433,8 +433,10 @@ private enum HomeLearningDate {
 }
 
 /// 3.15：今日功课——先回顾、再记忆卡，一个入口、一个合计时长；有本期焦点时一并标出
+/// 5.0.0：第三步“重温”，没有到期的就不显示这一步
 struct TodayWorkBar: View {
     let summary: HomeLearningSummary
+    var revisit = RevisitCounts()
     let focus: LearningFocus?
     let onStart: () -> Void
     let onFocus: () -> Void
@@ -446,8 +448,8 @@ struct TodayWorkBar: View {
     var body: some View {
         let reviewLeft = summary.reviewPendingCount
         let cardsLeft = cards.total
-        let minutes = LibraryStore.todayWorkMinutes(reviewPending: reviewLeft, cards: cards)
-        let allDone = reviewLeft == 0 && cardsLeft == 0
+        let minutes = LibraryStore.todayWorkMinutes(reviewPending: reviewLeft, cards: cards, revisit: revisit.left)
+        let allDone = reviewLeft == 0 && cardsLeft == 0 && revisit.left == 0
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("今日功课").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
@@ -477,6 +479,10 @@ struct TodayWorkBar: View {
             step(1, "回顾", reviewLeft, unit: "条", done: summary.reviewCompletedCount)
             Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ReviewPalette.sub)
             step(2, "记忆卡", cardsLeft, unit: "张", done: summary.cardsStudiedCount)
+            if revisit.left > 0 || revisit.done > 0 {
+                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ReviewPalette.sub)
+                step(3, "重温", revisit.left, unit: "张", done: revisit.done)
+            }
         }
     }
 
@@ -506,6 +512,6 @@ struct TodayWorkBar: View {
             .background(allDone ? ReviewPalette.soft : ReviewPalette.accent, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain).handCursor().fixedSize()
-        .help("先完成今日回顾，再进入记忆卡；两个以上牌组有待学卡片时混合学习")
+        .help("先完成今日回顾，再进入记忆卡（两个以上牌组有待学卡片时混合学习），最后重温札记与常念的问题")
     }
 }

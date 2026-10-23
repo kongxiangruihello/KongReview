@@ -7,6 +7,9 @@ struct CardLearningCompletionView: View {
     let globalRatingCount: Int
     let onReturn: () -> Void
     let onResume: () -> Void
+    /// 5.0.0：今日功课第三步——还有要重温的札记与问题时显示
+    var revisitLeft = 0
+    var onRevisit: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,7 +66,10 @@ struct CardLearningCompletionView: View {
                     .padding(.top, 16)
             }
             HStack(spacing: 8) {
-                PillButton(icon: "chevron.left", title: "返回牌组", style: .primary, action: onReturn)
+                if revisitLeft > 0 && summary.availability.kind != .ready {
+                    PillButton(icon: "arrow.counterclockwise.circle", title: "今日功课第三步：重温 · \(revisitLeft)", style: .primary, action: onRevisit)
+                }
+                PillButton(icon: "chevron.left", title: "返回牌组", style: revisitLeft > 0 && summary.availability.kind != .ready ? .normal : .primary, action: onReturn)
                 PillButton(icon: "arrow.clockwise", title: summary.availability.kind == .ready ? "继续学习" : "再查一次", action: onResume)
             }
             .padding(.top, 22)

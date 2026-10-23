@@ -109,6 +109,8 @@ private struct QuickCaptureSettings: View {
 private struct ReviewSettings: View {
     @Environment(LibraryStore.self) private var store
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
+    @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
+    @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
     @AppStorage(SettingsKeys.reminderEnabled) private var reminderEnabled = false
     @AppStorage(SettingsKeys.reminderHour) private var hour = 8
     @AppStorage(SettingsKeys.reminderMinute) private var minute = 0
@@ -118,6 +120,14 @@ private struct ReviewSettings: View {
             Stepper("每日回顾条数：\(dailyCount)", value: $dailyCount, in: 3...50)
             Text("改动从明天（或点“再抽一组”）开始生效。")
                 .font(.caption).foregroundStyle(.secondary)
+
+            Section("重温（今日功课第三步）") {
+                Stepper("每天至多重温札记：\(revisitNotes) 条", value: $revisitNotes, in: 0...10)
+                Stepper("每天至多重温「常念」的问题：\(revisitQuestions) 个", value: $revisitQuestions, in: 0...5)
+                Text("札记按 7、21、60、180、365 天的间隔回来，改过的从头算；「常念」且未解决的问题约每周回来一次。设为 0 即不重温这一类。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
 
             Section("提醒") {
@@ -133,6 +143,8 @@ private struct ReviewSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: revisitNotes) { store.refreshRevisit() }
+        .onChange(of: revisitQuestions) { store.refreshRevisit() }
         .onChange(of: reminderEnabled) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: hour) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: minute) { ReminderScheduler.shared.applySavedSettings() }

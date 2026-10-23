@@ -224,6 +224,8 @@ struct ContentView: View {
             QuestionBookView()
         case .question(let id):
             QuestionView(questionId: id).id(id)
+        case .revisit:
+            RevisitView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -246,6 +248,7 @@ struct SidebarView: View {
             set: { destination in
                 if destination == .review { store.openTodayReview() }
                 else if destination == .cards { store.openCardsHome() }
+                else if destination == .revisit { store.openRevisit() }
                 else { store.selection = destination }
             }
         )) {
@@ -277,6 +280,14 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .sidebarMenuRow()
                 .tag(SidebarItem.cards)
+                // 5.0.0：重温——今日功课第三步，行尾为今天还剩的张数
+                HStack {
+                    Label("重温", systemImage: "arrow.counterclockwise.circle")
+                    Spacer()
+                    if store.revisitCounts.left > 0 { SidebarCount(store.revisitCounts.left) }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.revisit)
             } header: {
                 Text("今日")
             }
