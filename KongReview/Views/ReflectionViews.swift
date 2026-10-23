@@ -107,14 +107,15 @@ struct ReflectionView: View {
     // MARK: 步骤条
 
     private func stepBar(current: Int, window w: GrowthWindow) -> some View {
+        // 窄窗口：其余各步只显示序号，当前一步显示名称
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { stepButtons(current: current, window: w) }
-            VStack(alignment: .leading, spacing: 6) { stepButtons(current: current, window: w) }
+            HStack(spacing: 8) { stepButtons(current: current, window: w, compact: false) }
+            HStack(spacing: 6) { stepButtons(current: current, window: w, compact: true) }
         }
     }
 
     @ViewBuilder
-    private func stepButtons(current: Int, window w: GrowthWindow) -> some View {
+    private func stepButtons(current: Int, window w: GrowthWindow, compact: Bool) -> some View {
         ForEach(steps.indices, id: \.self) { i in
             let on = i == current
             let seen = progress.visited.contains(i) || progress.completedAt != nil
@@ -123,14 +124,17 @@ struct ReflectionView: View {
                     Text("\(i + 1)").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                         .frame(width: 18, height: 18)
                         .background(on ? ReviewPalette.accent : (seen ? ReviewPalette.done : ReviewPalette.sub.opacity(0.5)), in: Circle())
-                    Text(steps[i].title).font(.system(size: 13, weight: on ? .semibold : .regular))
-                        .foregroundStyle(on ? ReviewPalette.accent : ReviewPalette.ink)
+                    if on || !compact {
+                        Text(steps[i].title).font(.system(size: 13, weight: on ? .semibold : .regular))
+                            .foregroundStyle(on ? ReviewPalette.accent : ReviewPalette.ink)
+                    }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(on ? ReviewPalette.accentSoft : ReviewPalette.card, in: Capsule())
                 .overlay(Capsule().stroke(ReviewPalette.hair))
             }
             .buttonStyle(.plain).handCursor().fixedSize()
+            .help("第 \(i + 1) 步：\(steps[i].title)")
         }
     }
 
@@ -263,7 +267,8 @@ struct ReflectionMaterialsStep: View {
                 }
                 .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                 if let n = e.highlight.note, !plainPreview(n).isEmpty {
-                    Text("按：" + plainPreview(n, limit: 100)).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
+                    let note = plainPreview(n, limit: 100)
+                    Text(note.hasPrefix("按") ? note : "按：" + note).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
                 }
             }
             Spacer(minLength: 8)
