@@ -91,6 +91,9 @@ import KongReviewCore
                                                  body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
                                                  highlightIDs: [highlights[0].id!], now: day(-40))
             try db.linkToResearchProject(project.id!, kind: .note, recordId: selfReliance.id!)
+            // 5.0.3：去年今日——一年前的今天写的札记
+            _ = try db.createIdeaNote(title: "读书先须识字，识字先须明音", body: "<p>乾嘉学者以小学为治经之门径。</p>",
+                                      now: calendar.date(byAdding: .year, value: -1, to: day(0, hour: 20))!)
             // 5.0.1：昨天修订过一次（复盘“看自己的想法”里列为本期修订）
             try db.saveIdeaNote(id: selfReliance.id!, title: selfReliance.title,
                                 body: "<p>孟子“无恒产而有恒心者，惟士为能”，与曾子“任重道远”相发明，参见 [[士由身份转为德行]]。士之自立，不待外物，而在其志。</p>",
