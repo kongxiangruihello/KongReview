@@ -56,6 +56,8 @@ enum SelfTestResult: Int, Codable, Sendable {
 /// 小胜
 enum ProgressKind: String, Codable, Sendable {
     case questionLead, questionSolved, noteRevised, noteLinked, sourceCited, selfTestRecovered
+    /// 5.1：读完一本书（同一本只记一次）
+    case bookFinished
 }
 
 struct ProgressEvent: Identifiable, Equatable, Sendable {
@@ -73,6 +75,7 @@ struct ProgressEvent: Identifiable, Equatable, Sendable {
         case .noteLinked: "札记《\(detail)》第一次被另一条札记链接"
         case .sourceCited: "第一次在札记中引用《\(detail)》"
         case .selfTestRecovered: "自测：从“忘了”到“记得”——\(detail)"
+        case .bookFinished: "读完了《\(detail)》"
         }
     }
 }
@@ -437,6 +440,9 @@ extension AppDatabase {
         let events = try progressEvents(start: window.start, end: window.end, limit: 1_000).reversed()
         lines += ["", "## 进展（\(events.count)）", ""]
         lines += events.map { "- \(f.string(from: $0.at))　\($0.text)" }
+        let books = try finishedBooks(start: window.start, end: window.end)
+        lines += ["", "## 读完的书（\(books.count)）", ""]
+        lines += books.map { "- 《\($0.title)》" + ($0.author.isEmpty ? "" : "　\($0.author)") + ($0.oneLine.isEmpty ? "" : "：\($0.oneLine)") }
         let changes = try viewChanges(start: window.start, end: window.end)
         lines += ["", "## 观点的变化（\(changes.count)）", ""]
         for c in changes {

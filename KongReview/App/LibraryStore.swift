@@ -105,6 +105,9 @@ final class LibraryStore {
     /// 5.0.2：今日收获（今天记下的小胜）与进展改动计数
     var todayGains: [String] = []
     var progressRevision = 0
+    /// 5.1：提要面板与改动计数
+    var bookSummaryEditor: BookSummaryEditorRequest?
+    var bookSummaryRevision = 0
     @ObservationIgnored var onReflectionChanged: (() -> Void)?
     var notebookQuoteCounts: [Int64: Int] = [:]
     var notebookState = NotebookState()

@@ -19,16 +19,19 @@ struct RevisitView: View {
     private enum Item: Equatable {
         case note(RevisitNoteItem)
         case question(RevisitQuestionItem)
+        case book(RevisitBookItem)
         var key: String {
             switch self {
             case .note(let n): "n\(n.id)"
             case .question(let q): "q\(q.id)"
+            case .book(let b): "b\(b.id)"
             }
         }
     }
 
     private var current: Item? {
         if let n = queue.notes.first { return .note(n) }
+        if let b = queue.books.first { return .book(b) }
         if let q = queue.questions.first { return .question(q) }
         return nil
     }
@@ -43,6 +46,7 @@ struct RevisitView: View {
                     switch item {
                     case .note(let n): noteCard(n)
                     case .question(let q): questionCard(q)
+                    case .book(let b): RevisitBookCard(book: b, revealed: $revealed, key: key)
                     }
                 } else {
                     finished
@@ -68,7 +72,7 @@ struct RevisitView: View {
     }
 
     private static func key(_ q: RevisitQueue) -> String {
-        (q.notes.first.map { "n\($0.id)" } ?? q.questions.first.map { "q\($0.id)" }) ?? ""
+        q.notes.first.map { "n\($0.id)" } ?? q.books.first.map { "b\($0.id)" } ?? q.questions.first.map { "q\($0.id)" } ?? ""
     }
 
     private func resetCard() {
@@ -86,7 +90,7 @@ struct RevisitView: View {
         case .question(let q):
             let text = q.title + "\n" + Markdown.plainText(fromHTML: q.detail)
             fresh = store.revisitNewHighlights(text: text, since: q.since, excluding: q.highlightIDs, limit: 5)
-        case nil:
+        case .book, nil:
             fresh = []
         }
     }
@@ -112,7 +116,7 @@ struct RevisitView: View {
                 Button { store.openQuestionBook() } label: { Label("问题簿", systemImage: "questionmark.bubble") }
                     .buttonStyle(.borderless).font(.system(size: 12)).handCursor()
             }
-            Text("今日功课第三步：久未重温的札记与「常念」的问题回到眼前。札记先看题目、想想理由再展开；每张只问一句，用 1、2、3 作答。")
+            Text("今日功课第三步：久未重温的札记、「常念」的问题与读完的书回到眼前。先想一想再展开；每张只问一句，用 1、2、3 作答。")
                 .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -309,7 +313,7 @@ struct RevisitView: View {
                     .font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 Text(queue.done > 0
                      ? "今天重温了 \(queue.done) 张。札记按 7、21、60、180、365 天的间隔回来，改过的从头算；「常念」的问题约每周一次。"
-                     : "新写的札记 7 天后第一次回来，之后间隔逐渐加长；在问题簿里标为「常念」的问题约每周回来一次。每天至多 \(RevisitLimits.saved().notes) 条札记、\(RevisitLimits.saved().questions) 个问题，可在设置的“回顾”页修改。")
+                     : "新写的札记 7 天后第一次回来，之后间隔逐渐加长；在问题簿里标为「常念」的问题约每周回来一次；读完的书在 1 个月、半年、一年后各回来一次。每天至多 \(RevisitLimits.saved().notes) 条札记、\(RevisitLimits.saved().questions) 个问题，可在设置的“回顾”页修改。")
                     .font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {

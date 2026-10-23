@@ -111,6 +111,7 @@ private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
     @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
     @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
+    @AppStorage(RevisitLimits.booksKey) private var revisitBooks = 1
     @AppStorage(ReflectionReminderPlan.enabledKey) private var reflectionReminder = false
     @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
     @AppStorage(ReflectionReminderPlan.weekdayKey) private var reflectionWeekday = 1
@@ -136,6 +137,7 @@ private struct ReviewSettings: View {
             Section("重温（今日功课第三步）") {
                 Stepper("每天至多重温札记：\(revisitNotes) 条", value: $revisitNotes, in: 0...10)
                 Stepper("每天至多重温「常念」的问题：\(revisitQuestions) 个", value: $revisitQuestions, in: 0...5)
+                Stepper("每天至多重温读完的书：\(revisitBooks) 本", value: $revisitBooks, in: 0...3)
                 Text("札记按 7、21、60、180、365 天的间隔回来，改过的从头算；「常念」且未解决的问题约每周回来一次。设为 0 即不重温这一类。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -166,6 +168,7 @@ private struct ReviewSettings: View {
         .formStyle(.grouped)
         .onChange(of: revisitNotes) { store.refreshRevisit() }
         .onChange(of: revisitQuestions) { store.refreshRevisit() }
+        .onChange(of: revisitBooks) { store.refreshRevisit() }
         .onChange(of: reflectionReminder) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: reflectionWeekday) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: reflectionHour) { ReminderScheduler.shared.applySavedSettings() }

@@ -46,6 +46,7 @@ struct ContentView: View {
         .sheet(item: $store.ideaNoteComposer) { composer in IdeaNoteComposerSheet(composer: composer).environment(store) }
         .sheet(item: $store.questionCreator) { request in QuestionCreateSheet(request: request).environment(store) }
         .sheet(item: $store.questionAttach) { request in QuestionAttachSheet(request: request) { store.questionAttach = nil }.environment(store) }
+        .sheet(item: $store.bookSummaryEditor) { request in BookSummarySheet(request: request).environment(store) }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
         .modifier(LearningMaterialExportPresentation())

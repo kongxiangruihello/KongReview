@@ -14,6 +14,7 @@ struct SourcePageHeader: View {
         let _ = store.revision
         let source = store.sources.first { $0.id == sourceId }
         let stats = (try? store.db.sourcePageStats(sourceId)) ?? SourcePageStats()
+        VStack(spacing: 0) {
         HStack(alignment: .top, spacing: 16) {
             SourceThumb(source: source, size: CGSize(width: 52, height: 70))
             VStack(alignment: .leading, spacing: 5) {
@@ -47,77 +48,10 @@ struct SourcePageHeader: View {
                 .labelsHidden()
                 .fixedSize()
                 .help("按页码：没有页码的摘录排在最后")
-                HStack(spacing: 8) {
-                    Button {
-                        store.reviewSource(sourceId)
-                    } label: {
-                        Label("回顾这本书", systemImage: "sun.max")
-                    }
-                    .buttonStyle(.borderless)
-                    .handCursor()
-                    .disabled(stats.total == 0)
-                    .help("在“今日回顾”里按页码顺序把这本书的摘录从头过一遍")
-                    // 2.0：按篇（摘录位置里有篇名或卷次时出现）
-                    // 2.1：每篇显示进度（回顾过几条、做成记忆卡几条）
-                    let chapters = (try? store.db.chapterProgress(sourceId)) ?? []
-                    if !chapters.isEmpty {
-                        Menu {
-                            Button("篇目进度…") { store.chapterProgressRequest = ChapterProgressRequest(sourceId: sourceId) }
-                            Divider()
-                            Text("共 \(chapters.count) 篇（按书中顺序）")
-                            ForEach(chapters) { ch in
-                                Menu((ch.reviewed == ch.total ? "✓ " : "") + "《\(ch.name)》\(ch.summary)") {
-                                    Button("回顾这一篇") { store.reviewChapter(sourceId, ch.name) }
-                                    Button("做成记忆卡（牌组“\(store.chapterBookTitle(sourceId))::\(ch.name)”）") {
-                                        store.makeCardsForChapter(sourceId, ch.name)
-                                    }
-                                }
-                            }
-                        } label: {
-                            Label("按篇", systemImage: "list.bullet.indent")
-                        }
-                        .menuStyle(.button)
-                        .buttonStyle(.borderless)
-                        .handCursor()
-                        .fixedSize()
-                        .help("按摘录位置里的篇名（如“学而第一”）分篇：回顾一篇，或把一篇做成记忆卡")
-                    }
-                    // 2.2：这部古籍还有别的版本时，可从对照表导入各条在那个版本里的页码
-                    if !store.editions(for: sourceId).isEmpty {
-                        Button {
-                            store.openEditionImport(sourceId)
-                        } label: {
-                            Label("导入版本页码…", systemImage: "tablecells")
-                        }
-                        .buttonStyle(.borderless)
-                        .handCursor()
-                        .help("从页码对照表（Excel、CSV，或在 Excel 里复制的几列）一次填好各条摘录在另一个版本里的页码")
-                    }
-                    Button {
-                        store.openPageRange(sourceId)
-                    } label: {
-                        Label("按页码…", systemImage: "text.line.first.and.arrowtriangle.forward")
-                    }
-                    .buttonStyle(.borderless)
-                    .handCursor()
-                    .disabled(stats.withPage == 0)
-                    .help("选一个页码范围：回顾这一段、做成记忆卡、导出，或选中后批量加标签等")
-                    Menu {
-                        Button("Word 文档…") { ReadingNotesExport.export(store: store, sourceId: sourceId, format: .docx) }
-                        Button("Markdown…") { ReadingNotesExport.export(store: store, sourceId: sourceId, format: .markdown) }
-                    } label: {
-                        Label("导出读书笔记", systemImage: "square.and.arrow.up")
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(.borderless)
-                    .handCursor()
-                    .fixedSize()
-                    .help("这本书的全部摘录按页码排列，附位置与按语")
-                    if let source {
-                        Button("编辑出处…") { store.editingSource = source }
-                            .buttonStyle(.link)
-                            .handCursor()
-                    }
+                // 5.1：窄窗口下按钮只显示图标（原来文字会竖着折行）
+                ViewThatFits(in: .horizontal) {
+                    actionRow(stats: stats, source: source).labelStyle(.titleAndIcon)
+                    actionRow(stats: stats, source: source).labelStyle(.iconOnly)
                 }
                 .font(.callout)
             }
@@ -125,6 +59,9 @@ struct SourcePageHeader: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(ReviewPalette.card)
+        // 5.1：精简提要
+        BookSummaryStrip(sourceId: sourceId)
+        }
         .sheet(item: Bindable(store).pageRange) { draft in
             PageRangeSheet(draft: draft)
         }
@@ -133,6 +70,82 @@ struct SourcePageHeader: View {
         }
         .sheet(item: Bindable(store).editionImport) { d in
             EditionImportSheet(draft: d)
+        }
+    }
+
+    @ViewBuilder
+    private func actionRow(stats: SourcePageStats, source: Source?) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                store.reviewSource(sourceId)
+            } label: {
+                Label("回顾这本书", systemImage: "sun.max")
+            }
+            .buttonStyle(.borderless)
+            .handCursor()
+            .disabled(stats.total == 0)
+            .help("在“今日回顾”里按页码顺序把这本书的摘录从头过一遍")
+            // 2.0：按篇（摘录位置里有篇名或卷次时出现）
+            // 2.1：每篇显示进度（回顾过几条、做成记忆卡几条）
+            let chapters = (try? store.db.chapterProgress(sourceId)) ?? []
+            if !chapters.isEmpty {
+                Menu {
+                    Button("篇目进度…") { store.chapterProgressRequest = ChapterProgressRequest(sourceId: sourceId) }
+                    Divider()
+                    Text("共 \(chapters.count) 篇（按书中顺序）")
+                    ForEach(chapters) { ch in
+                        Menu((ch.reviewed == ch.total ? "✓ " : "") + "《\(ch.name)》\(ch.summary)") {
+                            Button("回顾这一篇") { store.reviewChapter(sourceId, ch.name) }
+                            Button("做成记忆卡（牌组“\(store.chapterBookTitle(sourceId))::\(ch.name)”）") {
+                                store.makeCardsForChapter(sourceId, ch.name)
+                            }
+                        }
+                    }
+                } label: {
+                    Label("按篇", systemImage: "list.bullet.indent")
+                }
+                .menuStyle(.button)
+                .buttonStyle(.borderless)
+                .handCursor()
+                .fixedSize()
+                .help("按摘录位置里的篇名（如“学而第一”）分篇：回顾一篇，或把一篇做成记忆卡")
+            }
+            // 2.2：这部古籍还有别的版本时，可从对照表导入各条在那个版本里的页码
+            if !store.editions(for: sourceId).isEmpty {
+                Button {
+                    store.openEditionImport(sourceId)
+                } label: {
+                    Label("导入版本页码…", systemImage: "tablecells")
+                }
+                .buttonStyle(.borderless)
+                .handCursor()
+                .help("从页码对照表（Excel、CSV，或在 Excel 里复制的几列）一次填好各条摘录在另一个版本里的页码")
+            }
+            Button {
+                store.openPageRange(sourceId)
+            } label: {
+                Label("按页码…", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            .buttonStyle(.borderless)
+            .handCursor()
+            .disabled(stats.withPage == 0)
+            .help("选一个页码范围：回顾这一段、做成记忆卡、导出，或选中后批量加标签等")
+            Menu {
+                Button("Word 文档…") { ReadingNotesExport.export(store: store, sourceId: sourceId, format: .docx) }
+                Button("Markdown…") { ReadingNotesExport.export(store: store, sourceId: sourceId, format: .markdown) }
+            } label: {
+                Label("导出读书笔记", systemImage: "square.and.arrow.up")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .handCursor()
+            .fixedSize()
+            .help("这本书的全部摘录按页码排列，附位置与按语")
+            if let source {
+                Button("编辑出处…") { store.editingSource = source }
+                    .buttonStyle(.link)
+                    .handCursor()
+            }
         }
     }
 

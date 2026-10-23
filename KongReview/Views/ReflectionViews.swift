@@ -241,9 +241,21 @@ struct ReflectionMaterialsStep: View {
     let window: GrowthWindow
     @State private var entries: [NotebookEntry] = []
     @State private var shown = 30
+    @State private var books: [FinishedBook] = []
 
     var body: some View {
         ReflectionPanel(title: "② 看新材料", lead: "本期收藏与写了按语的摘录，按出处列出。值得展开的记成札记，与某个问题有关的挂上去。") {
+            // 5.1：本期读完的书
+            if !books.isEmpty {
+                Text("本期读完的书（\(books.count)）").font(.system(size: 13, weight: .semibold)).foregroundStyle(ReviewPalette.ink)
+                ForEach(books) { b in
+                    Button { store.selection = .source(b.id) } label: {
+                        Text("《\(b.title)》" + (b.oneLine.isEmpty ? "" : "：\(b.oneLine)")).font(.system(size: 13.5, design: .serif))
+                            .foregroundStyle(ReviewPalette.accent).multilineTextAlignment(.leading)
+                    }
+                    .buttonStyle(.plain).handCursor()
+                }
+            }
             if entries.isEmpty { ReflectionEmpty(text: "本期还没有收藏或写过按语的摘录。") }
             ForEach(Array(entries.prefix(shown).enumerated()), id: \.offset) { i, e in
                 if i == 0 || entries[i - 1].sourceTitle != e.sourceTitle {
@@ -256,7 +268,10 @@ struct ReflectionMaterialsStep: View {
                 Button("再显示 30 条（共 \(entries.count) 条）") { shown += 30 }.buttonStyle(.link).handCursor()
             }
         }
-        .task(id: "\(window.key)|\(store.revision)") { entries = (try? store.db.notebookEntries(start: window.start, end: window.end)) ?? [] }
+        .task(id: "\(window.key)|\(store.revision)|\(store.bookSummaryRevision)") {
+            entries = (try? store.db.notebookEntries(start: window.start, end: window.end)) ?? []
+            books = (try? store.db.finishedBooks(start: window.start, end: window.end)) ?? []
+        }
     }
 
     private func row(_ e: NotebookEntry) -> some View {
