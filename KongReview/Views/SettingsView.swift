@@ -111,6 +111,10 @@ private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
     @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
     @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
+    @AppStorage(ReflectionReminderPlan.enabledKey) private var reflectionReminder = false
+    @AppStorage(ReflectionReminderPlan.weekdayKey) private var reflectionWeekday = 1
+    @AppStorage(ReflectionReminderPlan.hourKey) private var reflectionHour = 20
+    @AppStorage(ReflectionReminderPlan.minuteKey) private var reflectionMinute = 0
     @AppStorage(SettingsKeys.reminderEnabled) private var reminderEnabled = false
     @AppStorage(SettingsKeys.reminderHour) private var hour = 8
     @AppStorage(SettingsKeys.reminderMinute) private var minute = 0
@@ -140,11 +144,24 @@ private struct ReviewSettings: View {
                     .disabled(!reminderEnabled)
                 Text("当天已经回顾过（每日回顾看过一条，或复习过一张记忆卡），就不再提醒。")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("每周复盘提醒", isOn: $reflectionReminder)
+                Picker("提醒日", selection: $reflectionWeekday) {
+                    ForEach(1...7, id: \.self) { Text("星期" + ["日", "一", "二", "三", "四", "五", "六"][$0 - 1]).tag($0) }
+                }
+                .disabled(!reflectionReminder)
+                DatePicker("复盘提醒时间", selection: reflectionTimeBinding, displayedComponents: .hourAndMinute)
+                    .disabled(!reflectionReminder)
+                Text("提醒做一次每周复盘（看数字、看新材料、看自己的想法、过一遍常念问题、写三句话）；这一周已复盘就不再提醒。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .onChange(of: revisitNotes) { store.refreshRevisit() }
         .onChange(of: revisitQuestions) { store.refreshRevisit() }
+        .onChange(of: reflectionReminder) { ReminderScheduler.shared.applySavedSettings() }
+        .onChange(of: reflectionWeekday) { ReminderScheduler.shared.applySavedSettings() }
+        .onChange(of: reflectionHour) { ReminderScheduler.shared.applySavedSettings() }
+        .onChange(of: reflectionMinute) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: reminderEnabled) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: hour) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: minute) { ReminderScheduler.shared.applySavedSettings() }
@@ -159,6 +176,17 @@ private struct ReviewSettings: View {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: date)
                 hour = c.hour ?? 8
                 minute = c.minute ?? 0
+            }
+        )
+    }
+
+    private var reflectionTimeBinding: Binding<Date> {
+        Binding(
+            get: { Calendar.current.date(bySettingHour: reflectionHour, minute: reflectionMinute, second: 0, of: Date()) ?? Date() },
+            set: { date in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+                reflectionHour = c.hour ?? 20
+                reflectionMinute = c.minute ?? 0
             }
         )
     }

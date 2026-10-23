@@ -6,6 +6,8 @@ import KongReviewCore
 /// 新建问题面板：预先归入的专题、项目，预先挂上的材料
 struct QuestionCreateRequest: Identifiable, Sendable {
     var id = UUID()
+    /// 5.0.1：预填的问题（复盘时把“困难”记为问题）
+    var title = ""
     var notebookID: Int64?
     var projectID: Int64?
     var material: QuestionAttachRequest?
@@ -40,9 +42,9 @@ extension LibraryStore {
         selection = .questionBook
     }
 
-    func newQuestion(notebookID: Int64? = nil, projectID: Int64? = nil, material: QuestionAttachRequest? = nil) {
+    func newQuestion(notebookID: Int64? = nil, projectID: Int64? = nil, material: QuestionAttachRequest? = nil, title: String = "") {
         guard !fullBackupBusy else { return }
-        questionCreator = QuestionCreateRequest(notebookID: notebookID, projectID: projectID, material: material)
+        questionCreator = QuestionCreateRequest(title: title, notebookID: notebookID, projectID: projectID, material: material)
     }
 
     @discardableResult

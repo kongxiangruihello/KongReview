@@ -91,6 +91,10 @@ import KongReviewCore
                                                  body: "<p>春秋以前之士多指等级中的一层；至孔门，“士”成为一种自我期许。</p>",
                                                  highlightIDs: [highlights[0].id!], now: day(-40))
             try db.linkToResearchProject(project.id!, kind: .note, recordId: selfReliance.id!)
+            // 5.0.1：昨天修订过一次（复盘“看自己的想法”里列为本期修订）
+            try db.saveIdeaNote(id: selfReliance.id!, title: selfReliance.title,
+                                body: "<p>孟子“无恒产而有恒心者，惟士为能”，与曾子“任重道远”相发明，参见 [[士由身份转为德行]]。士之自立，不待外物，而在其志。</p>",
+                                now: day(-1))
             // 4.1.2：专题笔记本末尾放一个札记块
             _ = try db.insertBlocks([NotebookBlock(notebookId: notebook.id!, position: 0, kind: .note, text: selfReliance.body, noteId: selfReliance.id!)],
                                     into: notebook.id!, after: nil, now: day(-2, hour: 21))

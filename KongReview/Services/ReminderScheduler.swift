@@ -16,6 +16,7 @@ final class ReminderScheduler {
     private let center = UNUserNotificationCenter.current()
 
     func applySavedSettings() {
+        applyReflectionReminder()
         let d = UserDefaults.standard
         let enabled = d.bool(forKey: SettingsKeys.reminderEnabled)
         let hour = d.object(forKey: SettingsKeys.reminderHour) as? Int ?? 8
@@ -80,6 +81,37 @@ final class ReminderScheduler {
                 let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                 let request = UNNotificationRequest(identifier: ReminderPlan.identifier(for: fire),
                                                     content: content, trigger: trigger)
+                try? await center.add(request)
+            }
+        }
+    }
+
+    /// 5.0.1：每周复盘提醒（默认关闭；打开后默认星期日 20:00）。排好之后 4 次，提醒所对应的那一周已复盘就跳过。
+    func applyReflectionReminder() {
+        let d = UserDefaults.standard
+        let enabled = d.bool(forKey: ReflectionReminderPlan.enabledKey)
+        let weekday = d.object(forKey: ReflectionReminderPlan.weekdayKey) as? Int ?? 1
+        let hour = d.object(forKey: ReflectionReminderPlan.hourKey) as? Int ?? 20
+        let minute = d.object(forKey: ReflectionReminderPlan.minuteKey) as? Int ?? 0
+        let db = QuickCaptureController.shared.store?.db
+        let fires = enabled ? ReflectionReminderPlan.fires(now: Date(), weekday: weekday, hour: hour, minute: minute) { window in
+            db?.reflectionCompleted(window) ?? false
+        } : []
+        let center = self.center
+        Task {
+            let pending = await center.pendingNotificationRequests()
+            center.removePendingNotificationRequests(withIdentifiers: pending.map(\.identifier).filter { $0.hasPrefix(ReflectionReminderPlan.prefix) })
+            guard enabled, !fires.isEmpty else { return }
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            guard granted else { return }
+            for fire in fires {
+                let content = UNMutableNotificationContent()
+                content.title = "每周复盘"
+                content.body = "约十分钟：看数字、看新材料、看自己的想法、过一遍常念问题，写下收获、困难与下一步。"
+                content.sound = .default
+                let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+                let request = UNNotificationRequest(identifier: ReflectionReminderPlan.prefix + ReminderPlan.dayKey(fire), content: content,
+                                                    trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false))
                 try? await center.add(request)
             }
         }
