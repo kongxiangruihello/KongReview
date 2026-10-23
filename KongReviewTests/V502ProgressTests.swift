@@ -88,7 +88,7 @@ final class V502ProgressTests: XCTestCase {
         let week = GrowthPeriod.week.window(containing: t0, now: t0)
         let set = try db.selfTestSet(week: week, now: t0)
         XCTAssertEqual(try db.selfTestSet(week: week, now: d(2)), set, "本周沿用已抽的题")
-        let item = try XCTUnwrap(set.items.first { $0.recordId == fav.id })
+        let item = try XCTUnwrap(set.items.first { $0.recordId == fav.id && $0.kind != .argument }, "札记与摘录的编号可能相同，取摘录的题")
         try db.recordSelfTest(item, result: .forgot, week: week, now: t0)
         try db.recordSelfTest(item, result: .partly, week: week, now: d(0, hour: 1))
         XCTAssertEqual(try db.selfTestResults(week: week)[item], .partly, "同一题重评以最后一次为准")
