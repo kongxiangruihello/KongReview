@@ -262,7 +262,7 @@ struct ProgressHomeCard: View {
             }
             ForEach(events.prefix(6)) { e in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(ReflectionView.day(e.at)).font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub).frame(width: 52, alignment: .leading)
+                    Text(ReflectionView.day(e.at)).font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub).fixedSize().frame(minWidth: 56, alignment: .leading)
                     Text(e.text).font(.system(size: 13)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
                 }
             }
@@ -311,7 +311,7 @@ struct ReflectionProgressPanel: View {
                     if events.isEmpty { Text("本期还没有记下进展。").font(.system(size: 13)).foregroundStyle(ReviewPalette.sub) }
                     ForEach(events.prefix(window.period == .week ? 20 : 40)) { e in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(ReflectionView.day(e.at)).font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub).frame(width: 52, alignment: .leading)
+                            Text(ReflectionView.day(e.at)).font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub).fixedSize().frame(minWidth: 56, alignment: .leading)
                             Text(e.text).font(.system(size: 13)).foregroundStyle(ReviewPalette.ink)
                         }
                     }
