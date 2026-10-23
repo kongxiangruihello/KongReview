@@ -55,6 +55,7 @@ struct RevisitView: View {
             .frame(maxWidth: .infinity)
         }
         .background(ReviewPalette.page)
+        .navigationTitle("重温")
         // 引用、挂上材料后也重读：卡上的摘录与“新摘录”随之更新；换了一张才收起正文
         .task(id: "\(store.revisitRevision)|\(store.today)|\(store.relatedIndex == nil)") {
             let next = (try? store.db.revisitQueue()) ?? .empty
