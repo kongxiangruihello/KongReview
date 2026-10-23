@@ -112,6 +112,7 @@ private struct ReviewSettings: View {
     @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
     @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
     @AppStorage(ReflectionReminderPlan.enabledKey) private var reflectionReminder = false
+    @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
     @AppStorage(ReflectionReminderPlan.weekdayKey) private var reflectionWeekday = 1
     @AppStorage(ReflectionReminderPlan.hourKey) private var reflectionHour = 20
     @AppStorage(ReflectionReminderPlan.minuteKey) private var reflectionMinute = 0
@@ -124,6 +125,13 @@ private struct ReviewSettings: View {
             Stepper("每日回顾条数：\(dailyCount)", value: $dailyCount, in: 3...50)
             Text("改动从明天（或点“再抽一组”）开始生效。")
                 .font(.caption).foregroundStyle(.secondary)
+
+            Section("侧栏与首页") {
+                Toggle("显示“研究与写作”（研究项目、专题笔记本）", isOn: $showResearch)
+                Text("隐藏后侧栏不再列出这一组，首页不显示当前项目；项目、笔记本与当前项目的回顾加权都不变，随时可以再打开。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Section("重温（今日功课第三步）") {
                 Stepper("每天至多重温札记：\(revisitNotes) 条", value: $revisitNotes, in: 0...10)
