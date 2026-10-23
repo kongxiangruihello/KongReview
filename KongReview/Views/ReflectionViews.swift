@@ -204,6 +204,7 @@ struct ReflectionNumbersStep: View {
     @State private var error: String?
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
         ReflectionPanel(title: "① 看数字", lead: "本期与上期同期比较，只看不填。完整的数字、质量指标与明细在学习小结里。") {
             if let error { Text(error).foregroundStyle(.red) }
             Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
@@ -226,6 +227,9 @@ struct ReflectionNumbersStep: View {
         }
         .task(id: "\(window.key)|\(store.revision)|\(store.revisitRevision)|\(store.questionRevision)") {
             do { rows = try await store.db.reflectionNumbers(window); error = nil } catch { self.error = error.localizedDescription }
+        }
+            // 5.0.2：本期进展；月度、年度另有学问检视
+            ReflectionProgressPanel(window: window)
         }
     }
 }

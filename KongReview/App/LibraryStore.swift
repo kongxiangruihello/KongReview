@@ -32,6 +32,8 @@ enum SidebarItem: Hashable {
     case revisit
     /// 5.0.1：按步骤复盘（周、月、年）
     case reflection
+    /// 5.0.2：每周自测
+    case selfTest
     case tag(String)
 }
 
@@ -100,6 +102,9 @@ final class LibraryStore {
     var reflectionPeriod: GrowthPeriod = .week
     var reflectionDate = Date()
     var reflectionRevision = 0
+    /// 5.0.2：今日收获（今天记下的小胜）与进展改动计数
+    var todayGains: [String] = []
+    var progressRevision = 0
     @ObservationIgnored var onReflectionChanged: (() -> Void)?
     var notebookQuoteCounts: [Int64: Int] = [:]
     var notebookState = NotebookState()

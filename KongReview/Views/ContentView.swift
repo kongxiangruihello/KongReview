@@ -228,6 +228,8 @@ struct ContentView: View {
             RevisitView()
         case .reflection:
             ReflectionView()
+        case .selfTest:
+            SelfTestView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -252,6 +254,7 @@ struct SidebarView: View {
                 else if destination == .cards { store.openCardsHome() }
                 else if destination == .revisit { store.openRevisit() }
                 else if destination == .reflection { store.openReflection() }
+                else if destination == .selfTest { store.openSelfTest() }
                 else { store.selection = destination }
             }
         )) {
@@ -295,6 +298,10 @@ struct SidebarView: View {
                 Label("复盘", systemImage: "arrow.triangle.2.circlepath")
                     .sidebarMenuRow()
                     .tag(SidebarItem.reflection)
+                // 5.0.2：每周自测
+                Label("自测", systemImage: "checklist")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.selfTest)
             } header: {
                 Text("今日")
             }

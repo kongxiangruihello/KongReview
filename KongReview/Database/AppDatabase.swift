@@ -448,6 +448,10 @@ final class AppDatabase {
         m.registerMigration("v20-revisit") { db in
             try AppDatabase.installRevisit(in: db)
         }
+        // 5.0.2：自测记录、进展记录（小胜）
+        m.registerMigration("v21-progress") { db in
+            try AppDatabase.installProgress(in: db)
+        }
         return m
     }
 }

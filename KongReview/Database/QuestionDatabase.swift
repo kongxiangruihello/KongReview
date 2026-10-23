@@ -386,8 +386,11 @@ extension AppDatabase {
             } else {
                 q.solvedAt = nil
             }
+            let old = q.status
             q.status = status; q.updatedAt = now
             try q.update(db)
+            // 5.0.2：有了线索、解决记为小胜
+            try Self.recordQuestionStatus(db, questionId: id, from: old, to: status, now: now)
         }
     }
 
@@ -424,6 +427,7 @@ extension AppDatabase {
         // 挂上第一条材料：“待研究”自动变为“有线索”
         try db.execute(sql: "UPDATE question SET status = ?, updatedAt = ? WHERE id = ? AND status = ?",
                        arguments: [Question.Status.lead.rawValue, now, questionId, Question.Status.open.rawValue])
+        if db.changesCount > 0 { try recordQuestionStatus(db, questionId: questionId, from: .open, to: .lead, now: now) }
         try touch(db, questionId, now)
     }
 

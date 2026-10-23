@@ -510,6 +510,8 @@ struct QuestionView: View {
                 }
                 .font(.system(size: 12.5))
             }
+            // 5.0.2：问题的经过——记下、挂材料、有线索、解决
+            QuestionTimelinePanel(questionId: questionId)
             ProjectPanel(title: "状态的意思", subtitle: "") {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Question.Status.allCases) { s in

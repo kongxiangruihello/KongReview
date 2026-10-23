@@ -7,6 +7,8 @@ extension LibraryStore {
     func refreshRevisit() {
         revisitCounts = (try? db.revisitCounts()) ?? RevisitCounts()
         revisitRevision += 1
+        // 5.0.2：重温、札记与问题的改动都可能记下小胜
+        refreshProgress()
     }
 
     func openRevisit() {

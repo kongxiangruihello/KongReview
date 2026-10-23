@@ -287,7 +287,10 @@ private struct HomeLearningButton: View {
 }
 
 private struct HomeLearningHistory: View {
+    @Environment(LibraryStore.self) private var store
     let summary: HomeLearningSummary
+    /// 5.0.2：连续中断时不显示“连续 0 天”，改显示本月学了几天
+    @State private var monthDays = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -315,11 +318,16 @@ private struct HomeLearningHistory: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ReviewPalette.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(ReviewPalette.hair))
+        .task(id: "\(store.today)|\(summary.learningStreak)") {
+            let w = GrowthPeriod.month.window(containing: Date())
+            monthDays = (try? await store.db.growthSummary(start: w.start, end: w.end))?[.days] ?? 0
+        }
     }
 
     private var streaks: some View {
         HStack(spacing: 24) {
-            streak(summary.learningStreak, label: "连续学习")
+            if summary.learningStreak > 0 { streak(summary.learningStreak, label: "连续学习") }
+            else { streak(monthDays, label: "本月学了") }
             streak(summary.longestLearningStreak, label: "最长连续")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -437,6 +445,8 @@ private enum HomeLearningDate {
 struct TodayWorkBar: View {
     let summary: HomeLearningSummary
     var revisit = RevisitCounts()
+    /// 5.0.2：今日收获（功课做完时显示）
+    var gains: [String] = []
     let focus: LearningFocus?
     let onStart: () -> Void
     let onFocus: () -> Void
@@ -462,6 +472,11 @@ struct TodayWorkBar: View {
                     .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
                     .help("打开当前项目：阶段、下一步、未解问题与材料").handCursor()
                 }
+            }
+            if allDone && !gains.isEmpty {
+                Label("今日收获：" + gains.joined(separator: "；"), systemImage: "sparkles")
+                    .font(.system(size: 13)).foregroundStyle(ReviewPalette.done)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 14) { steps(reviewLeft: reviewLeft, cardsLeft: cardsLeft); Spacer(minLength: 8); startButton(allDone: allDone) }

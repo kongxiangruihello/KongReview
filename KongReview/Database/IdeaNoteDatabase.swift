@@ -113,6 +113,8 @@ extension AppDatabase {
         for title in WikiLinks.titles(in: body) {
             guard let to = try resolveIdeaNoteID(db, title: title), to != noteId else { continue }
             try db.execute(sql: "INSERT OR IGNORE INTO idea_note_link(fromId, toId) VALUES (?, ?)", arguments: [noteId, to])
+            // 5.0.2：第一次被另一条札记链接，记为小胜（只记一次）
+            if db.changesCount > 0, try db.tableExists("progress_event") { try recordNoteLinked(db, toId: to) }
         }
     }
 
@@ -143,6 +145,7 @@ extension AppDatabase {
             try db.execute(sql: "INSERT OR IGNORE INTO idea_note_highlight(noteId, highlightId, position, addedAt) VALUES (?, ?, ?, ?)",
                            arguments: [id, h, Double(i + 1), now])
         }
+        try recordSourcesCited(db, highlightIDs: highlightIDs, now: now)
         try logWriting(db, noteId: id, added: WritingCount.count(html: body), removed: 0, now: now)
         try rebuildAllIdeaNoteLinks(db)
         return note
@@ -197,6 +200,7 @@ extension AppDatabase {
                                arguments: [noteId, h, next, now])
                 if db.changesCount > 0 { next += 1 }
             }
+            try Self.recordSourcesCited(db, highlightIDs: highlightIDs, now: now)
             try db.execute(sql: "UPDATE idea_note SET updatedAt = ? WHERE id = ?", arguments: [now, noteId])
         }
     }
