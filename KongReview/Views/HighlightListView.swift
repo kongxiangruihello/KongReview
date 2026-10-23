@@ -449,7 +449,7 @@ struct HighlightRow: View {
                 Text(RichText.marked("译：" + preview(t, limit: 600), terms: terms)).font(.callout).foregroundStyle(.secondary).lineLimit(3)
             }
             if let n = highlight.note {
-                Text(RichText.marked("按：" + preview(n, limit: 600), terms: terms)).font(.callout).foregroundStyle(.blue).lineLimit(3)
+                Text(RichText.marked({ let t = preview(n, limit: 600); return t.hasPrefix("按") ? t : "按：" + t }(), terms: terms)).font(.callout).foregroundStyle(.blue).lineLimit(3)
             }
             HStack(spacing: 8) {
                 let cite = CitationFormatter.citation(for: highlight, source: source, style: CitationSettings.style)

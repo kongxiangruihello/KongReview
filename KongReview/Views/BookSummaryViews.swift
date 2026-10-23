@@ -58,8 +58,13 @@ struct BookSummarySheet: View {
             Text("只写两样：一句话说这本书讲了什么；再用一栏写要点、自己的判断与可疑之处。读完后 1 个月、半年、一年，它会在“重温”里回来，问这句话还成立吗。")
                 .font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             TextField("一句话：这本书讲了什么", text: $oneLine).textFieldStyle(.roundedBorder).font(.system(size: 15))
-            RichEditor(text: $bodyText, placeholder: "要点、自己的判断与可疑之处（可不填）", autoHeight: true, minHeight: 140, slot: "book-summary")
-                .richEditorFrame()
+            // 读完提要再建编辑区：编辑区建好后才送来的正文，在面板里有时不显示
+            if loaded {
+                RichEditor(text: $bodyText, placeholder: "要点、自己的判断与可疑之处（可不填）", autoHeight: true, minHeight: 140, slot: "book-summary")
+                    .richEditorFrame()
+            } else {
+                Color.clear.frame(height: 140)
+            }
             HStack(spacing: 12) {
                 Toggle("已读完", isOn: $finished)
                 if finished {
