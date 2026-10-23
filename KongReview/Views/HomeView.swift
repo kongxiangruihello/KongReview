@@ -5,6 +5,9 @@ import KongReviewCore
 /// 启动页：分开呈现今日回顾与记忆卡的进度，再引导到各自的学习入口。
 struct HomeView: View {
     @Environment(LibraryStore.self) private var store
+    @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
+    /// 5.0.3：去年今日（空时不放卡片）
+    @State private var onThisDay: [OnThisDayItem] = []
 
     var body: some View {
         ScrollView {
@@ -34,8 +37,9 @@ struct HomeView: View {
                 // 5.0.2：本周进展——记下的小胜与本周自测
                 ProgressHomeCard()
 
-                // 4.0：当前项目——阶段、截止、下一步、未解问题、本周写作
-                CurrentProjectCard()
+                // 5.0.3：常念的问题（前三个）、去年今日
+                PinnedQuestionsHomeCard()
+                if !onThisDay.isEmpty { OnThisDayHomeCard(items: onThisDay) }
 
                 HomeLearningDashboard(summary: store.homeLearningSummary,
                                       quote: store.dailyReviewQuote(),
@@ -44,6 +48,8 @@ struct HomeView: View {
                 }
                 DailyArrangementView().id("\(store.today)|\(store.growthGeneration)")
                 HomeTodayPlans().id(store.growthGeneration)
+                // 4.0：当前项目——5.0.3 起放在最下方；隐藏“研究与写作”组时一并隐藏
+                if showResearch { CurrentProjectCard() }
             }
             .frame(maxWidth: 960)
             .padding(.horizontal, 28)
@@ -53,6 +59,9 @@ struct HomeView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle("首页")
+        .task(id: "\(store.today)|\(store.revision)|\(store.ideaNoteRevision)|\(store.questionRevision)") {
+            onThisDay = (try? store.db.onThisDay()) ?? []
+        }
         .onAppear {
             store.checkDayChange()
             store.refreshDerived()

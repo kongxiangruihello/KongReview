@@ -675,15 +675,15 @@ struct CurrentProjectCard: View {
 
 /// 4.0：侧栏改为六组后，首页显示一次说明
 struct SidebarRegroupNotice: View {
-    @AppStorage("sidebar.v4.noticeDismissed") private var dismissed = false
+    @AppStorage("sidebar.v5.noticeDismissed") private var dismissed = false
 
     var body: some View {
         if !dismissed {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "sidebar.left").foregroundStyle(ReviewPalette.accent)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("侧栏已按学术工作的环节分为六组").font(.system(size: 13, weight: .semibold)).foregroundStyle(ReviewPalette.ink)
-                    Text("今日（首页、今日回顾、记忆卡）、研究（研究项目）、阅读（出处、网页存档）、积累（摘录、收藏、标签）、写作与产出（专题笔记本）、成长（个人成长、统计）。原有入口都还在，最近删除与使用说明在侧栏最后；点组名旁的箭头可折叠。")
+                    Text("侧栏已按“个人学术回顾”改为四组").font(.system(size: 13, weight: .semibold)).foregroundStyle(ReviewPalette.ink)
+                    Text("回顾（首页、今日回顾、记忆卡、重温、自测、复盘、个人成长、回顾统计）、思考（札记、问题簿）、材料（摘录、收藏、出处、网页存档、已存搜索、标签）、研究与写作（研究项目、专题笔记本，默认折叠，可在设置“回顾”页隐藏）。原有入口一个不少；最近删除与使用说明仍在最后。")
                         .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
