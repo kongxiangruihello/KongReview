@@ -28,6 +28,9 @@ struct HomeView: View {
                              onStart: { store.startTodayWork() },
                              onFocus: { store.selection = store.currentProjectID.map(SidebarItem.project) ?? .projects })
 
+                // 5.0.1：本周复盘——未做时“去复盘”，做过显示写下的三句话
+                ReflectionHomeCard()
+
                 // 4.0：当前项目——阶段、截止、下一步、未解问题、本周写作
                 CurrentProjectCard()
 

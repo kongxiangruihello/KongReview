@@ -212,6 +212,11 @@ struct GrowthReportView: View {
         ScrollView {
             AcademicPaper {
                 HStack {
+                    if window.period != .day {
+                        Button("按步骤复盘…") { store.openReflection(period: window.period, date: window.start) }
+                            .controlSize(.small).handCursor()
+                            .help("看数字、看新材料、看自己的想法、过一遍常念问题、写三句话")
+                    }
                     Spacer()
                     Menu("导出") {
                         Button("本期小结（Markdown）…") { LearningMaterialExport.saveSummary(window: window, summary: current, reflection: reflection, store: store) }

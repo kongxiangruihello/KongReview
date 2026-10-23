@@ -30,6 +30,8 @@ enum SidebarItem: Hashable {
     case question(Int64)
     /// 5.0.0：重温（今日功课第三步）
     case revisit
+    /// 5.0.1：按步骤复盘（周、月、年）
+    case reflection
     case tag(String)
 }
 
@@ -94,6 +96,11 @@ final class LibraryStore {
     /// 5.0.0：今天剩下的重温（首页功课、侧栏计数）与改动计数
     var revisitCounts = RevisitCounts()
     var revisitRevision = 0
+    /// 5.0.1：复盘页的周期与日期、改动计数；完成复盘后由提醒模块重排每周复盘提醒
+    var reflectionPeriod: GrowthPeriod = .week
+    var reflectionDate = Date()
+    var reflectionRevision = 0
+    @ObservationIgnored var onReflectionChanged: (() -> Void)?
     var notebookQuoteCounts: [Int64: Int] = [:]
     var notebookState = NotebookState()
     /// 1.3：新建笔记本对话框（输入标题）；附带要放进去的摘录

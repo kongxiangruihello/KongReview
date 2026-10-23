@@ -569,6 +569,7 @@ struct QuestionCreateSheet: View {
                 }
             }
             TextField("问题：一句话（如“乾嘉学者为何讳言义理？”）", text: $title).textFieldStyle(.roundedBorder).font(.system(size: 15))
+                .onAppear { if title.isEmpty { title = request.title } }
             RichEditor(text: $detail, placeholder: "补充说明（可不填）", autoHeight: true, minHeight: 100, slot: "question-create")
                 .richEditorFrame()
             let scopes = [request.notebookID.flatMap { id in store.notebooks.first { $0.id == id }.map { "专题《\($0.title)》" } },

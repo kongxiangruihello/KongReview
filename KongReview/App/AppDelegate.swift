@@ -31,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         QuickCaptureController.shared.store?.onReviewedToday = {
             ReminderScheduler.shared.applySavedSettings()
         }
+        // 5.0.1：完成复盘后重排每周复盘提醒（本周已复盘就不再提醒）
+        QuickCaptureController.shared.store?.onReflectionChanged = {
+            ReminderScheduler.shared.applySavedSettings()
+        }
         // 每次数据变化后更新菜单栏上的数字
         QuickCaptureController.shared.store?.onReload = {
             StatusItemController.shared.updateCounts()
