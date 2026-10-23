@@ -199,6 +199,8 @@ extension AppDatabase {
             if exists == 0 {
                 try db.execute(sql: "INSERT INTO idea_note_revision(noteId, title, body, savedAt, day) VALUES (?, ?, ?, ?, ?)",
                                arguments: [id, before.title, before.body, now, day])
+                // 5.0.2：修订记为小胜（同一天只一次，随修订历史）
+                try recordProgress(db, .noteRevised, recordId: id, detail: title, now: now)
             }
         }
         try scheduleNote(db, id: id, day: revisitDay(now, plus: 7))
@@ -290,6 +292,7 @@ extension AppDatabase {
                     try db.execute(sql: "UPDATE question SET detail = detail || ? WHERE id = ?", arguments: [p, questionId])
                 }
                 try db.execute(sql: "UPDATE question SET status = 'lead' WHERE id = ? AND status = 'open'", arguments: [questionId])
+                if db.changesCount > 0 { try Self.recordQuestionStatus(db, questionId: questionId, from: .open, to: .lead, now: now) }
                 try db.execute(sql: "UPDATE question SET updatedAt = ? WHERE id = ?", arguments: [now, questionId])
             }
             try db.execute(sql: """
