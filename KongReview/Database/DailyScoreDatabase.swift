@@ -82,7 +82,8 @@ struct DailyScore: Equatable, Sendable {
         case let (nil, m?): value = m * 0.7 + s * 0.3
         case (nil, nil): value = s
         }
-        return Int((value * 100).rounded())
+        // 加一点余量，免得 43.5 因浮点误差成了 43.4999… 而舍成 43
+        return Int((value * 100 + 1e-9).rounded())
     }
 }
 

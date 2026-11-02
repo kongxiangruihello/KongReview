@@ -46,9 +46,11 @@ final class V521DailyScoreTests: XCTestCase {
         let src = try db.save(Source(title: "国史大纲"))
         var h = Highlight(text: "对本国历史应略有所知"); h.sourceId = src.id; h.isFavorite = true
         h = try db.save(h)
+        var h2 = Highlight(text: "温故而知新"); h2.sourceId = src.id; h2.isFavorite = true
+        h2 = try db.save(h2)
         let week = GrowthPeriod.week.window(containing: t0, now: t0)
         try db.recordSelfTest(SelfTestItem(kind: .source, recordId: h.id!), result: .remembered, week: week, now: d(0, hour: 2))
-        try db.recordSelfTest(SelfTestItem(kind: .gist, recordId: h.id!), result: .forgot, week: week, now: d(0, hour: 2))
+        try db.recordSelfTest(SelfTestItem(kind: .gist, recordId: h2.id!), result: .forgot, week: week, now: d(0, hour: 2))
         // 笔记：已吸收、需重读、待整理（不计）
         let nb = try db.createNotebook(title: "笔记", now: d(-30))
         let text = String(repeating: "乾嘉考据重建义理", count: 4)
