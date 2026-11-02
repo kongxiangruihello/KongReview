@@ -36,7 +36,7 @@ struct CardEditorPreviewView: View {
                 .font(.callout).foregroundStyle(.secondary)
             Text(savedCard ? "显示打开预览时已保存的内容；预览不计入学习记录。" : "显示当前未保存内容；折叠栏目、图片和链接可直接查看。预览不计入学习记录。")
                 .font(.caption).foregroundStyle(.secondary)
-            CardWebView(front:snapshot.front,back:showingAnswer ? snapshot.back : nil,store:store)
+            CardWebView(front:snapshot.front,back:showingAnswer ? snapshot.back : nil,store:store,css:store.cardCSS(for:snapshot.card))
                 .frame(maxWidth:.infinity,maxHeight:.infinity)
                 .accessibilityIdentifier("card-editor-learning-preview")
             HStack {

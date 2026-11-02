@@ -245,10 +245,14 @@ final class LibraryStore {
     var reviewedToday = false
     /// 笔记类型模板（多字段卡片按它显示）
     var noteTemplates: [String: NoteTemplate] = [:]
+    /// 6.0.0：没有 HTML 模板的卡片用的样式（CSS）
+    var plainCardCSS = ""
     var deckOptionsEditor: DeckOptions?
     /// 3.13：每日学习量面板
     var dailyLimitsEditor: DailyLimitsDraft?
     var templateEditor: NoteTemplate?
+    /// 6.0.0：普通卡片样式编辑器
+    var showsPlainCardStyle = false
     var apkgExport: ApkgExportRequest?
     var cardSyncOffer: CardSyncOffer?
     /// FSRS 优化、整理数据库等后台任务的状态文字
@@ -323,6 +327,7 @@ final class LibraryStore {
             cardCount = try db.cardCount()
             reviewedToday = try db.reviewedToday()
             noteTemplates = try db.noteTemplates()
+            plainCardCSS = (try? db.progressValue(String.self, key: Self.plainCardCSSKey)) ?? ""
             coverIDs = try db.coverSourceIDs()
             notebooks = try db.notebooks()
             notebookQuoteCounts = try db.notebookQuoteCounts()
@@ -1109,6 +1114,21 @@ final class LibraryStore {
     /// 卡片实际显示的正反面（多字段卡片按模板）
     func faces(of card: Card) -> (front: String, back: String) {
         card.faces(using: card.noteType.flatMap { noteTemplates[$0] })
+    }
+
+    // MARK: 6.0.0：卡片样式
+
+    static let plainCardCSSKey = "cards.plainCSS"
+
+    /// 卡片的样式：有 HTML 模板用模板的样式，否则用普通卡片样式
+    func cardCSS(for card: Card) -> String {
+        if let t = card.noteType.flatMap({ noteTemplates[$0] }), t.html != nil, !card.fields.isEmpty { return t.css }
+        return plainCardCSS
+    }
+
+    func savePlainCardCSS(_ css: String) {
+        perform { try db.saveProgress(css, key: Self.plainCardCSSKey) }
+        plainCardCSS = css
     }
 
     func answerCurrent(_ a: CardAnswer) {

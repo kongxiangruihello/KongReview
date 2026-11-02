@@ -14,11 +14,24 @@ public struct NoteTemplate: Codable, Hashable, Identifiable, Sendable {
     public var collapsed: [Int]
     /// 完形填空类型：正面第一个字段按 {{c1::…}} 挖空
     public var isCloze: Bool
+    /// 6.0.0：HTML 模板（正面、背面、样式）；有就以它为准，没有就按上面的放置拼出正反面
+    public var html: NoteTemplateHTML?
     public var id: String { name }
 
-    public init(name: String, fieldNames: [String], front: [Int], back: [Int], collapsed: [Int] = [], isCloze: Bool = false) {
+    public init(name: String, fieldNames: [String], front: [Int], back: [Int], collapsed: [Int] = [], isCloze: Bool = false,
+                html: NoteTemplateHTML? = nil) {
         self.name = name; self.fieldNames = fieldNames; self.front = front; self.back = back
-        self.collapsed = collapsed; self.isCloze = isCloze
+        self.collapsed = collapsed; self.isCloze = isCloze; self.html = html
+    }
+
+    /// 6.0.0：这类卡片的样式（只有写了 HTML 模板才有）
+    public var css: String { html?.css ?? "" }
+
+    /// 字段名 → 内容（去掉声音标记）
+    public func fieldMap(_ fields: [String]) -> [String: String] {
+        var m: [String: String] = [:]
+        for (i, name) in fieldNames.enumerated() where m[name] == nil { m[name] = value(fields, i) }
+        return m
     }
 
     /// 默认模板：第一个字段为正面，其余在背面；名称像“注释、备注、笔记、补充”的字段默认折叠
@@ -46,6 +59,11 @@ public struct NoteTemplate: Codable, Hashable, Identifiable, Sendable {
 
     /// 按模板生成正反面 HTML
     public func render(_ fields: [String]) -> (front: String, back: String) {
+        if let html {
+            let m = fieldMap(fields)
+            return (CardTemplateEngine.render(html.front, fields: m, side: .front),
+                    CardTemplateEngine.render(html.back, fields: m, side: .back))
+        }
         var frontParts: [String] = []
         var clozeBack: String?
         for i in front {

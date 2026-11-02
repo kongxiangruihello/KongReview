@@ -229,7 +229,7 @@ private struct EditorDraftReadOnlyPreview: View {
             if let type = draft.card.noteType { Text("模板：" + type).font(.caption).foregroundStyle(.secondary) }
             Text("只读预览，不计入学习记录；折叠栏目可展开查看。")
                 .font(.caption).foregroundStyle(.secondary)
-            CardWebView(front: faces.front, back: showingAnswer ? faces.back : nil, store: store)
+            CardWebView(front: faces.front, back: showingAnswer ? faces.back : nil, store: store, css: store.cardCSS(for: draft.card))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if !draft.tagsText.isEmpty { Text("标签：" + draft.tagsText).font(.caption).textSelection(.enabled) }
         case .highlight(let draft):
