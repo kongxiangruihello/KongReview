@@ -88,10 +88,6 @@ struct NotebookView: View {
                 .disabled(st.quoteCount == 0)
             }
             ToolbarItem {
-                // 4.0：归入研究项目
-                ResearchProjectLinkMenu(kind: .notebook, recordId: notebookId)
-            }
-            ToolbarItem {
                 Button { store.openNotebookPicker(after: st.blocks.last?.id) } label: {
                     Label("插入摘录", systemImage: "text.quote")
                 }
@@ -99,42 +95,19 @@ struct NotebookView: View {
             }
             ToolbarItem {
                 Menu {
-                    Button("Word 文档（含脚注、目录、页码）…") { NotebookExport.checkThenExport(store: store, .docx) }
-                    Button("演示稿（PowerPoint / Keynote）…") { NotebookExport.exportPptx(store: store) }
+                    // 6.0.1：Word、演示稿导出与出注版本已舍弃；笔记本留作题库，导出只为留存与打印
                     Button("PDF（讲义、打印）…") { NotebookExport.checkThenExport(store: store, .pdf) }
                     Button("Markdown（脚注 [^1]）…") { NotebookExport.exportMarkdown(store: store) }
                     Button("复制到剪贴板（粘到 Word、Pages，含脚注）") { NotebookExport.copyRTF(store: store) }
-                    // 2.1：同一部古籍有几个版本时，选用哪个版本出注
-                    let classics = store.notebookClassics()
-                    if !classics.isEmpty {
-                        Divider()
-                        ForEach(classics, id: \.title) { c in
-                            Menu("《\(c.title)》出注用的版本") {
-                                let chosen = st.exportEditions[c.title]
-                                Button { store.setNotebookEdition(c.title, nil) } label: {
-                                    if chosen == nil { Label("各条原来的出处", systemImage: "checkmark") } else { Text("各条原来的出处") }
-                                }
-                                Divider()
-                                ForEach(c.editions) { e in
-                                    let name = NotebookExport.editionName(e)
-                                    Button { store.setNotebookEdition(c.title, e.id) } label: {
-                                        if chosen == e.id { Label(name, systemImage: "checkmark") } else { Text(name) }
-                                    }
-                                }
-                            }
-                        }
-                    }
                     Divider()
                     Button("引文核对…") { store.runNotebookCitationCheck() }
                     Divider()
                     Toggle("出处做成脚注（否则写在引文后的括号里）", isOn: Bindable(st).exportFootnotes)
-                    Toggle("文末附参考文献表（GB/T 7714）", isOn: Bindable(st).exportBibliography)
                     Toggle("附上摘录的按语", isOn: Bindable(st).exportNotes)
-                    Toggle("Word 加目录（按小标题）", isOn: Bindable(st).exportTOC)
                 } label: {
                     Label("导出", systemImage: "square.and.arrow.up")
                 }
-                .help("导出为 Word、演示稿、Markdown，或复制后粘到 Word")
+                .help("导出为 PDF、Markdown，或复制后粘到 Word")
             }
             ToolbarItem {
                 Menu {

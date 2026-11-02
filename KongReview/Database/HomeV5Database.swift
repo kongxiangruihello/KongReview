@@ -26,8 +26,8 @@ struct OnThisDayItem: Identifiable, Equatable, Sendable {
 enum SidebarLayout {
     static let showResearchKey = "sidebar.showResearch"
     static let v5AppliedKey = "sidebar.v5.applied"
-    /// 4.0 的组名（today、research、reading、collect、writing、growth）改为 5.0 的四组
-    static let groups = ["review", "thinking", "materials", "research"]
+    /// 4.0 的组名（today、research、reading、collect、writing、growth）改为 5.0 的四组；6.0.1 起为考场、题库、其他三组
+    static let groups = ["exam", "bank", "other"]
 
     /// 第一次用 5.0 侧栏时：“研究与写作”默认折叠（之后按自己的折叠状态）
     static func applyV5Defaults(collapsed: Set<String>, applied: Bool) -> (collapsed: Set<String>, applied: Bool) {

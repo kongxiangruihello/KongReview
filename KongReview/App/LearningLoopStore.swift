@@ -5,7 +5,8 @@ import KongReviewCore
 
 extension LibraryStore {
     func refreshLearningFocus() {
-        learningFocus = try? db.validatedLearningFocus()
+        // 6.0.1：本期焦点与当前项目已舍弃——不再加权回顾、不再优先卡片（存着的设定不动）
+        learningFocus = Self.slimmedFeaturesOff ? nil : (try? db.validatedLearningFocus())
         if let focus = learningFocus {
             focusHighlightIDs = (try? db.focusHighlightIDs(focus)) ?? []
             focusDeckCounts = (try? db.focusDeckCounts(focus)) ?? [:]

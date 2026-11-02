@@ -347,9 +347,6 @@ struct SourceManagerView: View {
             if ids.count >= 2 {
                 Button("合并这 \(ids.count) 个出处…") { store.requestMerge(ids) }
             }
-            Button(ids.count == 1 ? "生成参考文献条目…" : "生成参考文献表（\(ids.count) 种）…") {
-                store.showBibliography(sourceIDs: ids, title: "出处管理")
-            }
             Menu("类型改为") {
                 ForEach(SourceKind.allCases, id: \.self) { k in
                     Button(k.label) { store.setKind(k, for: ids) }

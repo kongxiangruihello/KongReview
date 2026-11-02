@@ -59,8 +59,6 @@ struct SourcePageHeader: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(ReviewPalette.card)
-        // 5.1：精简提要
-        BookSummaryStrip(sourceId: sourceId)
         }
         .sheet(item: Bindable(store).pageRange) { draft in
             PageRangeSheet(draft: draft)
@@ -90,8 +88,6 @@ struct SourcePageHeader: View {
             let chapters = (try? store.db.chapterProgress(sourceId)) ?? []
             if !chapters.isEmpty {
                 Menu {
-                    Button("篇目进度…") { store.chapterProgressRequest = ChapterProgressRequest(sourceId: sourceId) }
-                    Divider()
                     Text("共 \(chapters.count) 篇（按书中顺序）")
                     ForEach(chapters) { ch in
                         Menu((ch.reviewed == ch.total ? "✓ " : "") + "《\(ch.name)》\(ch.summary)") {
@@ -109,17 +105,6 @@ struct SourcePageHeader: View {
                 .handCursor()
                 .fixedSize()
                 .help("按摘录位置里的篇名（如“学而第一”）分篇：回顾一篇，或把一篇做成记忆卡")
-            }
-            // 2.2：这部古籍还有别的版本时，可从对照表导入各条在那个版本里的页码
-            if !store.editions(for: sourceId).isEmpty {
-                Button {
-                    store.openEditionImport(sourceId)
-                } label: {
-                    Label("导入版本页码…", systemImage: "tablecells")
-                }
-                .buttonStyle(.borderless)
-                .handCursor()
-                .help("从页码对照表（Excel、CSV，或在 Excel 里复制的几列）一次填好各条摘录在另一个版本里的页码")
             }
             Button {
                 store.openPageRange(sourceId)

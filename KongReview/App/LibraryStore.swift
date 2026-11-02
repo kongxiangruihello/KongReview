@@ -1284,7 +1284,8 @@ final class LibraryStore {
 
     /// 数据变化后 3 秒同步一次 Obsidian（连续修改只同步最后一次）
     func scheduleObsidianSync() {
-        guard ObsidianSync.isEnabled, let folder = ObsidianSync.folder else { return }
+        // 6.0.1：Obsidian 同步已舍弃，不再自动写文件（已写出的文件不动）
+        guard !Self.slimmedFeaturesOff, ObsidianSync.isEnabled, let folder = ObsidianSync.folder else { return }
         obsidianTask?.cancel()
         let db = self.db
         let style = CitationSettings.style

@@ -33,23 +33,17 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { store.showsResourceAudit = true } label: { Label("资料检查",systemImage:"checkmark.magnifyingglass") }.help("全库链接与本地媒体检查").disabled(!store.canShowGlobalSearch).handCursor()
-            }
-            ToolbarItem(placement: .primaryAction) {
                 Button { store.showGlobalSearch() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
                     .disabled(!store.canShowGlobalSearch)
                     .handCursor()
                     .help("查找摘录、记忆卡、网页、出处、札记和问题（⌘⇧F）")
             }
         }
-        .sheet(isPresented:$store.showsResourceAudit) { LibraryResourceAuditView() }
         // 5.2.1：在线更新
         .sheet(isPresented: $updater.showsPanel) { UpdatePanel() }
-        .sheet(item: $store.researchProjectEditor) { project in ResearchProjectEditor(project: project).environment(store) }
         .sheet(item: $store.ideaNoteComposer) { composer in IdeaNoteComposerSheet(composer: composer).environment(store) }
         .sheet(item: $store.questionCreator) { request in QuestionCreateSheet(request: request).environment(store) }
         .sheet(item: $store.questionAttach) { request in QuestionAttachSheet(request: request) { store.questionAttach = nil }.environment(store) }
-        .sheet(item: $store.bookSummaryEditor) { request in BookSummarySheet(request: request).environment(store) }
         .modifier(GlobalSearchPresentation())
         .modifier(LearningExplorerPresentation())
         .modifier(LearningMaterialExportPresentation())
@@ -137,7 +131,6 @@ struct ContentView: View {
         .modifier(CardEntryHistoryPresentation(insideEditor:false))
         .modifier(CardBulkEntryPresentation(insideEditor:false))
         .modifier(TagSheets())
-        .modifier(WritingSheets())
         .modifier(NotebookSheets())
         .modifier(MaintenanceSheets())
         .alert("完成", isPresented: Binding(
@@ -184,7 +177,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch store.selection {
-        case .home, .none:
+        // 6.0.1：网页存档与研究项目已舍弃，旧位置回到首页
+        case .home, .none, .articles, .project, .projects:
             HomeView()
         case .review:
             DailyReviewView()
@@ -202,8 +196,6 @@ struct ContentView: View {
             HighlightListView(title: "未归类", filter: .init(unsortedOnly: true))
         case .trash:
             HighlightListView(title: "最近删除", filter: .init(deletedOnly: true))
-        case .articles:
-            ArticlesView()
         case .sourceManager:
             SourceManagerView()
         case .help:
@@ -216,10 +208,6 @@ struct ContentView: View {
             }
         case .notebook(let id):
             NotebookView(notebookId: id).id(id)
-        case .project(let id):
-            ResearchProjectView(projectId: id).id(id)
-        case .projects:
-            ResearchProjectListView()
         case .ideaNotes:
             IdeaNoteListView()
         case .ideaNote(let id):
@@ -250,8 +238,6 @@ struct ContentView: View {
 
 struct SidebarView: View {
     @Environment(LibraryStore.self) private var store
-    @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
-    @AppStorage(SidebarLayout.v5AppliedKey) private var v5Applied = false
 
     var body: some View {
         @Bindable var store = store
@@ -267,9 +253,8 @@ struct SidebarView: View {
                 else { store.selection = destination }
             }
         )) {
-            // 5.0.3：侧栏按“个人学术回顾”分四组——回顾、思考、材料、研究与写作；各组可折叠，记住状态。
-            // “研究与写作”默认折叠，设置里可整组隐藏（数据与当前项目加权不变）。
-            Section(isExpanded: store.sidebarGroupBinding("review")) {
+            // 6.0.1：侧栏改为三组——考场（每天来考）、题库（考的内容）、其他。各组可折叠，记住状态。
+            Section(isExpanded: store.sidebarGroupBinding("exam")) {
                 Label("首页", systemImage: "house")
                     .sidebarMenuRow()
                     .tag(SidebarItem.home)
@@ -312,14 +297,14 @@ struct SidebarView: View {
                 }
                 .sidebarMenuRow()
                 .tag(SidebarItem.revisit)
-                // 5.0.1：复盘——每周五步，月度、年度
-                Label("复盘", systemImage: "arrow.triangle.2.circlepath")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.reflection)
                 // 5.0.2：每周自测
                 Label("自测", systemImage: "checklist")
                     .sidebarMenuRow()
                     .tag(SidebarItem.selfTest)
+                // 5.0.1：复盘——每周五步，月度、年度
+                Label("复盘", systemImage: "arrow.triangle.2.circlepath")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.reflection)
                 Label("个人成长", systemImage: "leaf")
                     .sidebarMenuRow()
                     .tag(SidebarItem.growth)
@@ -327,32 +312,10 @@ struct SidebarView: View {
                     .sidebarMenuRow()
                     .tag(SidebarItem.stats)
             } header: {
-                Text("回顾")
+                Text("考场")
             }
 
-            Section(isExpanded: store.sidebarGroupBinding("thinking")) {
-                HStack {
-                    Label("札记", systemImage: "lightbulb")
-                    Spacer()
-                    if store.ideaNoteCount > 0 { SidebarCount(store.ideaNoteCount) }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.ideaNotes)
-                .contextMenu { Button("新写札记…") { store.composeIdeaNote() } }
-                // 4.1.1：问题簿——行尾为未解决的问题数
-                HStack {
-                    Label("问题簿", systemImage: "questionmark.bubble")
-                    Spacer()
-                    if store.openQuestionCount > 0 { SidebarCount(store.openQuestionCount) }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.questionBook)
-                .contextMenu { Button("记一个问题…") { store.newQuestion() } }
-            } header: {
-                Text("思考")
-            }
-
-            Section(isExpanded: store.sidebarGroupBinding("materials")) {
+            Section(isExpanded: store.sidebarGroupBinding("bank")) {
                 Label("全部摘录", systemImage: "text.quote")
                     .sidebarMenuRow()
                     .tag(SidebarItem.all)
@@ -392,18 +355,69 @@ struct SidebarView: View {
                         }
                     }
                 }
+                HStack {
+                    Label("札记", systemImage: "lightbulb")
+                    Spacer()
+                    if store.ideaNoteCount > 0 { SidebarCount(store.ideaNoteCount) }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.ideaNotes)
+                .contextMenu { Button("新写札记…") { store.composeIdeaNote() } }
+                // 4.1.1：问题簿——行尾为未解决的问题数
+                HStack {
+                    Label("问题簿", systemImage: "questionmark.bubble")
+                    Spacer()
+                    if store.openQuestionCount > 0 { SidebarCount(store.openQuestionCount) }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.questionBook)
+                .contextMenu { Button("记一个问题…") { store.newQuestion() } }
+                // 专题笔记本
+                ForEach(store.notebooks) { n in
+                    if let id = n.id {
+                        HStack {
+                            Label(n.title, systemImage: "text.book.closed").lineLimit(1)
+                            Spacer()
+                            SidebarCount(store.notebookQuoteCounts[id] ?? 0)
+                        }
+                        .sidebarMenuRow()
+                        .tag(SidebarItem.notebook(id))
+                        .contextMenu {
+                            Button("删除笔记本…", role: .destructive) { store.notebookPendingDeletion = n }
+                        }
+                    }
+                }
+                if store.notebooks.isEmpty {
+                    Button {
+                        store.newNotebookRequest = NewNotebookRequest()
+                    } label: {
+                        Label("新建专题笔记本…", systemImage: "plus")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .sidebarMenuRow()
+                }
+            } header: {
+                HStack {
+                    Text("题库")
+                    Spacer()
+                    Menu {
+                        Button("新写札记…") { store.composeIdeaNote() }
+                        Button("记一个问题…") { store.newQuestion() }
+                        Button("新建专题笔记本…") { store.newNotebookRequest = NewNotebookRequest() }
+                    } label: { Image(systemName: "plus") }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .handCursor()
+                        .help("新写札记、记问题或新建专题笔记本")
+                }
+            }
+
+            Section(isExpanded: store.sidebarGroupBinding("other")) {
                 Label("出处管理", systemImage: "books.vertical")
                     .sidebarMenuRow()
                     .tag(SidebarItem.sourceManager)
-                HStack {
-                    Label("网页存档", systemImage: "globe")
-                    Spacer()
-                    if store.articleCount > 0 {
-                        SidebarCount(store.articleCount)
-                    }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.articles)
                 // 出处列表默认折叠（记住上次状态）
                 DisclosureGroup(isExpanded: Bindable(store).sourcesExpanded) {
                     ForEach(store.sources) { source in
@@ -433,9 +447,21 @@ struct SidebarView: View {
                         SidebarCount(store.sources.count)
                     }
                 }
+                HStack {
+                    Label("最近删除", systemImage: "trash")
+                    Spacer()
+                    if store.trashCount > 0 {
+                        SidebarCount(store.trashCount)
+                    }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.trash)
+                Label("使用说明", systemImage: "questionmark.circle")
+                    .sidebarMenuRow()
+                    .tag(SidebarItem.help)
             } header: {
                 HStack {
-                    Text("材料")
+                    Text("其他")
                     Spacer()
                     Menu {
                         Picker("出处排序", selection: Bindable(store).sourceSort) {
@@ -452,94 +478,8 @@ struct SidebarView: View {
                     .help("出处排序：\(store.sourceSort.label)")
                 }
             }
-
-            if showResearch {
-                Section(isExpanded: store.sidebarGroupBinding("research")) {
-                ForEach(store.researchProjects) { p in
-                    if let id = p.id {
-                        HStack(spacing: 6) {
-                            Label(p.title, systemImage: p.kind.icon).lineLimit(1)
-                            Spacer()
-                            if id == store.currentProjectID {
-                                Image(systemName: "scope").font(.system(size: 10)).foregroundStyle(.secondary)
-                                    .help("当前项目")
-                            }
-                        }
-                        .sidebarMenuRow()
-                        .tag(SidebarItem.project(id))
-                        .contextMenu {
-                            if id != store.currentProjectID { Button("设为当前项目") { store.setCurrentProject(p) } }
-                            Button("编辑…") { store.editResearchProject(p) }
-                            Button("归档") { store.setResearchProjectArchived(p, true) }
-                        }
-                    }
-                }
-                Label(store.researchProjects.isEmpty ? "新建或查看项目…" : "全部项目", systemImage: "square.stack.3d.up")
-                    .foregroundStyle(.secondary)
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.projects)
-                ForEach(store.notebooks) { n in
-                    if let id = n.id {
-                        HStack {
-                            Label(n.title, systemImage: "text.book.closed").lineLimit(1)
-                            Spacer()
-                            SidebarCount(store.notebookQuoteCounts[id] ?? 0)
-                        }
-                        .sidebarMenuRow()
-                        .tag(SidebarItem.notebook(id))
-                        .contextMenu {
-                            Button("删除笔记本…", role: .destructive) { store.notebookPendingDeletion = n }
-                        }
-                    }
-                }
-                if store.notebooks.isEmpty {
-                    Button {
-                        store.newNotebookRequest = NewNotebookRequest()
-                    } label: {
-                        Label("新建专题笔记本…", systemImage: "plus")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .sidebarMenuRow()
-                }
-                } header: {
-                    HStack {
-                        Text("研究与写作")
-                        Spacer()
-                        Menu {
-                            Button("新建研究项目…") { store.newResearchProject() }
-                            Button("新建专题笔记本…") { store.newNotebookRequest = NewNotebookRequest() }
-                        } label: { Image(systemName: "plus") }
-                            .menuStyle(.borderlessButton)
-                            .menuIndicator(.hidden)
-                            .fixedSize()
-                            .handCursor()
-                            .help("新建研究项目或专题笔记本")
-                    }
-                }
-            }
-
-            // 不常用的两项放在最后
-            Section {
-                HStack {
-                    Label("最近删除", systemImage: "trash")
-                    Spacer()
-                    if store.trashCount > 0 {
-                        SidebarCount(store.trashCount)
-                    }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.trash)
-                Label("使用说明", systemImage: "questionmark.circle")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.help)
-            }
         }
         .listStyle(.sidebar)
-        .onAppear {
-            let r = SidebarLayout.applyV5Defaults(collapsed: store.sidebarCollapsedGroups, applied: v5Applied)
-            if !v5Applied { store.sidebarCollapsedGroups = r.collapsed; v5Applied = true }
-        }
         // 1.1：侧边栏收紧——字号比正文小一号、行高更矮，计数用小号灰字
         .font(.system(size: 12.5))
         .environment(\.defaultMinListRowHeight, 22)

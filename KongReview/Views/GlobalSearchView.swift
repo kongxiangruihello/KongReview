@@ -51,7 +51,7 @@ struct GlobalSearchView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(ReviewPalette.hair))
                 Picker("搜索范围", selection: $state.selectedKind) {
                     Text("全部").tag(Optional<GlobalSearchKind>.none)
-                    ForEach(GlobalSearchKind.allCases) { kind in
+                    ForEach(GlobalSearchKind.shown) { kind in
                         Text(kind.title).tag(Optional(kind))
                     }
                 }
@@ -108,7 +108,7 @@ struct GlobalSearchView: View {
                             Button("重试") { state.invalidate() }.handCursor()
                         }
                     }
-                    ForEach(state.sections.filter { $0.total > 0 }, id: \.kind) { page in
+                    ForEach(state.sections.filter { $0.total > 0 && GlobalSearchKind.shown.contains($0.kind) }, id: \.kind) { page in
                         resultSection(page)
                     }
                 }

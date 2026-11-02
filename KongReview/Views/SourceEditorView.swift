@@ -83,7 +83,6 @@ struct SourceEditorView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                CoverEditorSection(source: source, isbn: optional(sourceBinding.isbn))
                 Section("每日回顾") {
                     Picker("出现频率", selection: sourceBinding.reviewWeight) {
                         Text("不再出现").tag(0.0)

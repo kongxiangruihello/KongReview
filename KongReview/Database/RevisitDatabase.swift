@@ -27,15 +27,15 @@ struct RevisitLimits: Equatable, Sendable {
     static let blocksKey = "revisit.blocksPerDay"
     var notes = 2
     var questions = 1
-    /// 5.1：读完的书（提要）
-    var books = 1
+    /// 5.1：读完的书（提要）——6.0.1 起舍弃，默认 0、设置里不再提供
+    var books = 0
     /// 5.2.0：专题笔记本里的段落
     var blocks = 2
 
     static func saved(_ defaults: UserDefaults = .standard) -> RevisitLimits {
         RevisitLimits(notes: max(0, min(10, defaults.object(forKey: notesKey) as? Int ?? 2)),
                       questions: max(0, min(5, defaults.object(forKey: questionsKey) as? Int ?? 1)),
-                      books: max(0, min(3, defaults.object(forKey: booksKey) as? Int ?? 1)),
+                      books: 0,
                       blocks: max(0, min(10, defaults.object(forKey: blocksKey) as? Int ?? 2)))
     }
 }

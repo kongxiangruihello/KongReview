@@ -50,7 +50,8 @@ struct RevisitView: View {
                     switch item {
                     case .note(let n): noteCard(n)
                     case .question(let q): questionCard(q)
-                    case .book(let b): RevisitBookCard(book: b, revealed: $revealed, key: key)
+                    // 6.0.1：精简提要已舍弃，队列里不再有书（每天上限为 0）
+                    case .book: finished
                     case .block(let k): blockCard(k)
                     }
                 } else {

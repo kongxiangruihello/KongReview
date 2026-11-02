@@ -14,7 +14,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "6.0.0"
+    MARKETING_VERSION: "6.0.1"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""          # 在 Xcode 的 Signing & Capabilities 里选自己的 Team
 
@@ -44,7 +44,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.kongxiangrui.KongReview
             CFBundleURLSchemes: [kongreview, kongglean]   # kongglean：改名前的旧链接
-        NSAppleEventsUsageDescription: 存档网页时读取浏览器当前标签页的网址，自动填入。
+        NSAppleEventsUsageDescription: 从浏览器录入摘录时读取当前标签页的网址，自动填入出处。
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true    # 网页存档里有不少 http 图片
         NSServices:                       # 1.3：系统“服务”菜单（与 Tools/build-dmg.sh 保持一致）
@@ -52,11 +52,6 @@ targets:
             NSMessage: addHighlight
             NSPortName: KongReview
             NSSendTypes: [public.html, public.rtf, public.utf8-plain-text, NSStringPboardType]
-            NSRequiredContext: {}
-          - NSMenuItem: { default: 在 KongReview 中查引文 }
-            NSMessage: lookupSelection
-            NSPortName: KongReview
-            NSSendTypes: [public.utf8-plain-text, NSStringPboardType]
             NSRequiredContext: {}
     entitlements:
       path: KongReview/KongReview.entitlements
