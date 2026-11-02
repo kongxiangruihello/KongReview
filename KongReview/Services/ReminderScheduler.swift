@@ -17,6 +17,7 @@ final class ReminderScheduler {
 
     func applySavedSettings() {
         applyReflectionReminder()
+        applyCheckinReminder()
         let d = UserDefaults.standard
         let enabled = d.bool(forKey: SettingsKeys.reminderEnabled)
         let hour = d.object(forKey: SettingsKeys.reminderHour) as? Int ?? 8
@@ -81,6 +82,35 @@ final class ReminderScheduler {
                 let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
                 let request = UNNotificationRequest(identifier: ReminderPlan.identifier(for: fire),
                                                     content: content, trigger: trigger)
+                try? await center.add(request)
+            }
+        }
+    }
+
+    /// 5.2.2：晚间打卡提醒（默认开启，21:00）：今天还没打卡才提醒；打卡后撤掉今天那条
+    func applyCheckinReminder() {
+        let d = UserDefaults.standard
+        let enabled = d.object(forKey: CheckinReminderPlan.enabledKey) as? Bool ?? true
+        let hour = d.object(forKey: CheckinReminderPlan.hourKey) as? Int ?? CheckinReminderPlan.defaultHour
+        let minute = d.object(forKey: CheckinReminderPlan.minuteKey) as? Int ?? 0
+        let checked = QuickCaptureController.shared.store?.checkin.todayChecked ?? false
+        let fires = enabled ? CheckinReminderPlan.fires(now: Date(), hour: hour, minute: minute, checkedToday: checked) : []
+        let center = self.center
+        Task {
+            let pending = await center.pendingNotificationRequests()
+            center.removePendingNotificationRequests(withIdentifiers: pending.map(\.identifier).filter { $0.hasPrefix(CheckinReminderPlan.prefix) })
+            if checked { center.removeDeliveredNotifications(withIdentifiers: [CheckinReminderPlan.identifier(for: Date())]) }
+            guard enabled, !fires.isEmpty else { return }
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            guard granted else { return }
+            for fire in fires {
+                let content = UNMutableNotificationContent()
+                content.title = "今天还没打卡"
+                content.body = "做完今日检查中的一组，再写下日评（给今天打个分），就算打卡。"
+                content.sound = .default
+                let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+                let request = UNNotificationRequest(identifier: CheckinReminderPlan.identifier(for: fire), content: content,
+                                                    trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false))
                 try? await center.add(request)
             }
         }

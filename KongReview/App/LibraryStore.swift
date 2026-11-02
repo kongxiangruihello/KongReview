@@ -112,6 +112,9 @@ final class LibraryStore {
     /// 5.2.0：今日检查（各组已做 / 应做）
     var dailyCheck = DailyCheckState.empty
     var dailyCheckRevision = 0
+    /// 5.2.2：打卡天数；打卡状态变化后由提醒模块重排晚间打卡提醒
+    var checkin = CheckinSummary.empty
+    @ObservationIgnored var onCheckinChanged: (() -> Void)?
     /// 5.1：提要面板与改动计数
     var bookSummaryEditor: BookSummaryEditorRequest?
     var bookSummaryRevision = 0

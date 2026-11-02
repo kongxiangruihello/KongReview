@@ -31,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         QuickCaptureController.shared.store?.onReviewedToday = {
             ReminderScheduler.shared.applySavedSettings()
         }
+        // 5.2.2：今天打卡后撤掉晚间打卡提醒
+        QuickCaptureController.shared.store?.onCheckinChanged = {
+            ReminderScheduler.shared.applyCheckinReminder()
+        }
         // 5.0.1：完成复盘后重排每周复盘提醒（本周已复盘就不再提醒）
         QuickCaptureController.shared.store?.onReflectionChanged = {
             ReminderScheduler.shared.applySavedSettings()

@@ -32,11 +32,19 @@ struct StatsView: View {
                 Button("打开学习记录日历") { store.learningExplorer = .init(route: .day(Date())) }.handCursor()
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                     tile("今天 · 全库", "\(activity.today.highlights) 条摘录\n\(activity.today.cards) 张卡 · \(activity.today.cardRatings) 次评分", "sun.max")
-                    tile("连续学习", "\(activity.currentStreak) 天", "flame")
-                    tile("最长连续", "\(activity.longestStreak) 天", "trophy")
+                    // 5.2.2：打卡天数
+                    tile(store.checkin.current > 0 ? "连续打卡" : "本月打卡", "\(store.checkin.current > 0 ? store.checkin.current : store.checkin.month) 天", "flame")
+                    tile("最长连续打卡", "\(store.checkin.longest) 天", "trophy")
+                    tile("累计打卡", "\(store.checkin.total) 天\n本年 \(store.checkin.year) 天", "checkmark.seal")
                     tile("学习过的天数", "\(activity.activeDays) 天", "calendar")
                     tile("累计操作次数", "\(s.totalHighlights) 次摘录操作\n\(s.totalCards) 次评分", "sum")
                     tile("记忆卡正确率", s.cardAccuracy.map { String(format: "%.0f%%", $0 * 100) } ?? "—", "checkmark.circle")
+                }
+
+                // 5.2.2：一年打卡
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("一年打卡 · 深浅按自评").font(.headline)
+                    CheckinHeatmap(summary: store.checkin)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {

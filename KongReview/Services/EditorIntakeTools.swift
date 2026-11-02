@@ -8,6 +8,9 @@ enum EditorPasteStyle: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String { switch self { case .keep:"保留格式"; case .clean:"清理格式"; case .plain:"纯文字" } }
     static let defaultsKey = "editor.pasteStyle"
+    /// 5.2.2：粘贴带格式的内容时是否先弹出“选择粘贴方式”（默认否：直接保留原格式粘贴）
+    static let askKey = "editor.askPasteStyle"
+    static var asksEveryTime: Bool { UserDefaults.standard.bool(forKey: askKey) }
 }
 struct EditorPasteProposal: Identifiable {
     let id = UUID()
@@ -72,7 +75,14 @@ enum SourceAttributionRecognition {
 
 extension RichEditorHandle {
     func receivePaste(html: String,plain: String,original: String,selection: NSRange? = nil,source: Bool = false) {
-        pasteProposal = .init(original:original,html:html,plain:plain,source:source,selection:selection,baseline:valueReader?())
+        let proposal = EditorPasteProposal(original:original,html:html,plain:plain,source:source,selection:selection,baseline:valueReader?())
+        // 5.2.2：默认不弹窗，直接按原格式粘贴（随后照常识别末尾出处）；设置里打开“先选择粘贴方式”才弹出选择界面。
+        // 直接粘贴没成功（编辑内容在这期间变了）时退回到选择界面，免得内容丢失。
+        guard !EditorPasteStyle.asksEveryTime else { pasteProposal = proposal; return }
+        applyPaste(proposal,style:.keep) { [weak self] success in
+            guard let self else { return }
+            if success { self.attributionPulse += 1 } else { self.pasteProposal = proposal }
+        }
     }
     func applyPaste(_ proposal: EditorPasteProposal,style: EditorPasteStyle,completion: @escaping (Bool)->Void) {
         guard proposal.baseline == valueReader?() else { completion(false); return }
