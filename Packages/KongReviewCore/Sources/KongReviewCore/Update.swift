@@ -46,6 +46,19 @@ public struct UpdateRelease: Equatable, Sendable {
     /// GitHub 为附件给出的“sha256:…”摘要（较新的发布才有）
     public var sha256: String?
 
+    public init(version: AppVersion, tag: String, notes: String, publishedAt: Date?, pageURL: URL?,
+                dmgName: String, dmgURL: URL, dmgSize: Int64, sha256: String?) {
+        self.version = version
+        self.tag = tag
+        self.notes = notes
+        self.publishedAt = publishedAt
+        self.pageURL = pageURL
+        self.dmgName = dmgName
+        self.dmgURL = dmgURL
+        self.dmgSize = dmgSize
+        self.sha256 = sha256
+    }
+
     public static func == (a: UpdateRelease, b: UpdateRelease) -> Bool {
         a.tag == b.tag && a.dmgURL == b.dmgURL && a.dmgSize == b.dmgSize
     }
