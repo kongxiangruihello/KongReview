@@ -28,7 +28,9 @@ struct HomeView: View {
                                     onOpen: { store.showsDraftRecovery = true })
 
                 TodayWorkBar(summary: store.homeLearningSummary, revisit: store.revisitCounts, gains: store.todayGains, focus: nil,
+                             check: store.dailyCheck,
                              onStart: { store.startTodayWork() },
+                             onCheck: { store.openDailyCheck() },
                              onFocus: { store.selection = store.currentProjectID.map(SidebarItem.project) ?? .projects })
 
                 // 5.0.1：本周复盘——未做时“去复盘”，做过显示写下的三句话

@@ -65,8 +65,10 @@ extension LibraryStore {
         cardLearningSummaryScope = request.scope
         if study.notebookId != nil { study.notebookCounts = snapshot.scopedCards.pending }
         derivedIsLoading = false
+        derivedDayKey = ReminderPlan.dayKey(request.now)
         derivedStatisticsError = nil
         derivedPendingKey = nil
+        refreshDailyCheck()
     }
 
     private func derivedStatisticsFailed(_ error: Error) {

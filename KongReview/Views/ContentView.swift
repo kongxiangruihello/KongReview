@@ -231,6 +231,8 @@ struct ContentView: View {
             ReflectionView()
         case .selfTest:
             SelfTestView()
+        case .dailyCheck:
+            DailyCheckView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -258,6 +260,7 @@ struct SidebarView: View {
                 else if destination == .revisit { store.openRevisit() }
                 else if destination == .reflection { store.openReflection() }
                 else if destination == .selfTest { store.openSelfTest() }
+                else if destination == .dailyCheck { store.openDailyCheck() }
                 else { store.selection = destination }
             }
         )) {
@@ -267,6 +270,14 @@ struct SidebarView: View {
                 Label("首页", systemImage: "house")
                     .sidebarMenuRow()
                     .tag(SidebarItem.home)
+                // 5.2.0：今日检查——行尾为今天还剩的项数
+                HStack {
+                    Label("今日检查", systemImage: "checklist.checked")
+                    Spacer()
+                    if store.dailyCheck.left > 0 { SidebarCount(store.dailyCheck.left) }
+                }
+                .sidebarMenuRow()
+                .tag(SidebarItem.dailyCheck)
                 // 已选中时再点，也要从主题范围回到全库今日队列。
                 Button { store.openTodayReview() } label: {
                     Label("今日回顾", systemImage: "sun.max")

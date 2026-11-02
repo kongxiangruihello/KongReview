@@ -27,6 +27,15 @@ extension LibraryStore {
         } catch { report(error) }
     }
 
+    /// 5.2.0：笔记重温的三个选择（已吸收、需重读、待整理）
+    func revisitBlock(_ id: Int64, _ outcome: RevisitOutcome) {
+        guard !fullBackupBusy else { return }
+        do {
+            try db.recordBlockRevisit(blockId: id, outcome: outcome)
+            refreshRevisit()
+        } catch { report(error) }
+    }
+
     /// 问题重温的三个选择；“写解答”随即打开问题
     func revisitQuestion(_ id: Int64, _ outcome: RevisitOutcome, highlightIDs: [Int64] = [], remark: String = "") {
         guard !fullBackupBusy else { return }

@@ -20,17 +20,21 @@ struct RevisitView: View {
         case note(RevisitNoteItem)
         case question(RevisitQuestionItem)
         case book(RevisitBookItem)
+        /// 5.2.0：笔记段落
+        case block(RevisitBlockItem)
         var key: String {
             switch self {
             case .note(let n): "n\(n.id)"
             case .question(let q): "q\(q.id)"
             case .book(let b): "b\(b.id)"
+            case .block(let b): "k\(b.id)"
             }
         }
     }
 
     private var current: Item? {
         if let n = queue.notes.first { return .note(n) }
+        if let k = queue.blocks.first { return .block(k) }
         if let b = queue.books.first { return .book(b) }
         if let q = queue.questions.first { return .question(q) }
         return nil
@@ -47,6 +51,7 @@ struct RevisitView: View {
                     case .note(let n): noteCard(n)
                     case .question(let q): questionCard(q)
                     case .book(let b): RevisitBookCard(book: b, revealed: $revealed, key: key)
+                    case .block(let k): blockCard(k)
                     }
                 } else {
                     finished
@@ -72,7 +77,8 @@ struct RevisitView: View {
     }
 
     private static func key(_ q: RevisitQueue) -> String {
-        q.notes.first.map { "n\($0.id)" } ?? q.books.first.map { "b\($0.id)" } ?? q.questions.first.map { "q\($0.id)" } ?? ""
+        q.notes.first.map { "n\($0.id)" } ?? q.blocks.first.map { "k\($0.id)" } ?? q.books.first.map { "b\($0.id)" }
+            ?? q.questions.first.map { "q\($0.id)" } ?? ""
     }
 
     private func resetCard() {
@@ -90,7 +96,7 @@ struct RevisitView: View {
         case .question(let q):
             let text = q.title + "\n" + Markdown.plainText(fromHTML: q.detail)
             fresh = store.revisitNewHighlights(text: text, since: q.since, excluding: q.highlightIDs, limit: 5)
-        case .book, nil:
+        case .book, .block, nil:
             fresh = []
         }
     }
@@ -116,7 +122,7 @@ struct RevisitView: View {
                 Button { store.openQuestionBook() } label: { Label("问题簿", systemImage: "questionmark.bubble") }
                     .buttonStyle(.borderless).font(.system(size: 12)).handCursor()
             }
-            Text("今日功课第三步：久未重温的札记、「常念」的问题与读完的书回到眼前。先想一想再展开；每张只问一句，用 1、2、3 作答。")
+            Text("今日功课第三步：久未重温的札记、笔记、「常念」的问题与读完的书回到眼前。先想一想再展开；每张只问一句，用 1、2、3 作答。")
                 .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -219,6 +225,55 @@ struct RevisitView: View {
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ReviewPalette.hair))
     }
 
+    // MARK: 笔记段落（5.2.0）
+
+    private func blockCard(_ k: RevisitBlockItem) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ReviewCardContainer(padding: 30) {
+                HStack(spacing: 8) {
+                    Label("笔记", systemImage: "book.closed").font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
+                    Text(blockByline(k)).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+                    Spacer()
+                }
+                Text("《\(k.notebookTitle)》" + (k.heading.map { " · " + $0 } ?? ""))
+                    .font(.system(size: 22, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 14)
+                if revealed {
+                    RichWebText(text: Markdown.richHTML(k.text), style: .preview, slot: "revisit-block")
+                        .padding(.top, 16)
+                } else {
+                    Text("这一段开头：" + k.opening)
+                        .font(.system(size: 14, design: .serif)).foregroundStyle(ReviewPalette.sub)
+                        .padding(.top, 10)
+                    HStack(spacing: 10) {
+                        Image(systemName: "lightbulb").foregroundStyle(ReviewPalette.sub)
+                        Text("先合上想一想：这一段说了什么？要点是哪几条？想好了再展开对照。")
+                            .font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 18)
+                    PillButton(icon: "chevron.down", title: "展开这一段", key: "空格") { revealed = true }
+                        .keyboardShortcut(key(.space))
+                        .padding(.top, 14)
+                }
+            }
+            choices([
+                ("1", "已吸收", "checkmark", "能说出要点；下次在 \(AppDatabase.nextNoteInterval(after: k.intervalDays)) 天后", { store.revisitBlock(k.id, .absorbed) }),
+                ("2", "需重读", "arrow.uturn.backward", "说不出或说错；\(AppDatabase.blockRereadDays) 天后再来，间隔从头算", { store.revisitBlock(k.id, .reread) }),
+                ("3", "待整理", "tray.full", "内容还乱；一周后再来，列入今日检查的“待整理”", { store.revisitBlock(k.id, .organize) }),
+            ], openTitle: "打开笔记本", open: { store.selection = .notebook(k.notebookId) })
+        }
+    }
+
+    private func blockByline(_ k: RevisitBlockItem) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年M月d日"
+        var parts = ["写于 " + f.string(from: k.createdAt)]
+        if let last = k.lastReviewedAt { parts.append("上次重温 " + f.string(from: last)) } else { parts.append("第一次重温") }
+        return parts.joined(separator: " · ")
+    }
+
     // MARK: 常念的问题
 
     private func questionCard(_ q: RevisitQuestionItem) -> some View {
@@ -309,15 +364,16 @@ struct RevisitView: View {
     private var finished: some View {
         ReviewCardContainer(padding: 30) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(queue.done > 0 ? "今日重温已完成" : "今天没有要重温的札记与问题")
+                Text(queue.done > 0 ? "今日重温已完成" : "今天没有要重温的札记、笔记与问题")
                     .font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 Text(queue.done > 0
-                     ? "今天重温了 \(queue.done) 张。札记按 7、21、60、180、365 天的间隔回来，改过的从头算；「常念」的问题约每周一次。"
+                     ? "今天重温了 \(queue.done) 张。札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；「常念」的问题约每周一次。"
                      : "新写的札记 7 天后第一次回来，之后间隔逐渐加长；在问题簿里标为「常念」的问题约每周回来一次；读完的书在 1 个月、半年、一年后各回来一次。每天至多 \(RevisitLimits.saved().notes) 条札记、\(RevisitLimits.saved().questions) 个问题，可在设置的“回顾”页修改。")
                     .font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
-                    PillButton(icon: "house", title: "回到首页", style: .primary) { store.selection = .home }
+                    PillButton(icon: "checklist.checked", title: "今日检查", style: .primary) { store.openDailyCheck() }
+                    PillButton(icon: "house", title: "回到首页") { store.selection = .home }
                     PillButton(icon: "note.text", title: "全部札记") { store.selection = .ideaNotes }
                 }
                 .padding(.top, 6)

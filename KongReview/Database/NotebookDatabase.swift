@@ -134,6 +134,8 @@ extension AppDatabase {
             if let old = try NotebookBlock.fetchOne(db, key: id) {
                 let d = WritingCount.delta(from: Self.ownWords(old), to: Self.ownWords(old.kind, text: text, note: old.note))
                 try Self.logWriting(db, notebookId: old.notebookId, added: d.added, removed: d.removed, now: now)
+                // 5.2.0：改过文字就不再算“待整理”
+                if old.kind == .text { try Self.noteBlockEdited(db, id: id, before: old.text, after: text) }
             }
             try db.execute(sql: "UPDATE notebook_block SET text = ?, updatedAt = ? WHERE id = ?", arguments: [text, now, id])
             try db.execute(sql: "UPDATE notebook SET updatedAt = ? WHERE id = (SELECT notebookId FROM notebook_block WHERE id = ?)",

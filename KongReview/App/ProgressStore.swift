@@ -8,6 +8,7 @@ extension LibraryStore {
     func refreshProgress() {
         todayGains = (try? db.todayGains()) ?? []
         progressRevision += 1
+        refreshDailyCheck()
     }
 
     func openSelfTest() {
