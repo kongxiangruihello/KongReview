@@ -25,6 +25,8 @@ struct SettingsView: View {
                 .tabItem { Label("摘录", systemImage: "square.and.arrow.down") }
             DataSettings()
                 .tabItem { Label("数据", systemImage: "externaldrive") }
+            UpdateSettings()
+                .tabItem { Label("更新", systemImage: "arrow.down.circle") }
         }
         .frame(width: 600, height: 500)
         .disabled(store.fullBackupBusy)
@@ -592,5 +594,37 @@ struct RestoreBackupView: View {
         } message: {
             Text("数据库里的全部内容（摘录、出处、记忆卡、回顾记录、网页存档）会换成这份备份；应用设置不变。当前数据会先另存一份。")
         }
+    }
+}
+
+/// 5.2.1：在线更新
+private struct UpdateSettings: View {
+    @AppStorage(AppUpdater.autoCheckKey) private var autoCheck = true
+    private var updater = AppUpdater.shared
+
+    var body: some View {
+        Form {
+            Section("版本") {
+                LabeledContent("当前版本", value: updater.currentVersionText)
+                if let r = updater.release { LabeledContent("最新发布", value: r.version.description) }
+                LabeledContent("上次检查", value: updater.lastChecked.map(Self.time) ?? "还没有检查过")
+                HStack {
+                    Button("立即检查更新") { updater.check(manual: true) }
+                    Button("在网页上查看所有版本") { NSWorkspace.shared.open(AppUpdater.releasesPage) }
+                }
+            }
+            Section("自动检查") {
+                Toggle("启动时自动检查（每天至多一次）", isOn: $autoCheck)
+                Text("有新版本时弹出说明，可下载并安装：显示下载进度，下载后核对文件，安装前先备份学习库，旧版留在缓存目录作后备。新版发布在 GitHub（kongxiangruihello/KongReview）。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    static func time(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "yyyy年M月d日 HH:mm"
+        return f.string(from: d)
     }
 }

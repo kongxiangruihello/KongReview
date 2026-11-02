@@ -51,3 +51,16 @@ extension LibraryStore {
         } catch { report(error) }
     }
 }
+
+// MARK: - 5.2.1：日评分
+
+extension LibraryStore {
+    /// 写今天的自评与一句话
+    func saveSelfScore(_ score: SelfScore?, note: String) {
+        guard !fullBackupBusy else { return }
+        do {
+            try db.saveSelfScore(score, note: note)
+            dailyCheckRevision += 1
+        } catch { report(error) }
+    }
+}
