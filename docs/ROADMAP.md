@@ -347,7 +347,7 @@
 - [x] 摘录、图片摘录（有文字）→ 摘录；笔记、整本书心得、札记 → 札记，引用的摘录挂上
 - [x] 按 KongFolio 编号去重；改过的更新；KongReview 里删去的不加回；KongFolio 最近删除里的不导入
 - [x] 设置、菜单；迁移 v27
-- [ ] Mac 上全量测试；用作者真实的 KongFolio 阅读记录试导入（见 docs/validation/6.0.6-kongfolio.md）
+- [x] Mac 上：核心包 173 项、应用 642 项（630 通过、12 跳过、0 失败）；预览窗口用真实的 KongFolio 阅读记录试导入（见 docs/validation/6.0.6-kongfolio.md）
 - [ ] KongFolio 的“问题簿”（待作者确认在哪里）；只有图片的摘录
 
 ## v6.0.5 — 成绩册与考场门口（6.0 第五步）
