@@ -9,6 +9,7 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var store = store
+        @Bindable var updater = AppUpdater.shared
         NavigationSplitView {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 168, ideal: 196, max: 280)
@@ -42,6 +43,8 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented:$store.showsResourceAudit) { LibraryResourceAuditView() }
+        // 5.2.1：在线更新
+        .sheet(isPresented: $updater.showsPanel) { UpdatePanel() }
         .sheet(item: $store.researchProjectEditor) { project in ResearchProjectEditor(project: project).environment(store) }
         .sheet(item: $store.ideaNoteComposer) { composer in IdeaNoteComposerSheet(composer: composer).environment(store) }
         .sheet(item: $store.questionCreator) { request in QuestionCreateSheet(request: request).environment(store) }

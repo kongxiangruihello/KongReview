@@ -70,6 +70,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let s = QuickCaptureController.shared.store { WeeklyDigestNotifier.checkAndPost(store: s) }
         BrowserWatcher.shared.start()
+
+        // 5.2.1：在线更新——安装前先备份学习库；启动时每天至多自动检查一次（晚一点，免得和启动维护抢资源）
+        AppUpdater.shared.beforeInstall = {
+            guard let s = QuickCaptureController.shared.store else { return }
+            _ = try BackupService.backupNow(db: s.db)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            MainActor.assumeIsolated { AppUpdater.shared.checkIfDue() }
+        }
     }
 
     /// 关掉主窗口后应用继续在后台运行（快捷键、菜单栏图标仍可用）

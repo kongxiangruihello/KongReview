@@ -47,6 +47,10 @@ struct KongReviewApp: App {
         }
         .defaultSize(width: 1100, height: 720)
         .commands {
+            // 5.2.1：在线更新
+            CommandGroup(after: .appInfo) {
+                Button("检查更新…") { WindowOpener.showMain(); AppUpdater.shared.check(manual: true) }
+            }
             CommandGroup(replacing: .newItem) {
                 Group {
                 Button("新建摘录") { store.newHighlight() }

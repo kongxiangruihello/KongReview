@@ -27,6 +27,9 @@ struct HomeView: View {
                 DraftRecoveryBanner(highlights: store.savedHighlightDrafts, cards: store.savedCardDrafts,
                                     onOpen: { store.showsDraftRecovery = true })
 
+                // 5.2.1：有新版本时提示一行
+                UpdateHomeBanner()
+
                 TodayWorkBar(summary: store.homeLearningSummary, revisit: store.revisitCounts, gains: store.todayGains, focus: nil,
                              check: store.dailyCheck,
                              onStart: { store.startTodayWork() },
