@@ -5,7 +5,7 @@ import KongReviewCore
 
 /// 5.1：精简提要——保存、读完后 1 个月、半年、一年重温、每日上限、小胜与读完的书
 final class V510BookSummaryTests: XCTestCase {
-    // 6.0.1：这里测的是已舍弃、代码暂留到 6.0.3 的旧功能——测试时临时打开
+    // 6.0.1：这里测的是已舍弃、代码暂留到成绩册（6.0.4）的旧功能——测试时临时打开
     override func setUp() { super.setUp(); SlimSwitch.featuresOff = false }
     override func tearDown() { SlimSwitch.featuresOff = true; super.tearDown() }
 

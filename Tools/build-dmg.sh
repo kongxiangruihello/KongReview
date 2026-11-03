@@ -34,72 +34,11 @@ for f in "${OUT}" "${FINAL_DMG}"; do
   fi
 done
 
-echo "==> 编译（Release，arm64）"
-swift build -c release --arch arm64 --product "${APP}"
-BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
-
-echo "==> 组装 ${APP}.app"
-mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
-cp "${BIN_DIR}/${APP}" "${APP_DIR}/Contents/MacOS/${APP}"
-# SwiftPM 生成的资源包（如 GRDB 的隐私清单）
-find "${BIN_DIR}" -maxdepth 1 -name '*.bundle' -exec cp -R {} "${APP_DIR}/Contents/Resources/" \;
-
-echo "==> 生成图标"
-ICONSET="${WORK}/AppIcon.iconset"
-mkdir -p "${ICONSET}"
-cp KongReview/Resources/Assets.xcassets/AppIcon.appiconset/icon_*.png "${ICONSET}/"
-iconutil -c icns "${ICONSET}" -o "${APP_DIR}/Contents/Resources/AppIcon.icns"
-rm -rf "${ICONSET}"
-
-cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
-  <key>CFBundleExecutable</key><string>${APP}</string>
-  <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
-  <key>CFBundleName</key><string>${APP}</string>
-  <key>CFBundleDisplayName</key><string>${APP}</string>
-  <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSHumanReadableCopyright</key><string>© 孔祥瑞</string>
-  <key>NSAppleEventsUsageDescription</key><string>从浏览器录入摘录时读取当前标签页的网址，自动填入出处。</string>
-  <key>NSAppTransportSecurity</key>
-  <dict>
-    <key>NSAllowsArbitraryLoads</key><true/>
-  </dict>
-  <key>NSServices</key>
-  <array>
-    <dict>
-      <key>NSMenuItem</key><dict><key>default</key><string>添加到 KongReview</string></dict>
-      <key>NSMessage</key><string>addHighlight</string>
-      <key>NSPortName</key><string>${APP}</string>
-      <key>NSSendTypes</key><array><string>public.html</string><string>public.rtf</string><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array>
-      <key>NSRequiredContext</key><dict/>
-    </dict>
-  </array>
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleURLName</key><string>${BUNDLE_ID}</string>
-      <key>CFBundleURLSchemes</key><array><string>kongreview</string><string>kongglean</string></array>
-    </dict>
-  </array>
-</dict>
-</plist>
-PLIST
-
-echo "==> 清除扩展属性"
+echo "==> 编译并签名（Tools/build-app.sh）"
+bash Tools/build-app.sh
+mkdir -p "${WORK}"
+ditto "${OUT}/${APP}.app" "${APP_DIR}"
 xattr -cr "${APP_DIR}"
-
-echo "==> 本机签名（ad-hoc）"
-codesign --force --deep --sign - "${APP_DIR}"
 codesign --verify --verbose=1 "${APP_DIR}"
 
 echo "==> 打包 DMG"
@@ -110,7 +49,6 @@ ln -s /Applications "${STAGE}/Applications"
 mkdir -p "${OUT}"
 DMG="${OUT}/${APP}-${VERSION}.dmg"
 hdiutil create -volname "${APP} ${VERSION}" -srcfolder "${STAGE}" -ov -format UDZO "${DMG}" >/dev/null
-cp -R "${APP_DIR}" "${OUT}/"
 rm -rf "${WORK}"
 cp "${DMG}" "${FINAL_DMG}"
 

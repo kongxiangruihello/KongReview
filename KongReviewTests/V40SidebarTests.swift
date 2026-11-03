@@ -5,7 +5,7 @@ import KongReviewCore
 
 /// 4.0-c：侧栏六组的折叠状态记住；首页当前项目卡依赖的数据
 final class V40SidebarTests: XCTestCase {
-    // 6.0.1：这里测的是已舍弃、代码暂留到 6.0.3 的旧功能——测试时临时打开
+    // 6.0.1：这里测的是已舍弃、代码暂留到成绩册（6.0.4）的旧功能——测试时临时打开
     override func setUp() { super.setUp(); SlimSwitch.featuresOff = false }
     override func tearDown() { SlimSwitch.featuresOff = true; super.tearDown() }
 
