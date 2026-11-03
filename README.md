@@ -4,6 +4,21 @@
 
 属于 kong 系列应用（kongflow · kongbabel · kongvox · kongfetch）。0.6 起由 KongGlean 更名为 KongReview：首次启动会自动把旧版的数据和设置复制过来，旧链接 `kongglean://` 继续可用。
 
+## 6.0.6 导入 KongFolio 的阅读材料
+
+KongFolio 里读书时记下的摘录、笔记与札记导入进来，作为考题。
+
+- **自动导入**：读取 KongFolio 的阅读记录 `~/Library/Application Support/KongFolio/ReadingJournal/catalog.json`。启动、回到前台时和每分钟看一次，文件改过才导入，有新内容时提示一句。“设置 → 数据 → KongFolio 的阅读材料”可关掉、换位置、立即导入；菜单“文件 → 从 KongFolio 导入”。
+- **怎么对应**：
+  - 摘录、有文字的图片摘录 → 摘录。出处取书名与作者，位置取页码（有印刷页码用印刷页码），“我的笔记”作按语，带“KongFolio”标签。
+  - 笔记、整本书心得 → 札记；笔记里摘的原文另作一条摘录挂在札记上。
+  - 札记 → 札记；每段引用的摘录挂上（与阅读记录里的同一条共用，不导成两条），论述正文照录。
+- **出题**：摘录进入每天的抽题范围，出要点题与出处题；札记 7 天后第一次出论证题。
+- **重复导入**：按 KongFolio 的编号去重；KongFolio 里改过的更新原文、按语、出处、页码或札记正文；在 KongReview 里删去的不再加回来；KongFolio 里移到“最近删除”的不导入。只读 KongFolio 的文件，不改动它们。
+- **导出的 Markdown**：“从文件导入…”也可以选 KongFolio 导出的 Markdown（有原文的为摘录，只有笔记的为札记；只增不改）。
+- **还不导入**：没有文字的图片摘录（只有图片）；KongFolio 里没有找到“问题簿”。
+- **数据**：迁移 v27 新增 `kongfolio_item`（KongFolio 的编号 → 摘录或札记、KongFolio 那边的修改时间）。
+
 ## 6.0.5 成绩册与考场门口（6.0 第五步）
 
 日评、打卡、回顾统计、个人成长与复盘合成一本“成绩册”；首页改为“考场门口”。设计见“KongReview 6.0 设计方案：考场”第四、七节。

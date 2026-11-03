@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ApplicationServices
+import UniformTypeIdentifiers
 import KongReviewCore
 
 enum SettingsKeys {
@@ -246,10 +247,38 @@ private struct DataSettings: View {
     @AppStorage(LiquidTextFolder.enabledKey) private var ltEnabled = false
     @AppStorage(LiquidTextFolder.folderKey) private var ltFolder = ""
     @AppStorage(LiquidTextFolder.skipShortKey) private var ltSkipShort = false
+    @AppStorage(KongFolioSettings.enabledKey) private var kfEnabled = true
+    @AppStorage(KongFolioSettings.pathKey) private var kfPath = ""
+    @AppStorage(KongFolioSettings.lastReportKey) private var kfLast = ""
 
     var body: some View {
         let _ = store.revision
         Form {
+            // 6.0.6：KongFolio 的阅读材料
+            Section("KongFolio 的阅读材料") {
+                Toggle("自动导入 KongFolio 的摘录、笔记与札记", isOn: $kfEnabled)
+                    .onChange(of: kfEnabled) { if kfEnabled { store.checkKongFolio(quiet: false) } }
+                HStack {
+                    Text(KongFolioSettings.catalog.path)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("其他位置…") { chooseKongFolioCatalog() }
+                    if !kfPath.isEmpty { Button("用默认位置") { kfPath = "" } }
+                }
+                HStack {
+                    Button("立即导入") { store.checkKongFolio(quiet: false, force: true) }
+                    Button("从文件导入…") { store.chooseKongFolioFile() }
+                    Spacer()
+                    let c = (try? store.db.kongFolioCounts()) ?? (0, 0)
+                    Text("已导入摘录 \(c.highlights) 条、札记 \(c.notes) 条").font(.caption).foregroundStyle(.secondary)
+                }
+                if !kfLast.isEmpty {
+                    Text("上次：" + kfLast).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Text("读取 KongFolio 的阅读记录（默认在“~/Library/Application Support/KongFolio/ReadingJournal/catalog.json”），启动、回到前台时和每分钟看一次，改过才导入。摘录与有文字的图片摘录导入为摘录（出处取书名与作者，位置取页码，“我的笔记”作按语，带“KongFolio”标签）；笔记、整本书心得与札记导入为札记，引用的原文一并挂上。导入后照常在今日试卷上出题：摘录出要点题、出处题，札记 7 天后出论证题。重复导入不会重复；KongFolio 里改过的会更新；在 KongReview 里删去的不再加回来。“从文件导入”也可以选 KongFolio 导出的 Markdown（只增不改）。只读 KongFolio 的文件，不改动它们。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section("自动备份") {
                 Picker("备份位置", selection: Binding(
                     get: { BackupService.location },
@@ -374,6 +403,18 @@ private struct DataSettings: View {
 }
 
 @MainActor
+private func chooseKongFolioCatalog() {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = false
+    panel.canChooseFiles = true
+    panel.allowedContentTypes = [.json]
+    panel.prompt = "选择"
+    panel.message = "选择 KongFolio 的阅读记录 catalog.json（在 KongFolio 资料文件夹的 ReadingJournal 里）"
+    panel.directoryURL = KongFolioSettings.defaultCatalog.deletingLastPathComponent()
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    KongFolioSettings.catalog = url
+}
+
 private func chooseLiquidTextFolder() {
     let panel = NSOpenPanel()
     panel.canChooseDirectories = true

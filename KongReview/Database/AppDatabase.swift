@@ -472,6 +472,10 @@ final class AppDatabase {
         m.registerMigration("v26-article-annotation") { db in
             try AppDatabase.installAnnotate(in: db)
         }
+        // 6.0.6：KongFolio 阅读记录的来源键对照
+        m.registerMigration("v27-kongfolio") { db in
+            try AppDatabase.installKongFolio(in: db)
+        }
         return m
     }
 }
