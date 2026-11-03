@@ -12,7 +12,7 @@ import KongReviewCore
 
 /// 卷尾再考的一道
 struct ExamRelearnItem: Codable, Equatable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable { case highlight, note, block }
+    enum Kind: String, Codable, Sendable { case highlight, note, block, answer }
     var kind: Kind
     var id: Int64
     /// 已再考了几轮
@@ -58,7 +58,7 @@ struct ExamBudget: Codable, Equatable, Sendable {
         case .highlight: 30
         case .note: 60
         case .block: 60
-        case .question: 120
+        case .question: 60
         }
     }
 
@@ -141,6 +141,8 @@ extension LibraryStore {
                 if let n = try? db.revisitNoteItem(id: item.id) { return (item, .note(n)) }
             case .block:
                 if let b = try? db.revisitBlockItem(id: item.id) { return (item, .block(b)) }
+            case .answer:
+                if let a = try? db.answerItem(id: item.id) { return (item, .answer(a)) }
             }
             s.items.removeFirst()
             dropped = true
@@ -188,7 +190,7 @@ extension LibraryStore {
         let q = (try? db.revisitQueue(now: now)) ?? .empty
         t[.note] = q.notesDone + q.notes.count
         t[.block] = q.blocksDone + q.blocks.count
-        t[.question] = q.questionsDone + q.questions.count
+        t[.question] = q.questionsDone + q.questions.count + q.answersDone + q.answers.count
         return t
     }
 

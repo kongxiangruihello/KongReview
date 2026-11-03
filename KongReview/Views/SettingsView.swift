@@ -85,7 +85,8 @@ private struct ReviewSettings: View {
     @Environment(LibraryStore.self) private var store
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
     @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
-    @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
+    @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 2
+    @AppStorage(RevisitLimits.answersKey) private var revisitAnswers = 2
     @AppStorage(RevisitLimits.blocksKey) private var revisitBlocks = 2
     @AppStorage(CheckinReminderPlan.enabledKey) private var checkinReminder = true
     @AppStorage(CheckinReminderPlan.hourKey) private var checkinHour = CheckinReminderPlan.defaultHour
@@ -114,9 +115,10 @@ private struct ReviewSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Stepper("论证题（札记）：\(revisitNotes) 道", value: $revisitNotes, in: 0...10)
-                Stepper("进展题（「常念」的问题）：\(revisitQuestions) 道", value: $revisitQuestions, in: 0...5)
+                Stepper("进展题（未解决的问题）：\(revisitQuestions) 道", value: $revisitQuestions, in: 0...10)
+                Stepper("解答题（已解决的问题）：\(revisitAnswers) 道", value: $revisitAnswers, in: 0...10)
                 Stepper("复述题（笔记）：\(revisitBlocks) 道", value: $revisitBlocks, in: 0...10)
-                Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。「常念」且未解决的问题约每周回来一次。设为 0 即不出这一类。")
+                Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。问题簿里未解决的问题（待研究、有线索）出进展题：「常念」的约每周一次，其余按 7、21、60…… 天回来；已解决、写了解答（或指向一条札记）的出解答题：给问题、想答案，按 7、21、60、180、365 天回来，忘了的两天后再来；搁置的不出。设为 0 即不出这一类。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

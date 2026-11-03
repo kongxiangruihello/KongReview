@@ -10,6 +10,8 @@ enum ExamQuestion: Equatable {
     case note(RevisitNoteItem)
     case block(RevisitBlockItem)
     case question(RevisitQuestionItem)
+    /// 6.0.9：解答题（已解决的问题）
+    case answer(RevisitAnswerItem)
 
     var kind: ExamKind {
         switch self {
@@ -17,7 +19,7 @@ enum ExamQuestion: Equatable {
         case .highlight: .highlight
         case .note: .note
         case .block: .block
-        case .question: .question
+        case .question, .answer: .question
         }
     }
 
@@ -29,6 +31,7 @@ enum ExamQuestion: Equatable {
         case .note(let n): "n\(n.id)"
         case .block(let b): "k\(b.id)"
         case .question(let q): "q\(q.id)"
+        case .answer(let a): "a\(a.id)-\(a.reviewCount)"
         }
     }
 }
@@ -47,7 +50,7 @@ struct ExamPaperState: Equatable {
         if !highlights.isEmpty { s.insert(.highlight) }
         if !revisit.notes.isEmpty { s.insert(.note) }
         if !revisit.blocks.isEmpty { s.insert(.block) }
-        if !revisit.questions.isEmpty { s.insert(.question) }
+        if !revisit.questions.isEmpty || !revisit.answers.isEmpty { s.insert(.question) }
         return s
     }
 
@@ -57,7 +60,8 @@ struct ExamPaperState: Equatable {
         case .highlight: highlights.first.map { .highlight($0, ExamHighlightMode.pick(for: $0, day: day)) }
         case .note: revisit.notes.first.map { .note($0) }
         case .block: revisit.blocks.first.map { .block($0) }
-        case .question: revisit.questions.first.map { .question($0) }
+        // 6.0.9：先出进展题，再出解答题
+        case .question: revisit.questions.first.map { .question($0) } ?? revisit.answers.first.map { .answer($0) }
         }
     }
 }
@@ -135,7 +139,9 @@ extension LibraryStore {
             paper.highlights = trim(paper.highlights, .highlight, done: position)
             paper.revisit.notes = trim(paper.revisit.notes, .note, done: paper.revisit.notesDone)
             paper.revisit.blocks = trim(paper.revisit.blocks, .block, done: paper.revisit.blocksDone)
-            paper.revisit.questions = trim(paper.revisit.questions, .question, done: paper.revisit.questionsDone)
+            let asked = paper.revisit.questionsDone + paper.revisit.answersDone
+            paper.revisit.questions = trim(paper.revisit.questions, .question, done: asked)
+            paper.revisit.answers = trim(paper.revisit.answers, .question, done: asked + paper.revisit.questions.count)
             if paper.nextCard != nil, let cap = budget.cap(.card), ((try? db.cardsRatedToday(now: now)) ?? 0) >= cap {
                 paper.nextCard = nil
                 paper.deferred += todayCardPending.total
@@ -200,6 +206,18 @@ extension LibraryStore {
         review.sessionToken += 1
         refreshDerived()
         StatusItemController.shared.updateCounts()
+    }
+
+    /// 6.0.9：解答题——记得 / 大致 / 忘了（计入掌握度），忘了的当天卷尾再考
+    func examAnswerQuestionAnswer(_ item: RevisitAnswerItem, result: SelfTestResult, now: Date = Date()) {
+        guard !fullBackupBusy else { return }
+        checkDayChange()
+        do {
+            try db.recordAnswerReview(questionId: item.id, result: result, now: now)
+        } catch { report(error); return }
+        if result == .forgot { examRelearnAdd(.answer, item.id) }
+        if !reviewedToday { reviewedToday = true; onReviewedToday?() }
+        refreshRevisit()
     }
 
     /// 札记：先记“记得 / 大致 / 忘了”（计入掌握度），再按“还这么看吗”排下次

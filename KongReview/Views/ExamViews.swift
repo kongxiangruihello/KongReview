@@ -155,6 +155,7 @@ struct ExamView: View {
         case .note(let n): noteQuestion(n)
         case .block(let k): blockQuestion(k)
         case .question(let item): progressQuestion(item)
+        case .answer(let item): answerQuestion(item)
         }
     }
 
@@ -462,6 +463,57 @@ struct ExamView: View {
                     ("2", "写解答", "checkmark.circle", "打开问题写解答", { store.revisitQuestion(q.id, .answer) }),
                     ("3", "还没有", "clock", "下周再来", { store.revisitQuestion(q.id, .notyet, remark: remark); next() }),
                 ])
+            }
+        }
+    }
+
+    // 6.0.9：问题簿·解答题（已解决的问题：给问题，想答案）
+
+    private func answerQuestion(_ a: RevisitAnswerItem) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ReviewCardContainer(padding: 30) {
+                badge(.question, "解答题", a.reviewCount == 0 ? "第一次考" : "")
+                Text(a.title).font(.system(size: 22, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+                if !revealed {
+                    think("这个问题当初是怎么解决的？答案是什么、依据是哪些材料？想好了再展开对照。")
+                    TextField("我的回答（可不写）", text: $myAnswer, axis: .vertical)
+                        .lineLimit(1...5).textFieldStyle(.roundedBorder).focused($typing).padding(.top, 12)
+                    revealButton("展开我的解答")
+                } else {
+                    if !myAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("我的回答：" + myAnswer).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+                    }
+                    Divider().padding(.vertical, 14)
+                    VStack(alignment: .leading, spacing: 12) {
+                        if !plain(a.answer).isEmpty {
+                            RichWebText(text: WikiLinks.plain(a.answer), style: .preview, slot: "exam-answer")
+                        }
+                        if let title = a.noteTitle {
+                            Text("解答见札记《\(title)》").font(.system(size: 13, weight: .medium)).foregroundStyle(ReviewPalette.ink)
+                            if let body = a.noteBody, !plain(body).isEmpty {
+                                RichWebText(text: WikiLinks.plain(body), style: .preview, slot: "exam-answer-note")
+                            }
+                        }
+                    }
+                }
+            }
+            if revealed {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("答案想起来多少？").font(.system(size: 13.5, weight: .medium)).foregroundStyle(ReviewPalette.ink)
+                    if let item = relearnItem {
+                        gradeButtons { r in store.examRelearnAnswer(item, passed: r == .remembered); next() }
+                    } else {
+                        gradeButtons { r in store.examAnswerQuestionAnswer(a, result: r); next() }
+                        Text("记得的隔得越来越久再考（\(AppDatabase.nextNoteInterval(after: a.intervalDays)) 天后）；忘了的交卷前在卷尾再考，两天后再来。")
+                            .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
+                    }
+                    HStack {
+                        Button("打开这个问题") { store.selection = .question(a.id) }.buttonStyle(.link).font(.system(size: 12)).handCursor()
+                        Spacer()
+                    }
+                }
             }
         }
     }

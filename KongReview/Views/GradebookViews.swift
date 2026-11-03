@@ -422,7 +422,7 @@ struct MasteryTrendSection: View {
                     AxisGridLine(); AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
                 } }
                 .chartForegroundStyleScale(domain: GradeKind.allCases.map(\.title),
-                                           range: [ReviewPalette.accent, ReviewPalette.hard, ReviewPalette.easy, ReviewPalette.again])
+                                           range: [ReviewPalette.accent, ReviewPalette.hard, ReviewPalette.easy, ReviewPalette.again, ReviewPalette.ink])
                 .frame(height: 200)
             }
             if let last = weeks.last {
@@ -511,13 +511,14 @@ struct WeakItemsSection: View {
         case .highlight: .highlight
         case .note: .note
         case .block: .block
+        case .question: .answer
         case .card: nil
         }
     }
 
     /// 把常错的摘录、札记、笔记都放进今天的卷尾再考
     private func queueAll() {
-        for k in [GradeKind.highlight, .note, .block] {
+        for k in [GradeKind.highlight, .note, .block, .question] {
             guard let kind = relearnKind(k) else { continue }
             for w in items[k] ?? [] { store.examRelearnAdd(kind, w.recordId) }
         }

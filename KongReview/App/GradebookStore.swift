@@ -35,6 +35,8 @@ extension LibraryStore {
             selection = .ideaNote(item.recordId)
         case .block:
             if let n = item.notebookId { selection = .notebook(n) }
+        case .question:
+            selection = .question(item.recordId)
         }
     }
 }
