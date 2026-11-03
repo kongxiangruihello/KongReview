@@ -36,6 +36,10 @@ final class V611RealLibraryTimingTests: XCTestCase {
             let now = Date()
             let annotate = try clock("今日标注抽篇（6.0.4）") { try db.annotateToday(count: 5, now: now) }
             print("实库结果｜今日标注 \(annotate.items.count) 篇")
+            // 今天的几篇正式应用里多半已抽过（存在库里）；量“明天第一次抽”才是逐篇比对的用时
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now)!
+            let next = try clock("明天第一次抽篇") { try db.annotateToday(count: 5, now: tomorrow) }
+            print("实库结果｜明天抽到 \(next.items.count) 篇，余约 \(next.remaining) 篇")
             _ = try clock("年报（6.0.5）") { try db.gradebookReport(GrowthPeriod.year.window(containing: now, now: now), now: now) }
             _ = try clock("月报") { try db.gradebookReport(GrowthPeriod.month.window(containing: now, now: now), now: now) }
             _ = try clock("每日成绩（本月）") { try db.gradebookMonth(containing: now, now: now) }
