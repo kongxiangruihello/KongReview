@@ -56,15 +56,15 @@ struct HomeLearningDashboard: View {
 
     private var reviewCard: some View {
         HomeLearningTaskCard {
-            HomeLearningTaskHeader(icon: "sun.max", title: "今日回顾",
+            HomeLearningTaskHeader(icon: "text.quote", title: "摘录题",
                                    status: reviewStatus, completed: summary.reviewIsComplete,
                                    pending: summary.reviewPendingCount > 0)
-            HomeLearningMetrics(completed: summary.reviewCompletedCount, completedLabel: "已回顾",
-                                pending: summary.reviewPendingCount, pendingLabel: "待回顾", unit: "条")
+            HomeLearningMetrics(completed: summary.reviewCompletedCount, completedLabel: "已答",
+                                pending: summary.reviewPendingCount, pendingLabel: "待答", unit: "题")
             reviewProgress
             HomeLearningButton(title: reviewButtonTitle, pending: summary.reviewPendingCount > 0,
                                action: onReview)
-                .help(summary.reviewIsComplete ? "查看今天的回顾统计" : "进入今日回顾，继续当前这一组摘录")
+                .help("打开今日试卷：摘录题与记忆卡、札记、笔记、问题交错出")
         }
     }
 
@@ -76,9 +76,9 @@ struct HomeLearningDashboard: View {
             HomeLearningMetrics(completed: summary.cardsStudiedCount, completedLabel: "今日已学",
                                 pending: summary.cardsDueCount, pendingLabel: "当前待学", unit: "张")
             cardsBreakdown
-            HomeLearningButton(title: "去学习记忆卡", pending: summary.cardsDueCount > 0,
+            HomeLearningButton(title: "去今日试卷", pending: summary.cardsDueCount > 0,
                                action: onCards)
-                .help("打开记忆卡首页，选择牌组后开始学习")
+                .help("记忆卡在今日试卷里与其他题交错出；牌组与浏览在侧栏“题库 → 记忆卡”")
         }
     }
 
@@ -131,13 +131,13 @@ struct HomeLearningDashboard: View {
     }
 
     private var reviewProgressTitle: String {
-        if summary.reviewTotalCount > 0 { return "今日回顾进度" }
+        if summary.reviewTotalCount > 0 { return "今日摘录题进度" }
         return summary.reviewCandidateCount > 0 ? "今日暂无回顾任务" : "添加摘录后开始回顾"
     }
 
     private var reviewStatus: String {
         if summary.reviewIsComplete { return "已完成" }
-        if summary.reviewPendingCount > 0 { return "待回顾" }
+        if summary.reviewPendingCount > 0 { return "待答" }
         return summary.reviewCandidateCount > 0 ? "尚未开始" : "暂无摘录"
     }
 
@@ -156,9 +156,9 @@ struct HomeLearningDashboard: View {
     }
 
     private var reviewButtonTitle: String {
-        if summary.reviewIsComplete { return "查看今日回顾统计" }
-        if summary.reviewHasSession, summary.reviewCompletedCount > 0 { return "继续今日回顾" }
-        return summary.reviewPendingCount > 0 ? "开始今日回顾" : "去今日回顾"
+        if summary.reviewIsComplete { return "看成绩单" }
+        if summary.reviewHasSession, summary.reviewCompletedCount > 0 { return "接着答卷" }
+        return "去今日试卷"
     }
 }
 
@@ -468,16 +468,16 @@ struct TodayWorkBar: View {
         let allDone = reviewLeft == 0 && cardsLeft == 0 && revisit.left == 0
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("今日功课").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                Text("今日试卷").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 if !allDone { Text("约 \(minutes) 分钟").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).monospacedDigit() }
                 Spacer(minLength: 8)
                 Button(action: onCheck) {
-                    Label(checkedIn ? "今日已打卡" : check.due > 0 ? "今日检查 \(check.done)/\(check.due)" : "今日检查",
+                    Label(checkedIn ? "今日已打卡" : check.due > 0 ? "已答 \(check.done)/\(check.due)" : "成绩单",
                           systemImage: checkedIn ? "checkmark.seal.fill" : "checklist.checked").lineLimit(1)
                 }
                 .buttonStyle(.plain).font(.system(size: 12, weight: .medium).monospacedDigit())
                 .foregroundStyle(checkedIn || (check.due > 0 && check.left == 0) ? ReviewPalette.done : ReviewPalette.accent)
-                .help("一页看全今天的回顾、记忆卡、重温与自测：各组已做 / 应做").handCursor()
+                .help("打开今日试卷：已答 / 应答，答完看成绩单").handCursor()
                 if let focus {
                     Button(action: onFocus) {
                         Label(focus.kind == .project ? "当前\(focus.label)" : "本期焦点：\(focus.label)", systemImage: "scope").lineLimit(1)
@@ -504,12 +504,10 @@ struct TodayWorkBar: View {
 
     private func steps(reviewLeft: Int, cardsLeft: Int) -> some View {
         HStack(spacing: 10) {
-            step(1, "回顾", reviewLeft, unit: "条", done: summary.reviewCompletedCount)
-            Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ReviewPalette.sub)
-            step(2, "记忆卡", cardsLeft, unit: "张", done: summary.cardsStudiedCount)
+            step(1, "摘录", reviewLeft, unit: "题", done: summary.reviewCompletedCount)
+            step(2, "记忆卡", cardsLeft, unit: "题", done: summary.cardsStudiedCount)
             if revisit.left > 0 || revisit.done > 0 {
-                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ReviewPalette.sub)
-                step(3, "重温", revisit.left, unit: "张", done: revisit.done)
+                step(3, "札记·笔记·问题", revisit.left, unit: "题", done: revisit.done)
             }
         }
     }
@@ -532,7 +530,7 @@ struct TodayWorkBar: View {
     private func startButton(allDone: Bool) -> some View {
         Button(action: onStart) {
             HStack(spacing: 6) {
-                Text(allDone ? "今日功课已完成 · 查看回顾" : "开始今日功课").font(.system(size: 13, weight: .semibold))
+                Text(allDone ? "今日试卷已答完 · 看成绩单" : (summary.reviewCompletedCount + summary.cardsStudiedCount + revisit.done > 0 ? "接着答卷" : "开始答卷")).font(.system(size: 13, weight: .semibold))
                 Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(allDone ? ReviewPalette.ink : Color.white)
@@ -540,6 +538,6 @@ struct TodayWorkBar: View {
             .background(allDone ? ReviewPalette.soft : ReviewPalette.accent, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain).handCursor().fixedSize()
-        .help("先完成今日回顾，再进入记忆卡（两个以上牌组有待学卡片时混合学习），最后重温札记与常念的问题")
+        .help("五类题交错出在一张卷子上：记忆卡、摘录、札记、笔记、问题")
     }
 }

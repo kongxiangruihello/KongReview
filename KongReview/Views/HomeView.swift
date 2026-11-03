@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import KongReviewCore
 
-/// 启动页：分开呈现今日回顾与记忆卡的进度，再引导到各自的学习入口。
+/// 启动页：今日试卷的进度（摘录题、记忆卡），进入今日试卷。
 struct HomeView: View {
     @Environment(LibraryStore.self) private var store
 
@@ -42,8 +42,8 @@ struct HomeView: View {
 
                 HomeLearningDashboard(summary: store.homeLearningSummary,
                                       quote: store.dailyReviewQuote(),
-                                      onReview: { store.openTodayReview() },
-                                      onCards: { store.openCardsHome() })
+                                      onReview: { store.openExam() },
+                                      onCards: { store.openExam() })
                 }
             }
             .frame(maxWidth: 960)

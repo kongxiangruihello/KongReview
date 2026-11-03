@@ -295,16 +295,7 @@ struct ReflectionProgressPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if window.period == .week && window.fullEnd > Date() && !selfTestDone {
-                HStack(spacing: 10) {
-                    Image(systemName: "checklist").foregroundStyle(ReviewPalette.accent)
-                    Text("本周自测还没做完。先回忆、再对照，约五分钟。").font(.system(size: 13)).foregroundStyle(ReviewPalette.ink)
-                    Spacer()
-                    Button("先做本周自测") { store.openSelfTest() }.controlSize(.small).handCursor()
-                }
-                .padding(12)
-                .background(ReviewPalette.accentSoft, in: RoundedRectangle(cornerRadius: 10))
-            }
+            // 6.0.3：每周自测并入今日试卷，复盘里不再提示
             ReviewCardContainer(padding: 24) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("本期进展（\(events.count)）").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)

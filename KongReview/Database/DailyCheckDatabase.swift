@@ -17,19 +17,21 @@ import KongReviewCore
 enum DailyCheckGroup: String, Codable, CaseIterable, Identifiable, Sendable {
     case review, cards, revisit, selfTest
     var id: String { rawValue }
+    /// 6.0.3：今日试卷上的三组（每周自测已并入摘录题与论证题）
+    static let exam: [DailyCheckGroup] = [.review, .cards, .revisit]
     var title: String {
         switch self {
-        case .review: "今日回顾"
+        case .review: "摘录"
         case .cards: "记忆卡"
-        case .revisit: "重温"
+        case .revisit: "札记 · 笔记 · 问题"
         case .selfTest: "自测"
         }
     }
     var unit: String {
         switch self {
-        case .review: "条"
-        case .cards: "张"
-        case .revisit: "张"
+        case .review: "题"
+        case .cards: "题"
+        case .revisit: "题"
         case .selfTest: "题"
         }
     }
@@ -326,14 +328,16 @@ extension AppDatabase {
     }
 
     /// 合成今天的检查。`snapshot` 为真时，还没定下应做数的组以此刻的“已做 + 未做”定下；为假时只显示、不定（统计还在加载时）。
-    func dailyCheck(current: [DailyCheckGroup: DailyCheckCount], snapshot: Bool = true, now: Date = Date()) throws -> DailyCheckState {
+    /// 6.0.3：`groups` 为今天卷子上的各组；每周自测并入卷子后，应用只传回顾、记忆卡、重温三组
+    func dailyCheck(current: [DailyCheckGroup: DailyCheckCount], groups: [DailyCheckGroup] = DailyCheckGroup.allCases,
+                    snapshot: Bool = true, now: Date = Date()) throws -> DailyCheckState {
         try writer.write { db in
             guard try db.tableExists("daily_checkin") else { return .empty }
             let day = Self.revisitDay(now)
             let stored = try Self.dailyPlan(db, day: day)
             var plan = stored ?? DailyCheckPlan()
             var rows: [DailyCheckRow] = []
-            for g in DailyCheckGroup.allCases {
+            for g in groups {
                 let c = current[g] ?? DailyCheckCount()
                 if plan.due[g.rawValue] == nil && snapshot { plan.due[g.rawValue] = c.total }
                 let due = max(plan.due[g.rawValue] ?? c.total, c.done)

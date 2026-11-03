@@ -167,13 +167,13 @@ final class V500RevisitTests: XCTestCase {
 
     func testStoreTodayWorkReachesRevisitAndFreshHighlights() throws {
         try MainActor.assumeIsolated {
-            // 回顾与记忆卡都没有待办时，“开始今日功课”直接进入重温
+            // 6.0.3：“开始今日功课”即打开今日试卷
             let plain = try AppDatabase(DatabaseQueue())
             let only = try plain.createIdeaNote(title: "士以道自任", now: Date().addingTimeInterval(-30 * 86_400))
             let first = LibraryStore(db: plain)
             XCTAssertEqual(first.revisitCounts.notesLeft, 1)
             first.startTodayWork()
-            XCTAssertEqual(first.selection, .revisit)
+            XCTAssertEqual(first.selection, .dailyCheck)
             first.revisitNote(only.id!, .revise)
             XCTAssertEqual(first.selection, .ideaNote(only.id!), "要修订随即打开札记")
             XCTAssertEqual(first.revisitCounts.left, 0)

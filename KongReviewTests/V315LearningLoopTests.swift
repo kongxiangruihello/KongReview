@@ -175,7 +175,7 @@ final class V315LearningLoopTests: XCTestCase {
             XCTAssertEqual(store.study.current?.id, focusCard.id)
             store.openCardsHome()
             store.startTodayWork()
-            XCTAssertEqual(store.selection, .review, "今天的回顾还没完成时先进入回顾")
+            XCTAssertEqual(store.selection, .dailyCheck, "6.0.3：今日功课即今日试卷")
             store.setLearningFocus(nil)
             XCTAssertNil(store.learningFocus)
             XCTAssertTrue(store.focusHighlightIDs.isEmpty)
