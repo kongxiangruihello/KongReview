@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 6.1.0：预览应用可用启动参数 -previewAppearance dark 以深色模式打开，便于逐页核对
+        if PreviewLibrary.isEnabled, UserDefaults.standard.string(forKey: "previewAppearance") == "dark" {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
         guard !EditorValidation.isEnabled, !PreviewLibrary.isEnabled else { return }
         HotKeyCenter.shared.action = { QuickCaptureController.shared.show() }
         HotKeyCenter.shared.apply(HotKeyPreset.current)
