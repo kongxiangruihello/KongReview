@@ -192,11 +192,12 @@ extension LibraryStore {
         return t
     }
 
-    /// 今天这一组摘录里补考的条数（排在最前）
+    /// 今天这一组摘录里补考与新录的条数（排在最前，6.0.8 起新录也与补考一同优先）
     func examRetestsToday(now: Date = Date()) -> Int {
         guard let record = try? todayReviewSession(now: now) else { return 0 }
-        let retests = Set((try? db.examRetestHighlightIDs(now: now, limit: AppDatabase.examRetestPerDay)) ?? [])
-        return record.regularIds.prefix { retests.contains($0) }.count
+        var early = Set((try? db.examRetestHighlightIDs(now: now, limit: AppDatabase.examRetestPerDay)) ?? [])
+        if let fresh = ExamFresh.Session.load(), fresh.day == ReviewSessionRecord.dayString(now) { early.formUnion(fresh.rounds.keys) }
+        return record.regularIds.prefix { early.contains($0) }.count
     }
 }
 

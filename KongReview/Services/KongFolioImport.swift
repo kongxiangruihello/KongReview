@@ -101,13 +101,15 @@ struct KongFolioEntry: Equatable, Sendable {
     var quotes: [KongFolioEntry] = []
     /// 只增不改（Markdown 没有修改时间）
     var appendOnly = false
+    /// 6.0.8：只有图片的摘录带上的图片（媒体名 → 数据）
+    var media: [String: Data] = [:]
 }
 
 /// 把 catalog.json 或导出的 Markdown 转成要导入的材料
 enum KongFolioConverter {
     struct Result: Equatable, Sendable {
         var entries: [KongFolioEntry] = []
-        /// 没有文字的图片摘录、空记录
+        /// 空记录（6.0.8 起，只有图片的摘录连图导入；找不到图片文件的仍算空）
         var skippedEmpty = 0
         /// KongFolio 里已移到“最近删除”的
         var skippedRemoved = 0
@@ -115,11 +117,14 @@ enum KongFolioConverter {
 
     static let tag = "KongFolio"
 
-    static func convert(_ state: KongFolioCatalog.State) -> Result {
+    /// - Parameter assets: 6.0.8：KongFolio 存摘录图片的文件夹（ReadingJournal/Assets）；有它才导入只有图片的摘录
+    static func convert(_ state: KongFolioCatalog.State, assets: URL? = nil) -> Result {
         var r = Result()
         for rec in state.records ?? [] {
             if rec.removed != nil { r.skippedRemoved += 1; continue }
-            if let e = entry(from: rec) { r.entries.append(e) } else { r.skippedEmpty += 1 }
+            if let e = entry(from: rec) { r.entries.append(e) }
+            else if let e = imageEntry(from: rec, assets: assets) { r.entries.append(e) }
+            else { r.skippedEmpty += 1 }
         }
         for essay in state.essays ?? [] {
             if essay.removed != nil { r.skippedRemoved += 1; continue }
@@ -153,6 +158,29 @@ enum KongFolioConverter {
                               sourceTitle: c.flatMap { t in trimmed(t.title).isEmpty ? nil : trimmed(t.title) },
                               sourceAuthor: trimmed(c?.author), location: location(c), tags: tags(rec.tags),
                               created: rec.created ?? Date(), modified: rec.modified ?? rec.created ?? Date())
+    }
+
+    /// 6.0.8：只有图片的摘录：图片存进媒体表，摘录正文是这张图
+    static let maximumImageBytes = 15 * 1_024 * 1_024
+
+    static func imageEntry(from rec: KongFolioCatalog.Record, assets: URL?) -> KongFolioEntry? {
+        guard rec.kind != KongFolioCatalog.note, rec.wholeBook != true, trimmed(rec.quote).isEmpty,
+              let assets, let asset = rec.imageAsset, !asset.isEmpty,
+              asset == URL(fileURLWithPath: asset).lastPathComponent else { return nil }
+        let file = assets.appendingPathComponent(asset)
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? NSNumber,
+              size.intValue > 0, size.intValue <= maximumImageBytes,
+              let data = try? Data(contentsOf: file) else { return nil }
+        let ext = URL(fileURLWithPath: asset).pathExtension.lowercased()
+        let name = "kongfolio-" + digest(asset + "\u{1}" + String(data.count)) + "." + (ext.isEmpty ? "png" : ext)
+        let c = rec.citations?.first
+        let note = trimmed(rec.note)
+        return KongFolioEntry(key: "record:" + rec.id, kind: .highlight, text: "![图片摘录](kr-media://media/\(name))",
+                              html: note.isEmpty ? "" : Markdown.richHTML(note),
+                              sourceTitle: c.flatMap { t in trimmed(t.title).isEmpty ? nil : trimmed(t.title) },
+                              sourceAuthor: trimmed(c?.author), location: location(c), tags: tags(rec.tags),
+                              created: rec.created ?? Date(), modified: rec.modified ?? rec.created ?? Date(),
+                              media: [name: data])
     }
 
     static func entry(from rec: KongFolioCatalog.Record) -> KongFolioEntry? {
@@ -301,7 +329,7 @@ enum KongFolioConverter {
         if ["md", "markdown", "txt"].contains(url.pathExtension.lowercased()) {
             return convertMarkdown(String(decoding: data, as: UTF8.self))
         }
-        do { return convert(try KongFolioCatalog.decode(data)) }
+        do { return convert(try KongFolioCatalog.decode(data), assets: url.deletingLastPathComponent().appendingPathComponent("Assets", isDirectory: true)) }
         catch let e as KongFolioImportError { throw e }
         catch { throw KongFolioImportError.notCatalog }
     }
