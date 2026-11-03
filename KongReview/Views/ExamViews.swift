@@ -235,7 +235,9 @@ struct ExamView: View {
         let note = plain(h.note ?? "")
         return VStack(alignment: .leading, spacing: 14) {
             ReviewCardContainer(padding: 30) {
-                badge(.highlight, mode.title, h.isFavorite ? "已收藏" : "")
+                // 6.0.8：新录的标出第几次
+                badge(.highlight, mode.title, [store.examFreshRound(h.id).map { "新录 · 第 \($0) 次" }, h.isFavorite ? "已收藏" : nil]
+                    .compactMap { $0 }.joined(separator: " · "))
                 VStack(alignment: .leading, spacing: 12) {
                     switch mode {
                     case .source:

@@ -131,7 +131,17 @@ import KongReviewCore
             let others = highlights.prefix(10).compactMap(\.id).filter { $0 != highlights[5].id! }
             let ids = Array(others.prefix(4)) + [highlights[5].id!] + Array(others.dropFirst(4).prefix(5))
             for id in ids.prefix(4) { db.log(ReviewEvent(kind: .keep, highlightId: id, at: now.addingTimeInterval(-600))) }
-            let record = ReviewSessionRecord(day: ReviewSessionRecord.dayString(now), regularIds: Array(ids), masteryIds: [], position: 4)
+            // 6.0.8：两条昨天新录的、一条四天前录且三天前考过一次的，排在已答的 4 条之后（与正式组卷的次序相同）
+            for (i, text) in ["新录示例：君子不器。", "新录示例：吾日三省吾身。"].enumerated() {
+                _ = try db.save(Highlight(sourceId: sources[0].id, text: text, location: "第 \(i + 20) 页", createdAt: day(-1, hour: 21)))
+            }
+            let second = try db.save(Highlight(sourceId: sources[1].id, text: "新录示例：士不可以不弘毅，任重而道远。", location: "第 31 页", createdAt: day(-4, hour: 21)))
+            try db.recordExamResult(kind: .gist, recordId: second.id!, result: .partly, now: day(-3, hour: 20))
+            let fresh = try db.examFreshCandidates(now: now, limit: ExamFresh.defaultPerDay)
+            ExamFresh.Session(day: ReviewSessionRecord.dayString(now), rounds: Dictionary(fresh.map { ($0.id, $0.round) }, uniquingKeysWith: { a, _ in a })).save()
+            // 一组仍是 10 条：新录占名额
+            let ordered = Array((Array(ids.prefix(4)) + fresh.map(\.id) + Array(ids.dropFirst(4))).prefix(ids.count))
+            let record = ReviewSessionRecord(day: ReviewSessionRecord.dayString(now), regularIds: ordered, masteryIds: [], position: 4)
             UserDefaults.standard.set(try JSONEncoder().encode(record), forKey: ReviewSessionRecord.key(theme: nil))
             // 本周复盘与计划
             let week = GrowthPeriod.week.window(containing: now)
@@ -182,8 +192,20 @@ import KongReviewCore
                 try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-10, hour: 20))
                 try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-3, hour: 20))
             }
+            // 6.0.7：“默认”牌组绑一个带起始内容（HTML）的录入预设，新建卡片时可看到填进去的样子
+            var preset = CardEntryPreset(name: "名词解释（示例）", sections: [.init(name: "背景"), .init(name: "意义")])
+            preset.frontRule = .init(hint: "填写需要解释的概念或名词", required: true, html: "<h3>概念：</h3>")
+            preset.backRule = .init(hint: "先用一句话概括，再列出关键要素", required: true,
+                                    html: "<p><b>一句话：</b></p><ul><li>要素一：</li><li>要素二：</li></ul>")
+            preset.sections[0].rule = .init(hint: "交代提出背景、时间或适用范围")
+            preset.sections[1].rule = .init(hint: "说明历史地位、影响或概念边界", html: "<p><i>影响：</i></p>")
+            try db.saveCardEntryPreset(preset)
+            try db.setDeckEntryPreset(deck: "默认", presetID: preset.id)
             UserDefaults.standard.set(10, forKey: SettingsKeys.dailyCount)
             UserDefaults.standard.set(3, forKey: AnnotateSettings.perDayKey)
+            UserDefaults.standard.removeObject(forKey: ExamFresh.perDayKey)
+            // 每次打开都从“不限时长”开始（设置里改过的不带进下一次预览）
+            UserDefaults.standard.removeObject(forKey: ExamSettings.minutesKey)
             let store = LibraryStore(db: db, draftPersistence: nil, positionDefaults: nil)
             store.journeyNavigation.period = .week
             return store

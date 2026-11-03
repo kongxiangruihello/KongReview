@@ -99,12 +99,18 @@ private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.reminderMinute) private var minute = 0
     @AppStorage(AnnotateSettings.perDayKey) private var annotatePerDay = AnnotateSettings.defaultPerDay
     @AppStorage(ExamSettings.minutesKey) private var examMinutes = 0
+    @AppStorage(ExamFresh.perDayKey) private var freshPerDay = ExamFresh.defaultPerDay
 
     var body: some View {
         Form {
             Section("今日试卷：每天至多出几道") {
                 Stepper("摘录题：\(dailyCount) 道", value: $dailyCount, in: 3...50)
                 Text("从全库按加权抽样（收藏、写过按语、被札记引用的更常出），忘了的两天后补考（至多 3 道，占名额）。改动从明天开始生效。记忆卡的题数在记忆卡的“每日学习量”里设。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // 6.0.8：新录的摘录及早上卷
+                Stepper(freshPerDay == 0 ? "其中新录的：不留名额" : "其中新录的：至多 \(freshPerDay) 道", value: $freshPerDay, in: 0...10)
+                Text("新录的摘录（含今日标注划出的、从 KongFolio 导入的）录进来的第二天起考第 1 次，隔两天考第 2 次，之后回到平常的抽样；排在补考之后，占摘录题的名额；先出到了第 2 次的，再出最近录的，一次进来很多时其余往后顺延。30 天内录的才算；整篇存进来的文章归“今日标注”。改动从明天开始生效。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Stepper("论证题（札记）：\(revisitNotes) 道", value: $revisitNotes, in: 0...10)

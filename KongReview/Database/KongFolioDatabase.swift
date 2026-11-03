@@ -18,6 +18,8 @@ struct KongFolioReport: Equatable, Sendable {
     var skippedDeleted = 0
     /// 没有文字的图片摘录、空记录
     var skippedEmpty = 0
+    /// 6.0.8：图片摘录找不到图片文件
+    var missingImages = 0
     /// KongFolio 里移到“最近删除”的
     var skippedRemoved = 0
     var sources: [String] = []
@@ -34,7 +36,8 @@ struct KongFolioReport: Equatable, Sendable {
         if updated > 0 { parts.append("KongFolio 里改过的 \(updated) 条已更新。") }
         if added == 0 && updated == 0 { parts.append("KongFolio 的阅读记录没有新内容（\(unchanged) 条已导入过）。") }
         var skipped: [String] = []
-        if skippedEmpty > 0 { skipped.append("\(skippedEmpty) 条没有文字（如只有图片）") }
+        if skippedEmpty > 0 { skipped.append("\(skippedEmpty) 条是空的") }
+        if missingImages > 0 { skipped.append("\(missingImages) 条图片摘录找不到图片文件") }
         if skippedDeleted > 0 { skipped.append("\(skippedDeleted) 条已在 KongReview 里删去") }
         if skippedRemoved > 0 { skipped.append("\(skippedRemoved) 条在 KongFolio 的最近删除里") }
         if !skipped.isEmpty { parts.append("跳过：" + skipped.joined(separator: "，") + "。") }
@@ -57,7 +60,7 @@ extension AppDatabase {
     /// 导入（一个事务：要么全成，要么不改）
     func importKongFolio(_ result: KongFolioConverter.Result, now: Date = Date()) throws -> KongFolioReport {
         try writer.write { db in
-            var r = KongFolioReport(skippedEmpty: result.skippedEmpty, skippedRemoved: result.skippedRemoved)
+            var r = KongFolioReport(skippedEmpty: result.skippedEmpty, missingImages: result.missingImages, skippedRemoved: result.skippedRemoved)
             var sources: [String] = []
             for e in result.entries {
                 switch e.kind {
@@ -130,6 +133,7 @@ extension AppDatabase {
             h.tags = tags
             h.updatedAt = now
             try h.update(db)
+            try kongFolioSaveMedia(db, e.media)
             try kongFolioRemember(db, key: e.key, kind: "highlight", id: link.id, modified: e.modified, now: now)
             r.updated += 1
             return link.id
@@ -146,6 +150,7 @@ extension AppDatabase {
         var h = Highlight(sourceId: sourceId, text: e.text, note: e.html.isEmpty ? nil : e.html, location: e.location,
                           tags: e.tags, createdAt: e.created, updatedAt: now)
         try h.insert(db)
+        try kongFolioSaveMedia(db, e.media)
         guard let id = h.id else { return nil }
         try kongFolioRemember(db, key: e.key, kind: "highlight", id: id, modified: e.modified, now: now)
         r.newHighlights += 1
@@ -184,6 +189,13 @@ extension AppDatabase {
         for (i, h) in quoteIDs.enumerated() {
             try db.execute(sql: "INSERT OR IGNORE INTO idea_note_highlight(noteId, highlightId, position, addedAt) VALUES (?, ?, ?, ?)",
                            arguments: [noteId, h, start + Double(i + 1), now])
+        }
+    }
+
+    /// 6.0.8：只有图片的摘录带的图片，与记忆卡图片同表，经 kr-media:// 显示
+    private static func kongFolioSaveMedia(_ db: Database, _ media: [String: Data]) throws {
+        for (name, data) in media {
+            try db.execute(sql: "INSERT OR REPLACE INTO card_media (name, data) VALUES (?, ?)", arguments: [name, data])
         }
     }
 

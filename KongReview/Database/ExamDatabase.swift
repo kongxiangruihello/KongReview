@@ -79,12 +79,22 @@ enum ExamHighlightMode: Equatable, Sendable {
 
     /// 有出处且有位置或按语的，按日期与编号在要点题、出处题之间轮换；只有出处的考出处；没有出处的给开头
     static func pick(for h: Highlight, day: Date, calendar: Calendar = .current) -> ExamHighlightMode {
+        // 6.0.8：只有图片的摘录（如 KongFolio 的图片摘录）只能看出处想内容
+        if Markdown.plainText(fromHTML: Markdown.richHTML(Self.withoutImages(h.text))).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .gist
+        }
         guard h.sourceId != nil else { return .opening }
         let hasCue = !(h.location ?? "").trimmingCharacters(in: .whitespaces).isEmpty
             || !Markdown.plainText(fromHTML: Markdown.richHTML(h.note ?? "")).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasCue else { return .source }
         let dayIndex = Int(calendar.startOfDay(for: day).timeIntervalSince1970 / 86_400)
         return ((h.id ?? 0) + Int64(dayIndex)) % 2 == 0 ? .gist : .source
+    }
+
+    /// 去掉图片（Markdown 的 ![…](…) 与 <img>），看还有没有文字
+    static func withoutImages(_ text: String) -> String {
+        text.replacingOccurrences(of: #"!\[[^\]]*\]\([^)]*\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)<img\b[^>]*>"#, with: "", options: .regularExpression)
     }
 
     var title: String {

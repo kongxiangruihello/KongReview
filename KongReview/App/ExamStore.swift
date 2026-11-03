@@ -85,8 +85,14 @@ extension LibraryStore {
         let byID = Dictionary(highlights.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
         let retests = try db.examRetestHighlightIDs(now: now, limit: min(Self.examRetestCap(dailyCount), AppDatabase.examRetestPerDay))
             .filter { byID[$0] != nil }
-        let refresh = bias.refresh.compactMap { byID[$0.id] }.filter { !retests.contains($0.id ?? -1) }
-        let first = retests + refresh.compactMap(\.id)
+        // 6.0.8：新录的摘录排在补考之后（录进来的第二天起第 1 次，隔两天第 2 次）
+        let freshRoom = min(ExamFresh.perDay(), max(0, dailyCount - retests.count))
+        let fresh = ((try? db.examFreshCandidates(now: now, limit: freshRoom + retests.count)) ?? [])
+            .filter { byID[$0.id] != nil && !retests.contains($0.id) }.prefix(freshRoom)
+        ExamFresh.Session(day: today, rounds: Dictionary(fresh.map { ($0.id, $0.round) }, uniquingKeysWith: { a, _ in a })).save()
+        let early = Set(retests + fresh.map(\.id))
+        let refresh = bias.refresh.compactMap { byID[$0.id] }.filter { !early.contains($0.id ?? -1) }
+        let first = retests + fresh.map(\.id) + refresh.compactMap(\.id)
         let taken = Set(first)
         let pool = highlights.filter { !taken.contains($0.id ?? -1) }
         var rng = SeededGenerator.forDay(now)
@@ -95,6 +101,12 @@ extension LibraryStore {
         let record = ReviewSessionRecord(day: today, regularIds: Array((first + regular).prefix(max(dailyCount, first.count))), masteryIds: [], position: 0)
         record.save(key: key)
         return record
+    }
+
+    /// 6.0.8：这条摘录今天是不是新录的第几次考（不是新录为 nil）
+    func examFreshRound(_ id: Int64?, now: Date = Date()) -> Int? {
+        guard let id, let s = ExamFresh.Session.load(), s.day == ReviewSessionRecord.dayString(now) else { return nil }
+        return s.rounds[id]
     }
 
     /// 补考至多占每日条数的一半
