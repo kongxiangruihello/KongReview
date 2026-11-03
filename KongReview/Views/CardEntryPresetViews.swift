@@ -212,16 +212,28 @@ private struct CardEntryPresetEditorView: View {
                         }
                         if preset.sections.isEmpty { Text("可添加释义、出处、例句等空白栏目。").font(.caption).foregroundStyle(.secondary) }
                     }
+                    // 6.0.7：写了起始内容时，看新卡片在复习时的样子（正面、背面与栏目合在一起）
+                    if preset.hasStartHTML {
+                        let card = preset.previewCard()
+                        let faces = store.faces(of: card)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("新卡片的样子").font(.headline)
+                            CardWebView(front: faces.front, back: faces.back, store: store, css: store.cardCSS(for: card))
+                                .frame(height: 240)
+                                .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                            Text("按卡片样式显示起始内容；填写提示不会出现在卡片上。").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }.padding(.trailing, 6)
             }
             if let error { Text(error).font(.callout).foregroundStyle(.red) }
             HStack {
-                Text("提示只辅助填写，不进入卡片正文。").font(.caption).foregroundStyle(.secondary)
+                Text("提示只辅助填写，不进入卡片正文；起始内容（HTML）会先填进新卡片。").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("保存") { save() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
             }
-        }.padding(24).frame(width: 640, height: 650).disabled(store.fullBackupBusy)
+        }.padding(24).frame(width: 700, height: 620).disabled(store.fullBackupBusy)
             .task {
                 tagsText = TagParser.format(preset.tags)
                 do { templates = try store.db.noteTemplates() }
@@ -293,19 +305,73 @@ struct CardEntryPresetDeckBindingView: View {
 }
 
 private struct CardEntryRuleEditor: View {
+    @Environment(LibraryStore.self) private var store
     let label: String
     @Binding var rule: CardEntryInputRule
+    @State private var showsHTML = false
+    /// 在光标处插入（不在末尾追加）
+    @State private var inserter = TemplateCodeInserter()
+
+    private var html: Binding<String> {
+        Binding(get: { rule.html ?? "" }, set: { rule.html = $0.isEmpty ? nil : $0 })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(label).font(.headline)
                 Spacer()
+                Button(showsHTML ? "收起起始内容" : (rule.startHTML == nil ? "起始内容（HTML）…" : "起始内容（HTML，已设）"))  { showsHTML.toggle() }
+                    .buttonStyle(.link).font(.caption).handCursor()
+                    .help("用 HTML 写这一栏的起始内容：新建卡片时先填进去，作格式与结构的起点")
                 Toggle("必填", isOn: $rule.required).toggleStyle(.checkbox)
             }
             TextField("填写提示（可选）", text: $rule.hint, axis: .vertical)
                 .lineLimit(1...3).textFieldStyle(.roundedBorder)
+            // 6.0.7：起始内容用 HTML 写，右边即时预览
+            if showsHTML {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("HTML").font(.caption).foregroundStyle(.secondary)
+                        // 代码框：等宽，不把直引号换成弯引号（否则 href="…" 会写坏）
+                        TemplateCodeEditor(text: html, inserter: inserter)
+                            .frame(minHeight: 120)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("预览").font(.caption).foregroundStyle(.secondary)
+                        EditorHTMLPreview(html: rule.startHTML ?? "", store: store)
+                            .frame(minHeight: 120)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    }
+                }
+                HStack(spacing: 10) {
+                    Menu("插入") {
+                        ForEach(Self.snippets.indices, id: \.self) { i in
+                            Button(Self.snippets[i].0) { inserter.insert(Self.snippets[i].1) }
+                        }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    Button("清空") { rule.html = nil }.disabled(rule.html == nil)
+                    Spacer()
+                    Text("新建卡片时先填进这一栏；原样没改不算填写（设了必填仍须填写）。脚本、内嵌框架与事件属性存时去掉。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .controlSize(.small)
+            }
         }
+        .onAppear { showsHTML = rule.startHTML != nil }
     }
+
+    /// 常用的起始格式
+    static let snippets: [(String, String)] = [
+        ("粗体小标题", "<p><b>小标题：</b></p>"),
+        ("要点列表", "<ul><li></li><li></li><li></li></ul>"),
+        ("编号步骤", "<ol><li></li><li></li><li></li></ol>"),
+        ("两列表格", "<table><tr><th>项目</th><th>内容</th></tr><tr><td></td><td></td></tr><tr><td></td><td></td></tr></table>"),
+        ("引文", "<blockquote><p></p></blockquote>"),
+        ("分隔线", "<hr>"),
+    ]
 }
 
 private struct CardEntryBuiltinPreviewView: View {

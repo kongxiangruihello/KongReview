@@ -10,6 +10,8 @@ struct TodayWorkBar: View {
     var revisit = RevisitCounts()
     /// 6.0.4：今天要标注的文章（篇）
     var annotate = DailyCheckCount()
+    /// 6.0.7：设了每天考多久时，各组按分到的题数（还没答的）
+    var capped: [DailyCheckGroup: DailyCheckCount]? = nil
     /// 5.0.2：今日收获（功课做完时显示）
     var gains: [String] = []
     let focus: LearningFocus?
@@ -26,11 +28,14 @@ struct TodayWorkBar: View {
     }
 
     var body: some View {
-        let reviewLeft = summary.reviewPendingCount
-        let cardsLeft = cards.total
+        let reviewLeft = capped?[.review]?.left ?? summary.reviewPendingCount
+        let cardsLeft = capped?[.cards]?.left ?? cards.total
+        let revisitLeft = capped?[.revisit]?.left ?? revisit.left
         // 6.0.4：标注一篇按约 8 分钟计
-        let minutes = LibraryStore.todayWorkMinutes(reviewPending: reviewLeft, cards: cards, revisit: revisit.left) + annotate.left * 8
-        let allDone = reviewLeft == 0 && cardsLeft == 0 && revisit.left == 0 && annotate.left == 0
+        let minutes = (capped == nil
+            ? LibraryStore.todayWorkMinutes(reviewPending: reviewLeft, cards: cards, revisit: revisitLeft)
+            : (reviewLeft * 30 + cardsLeft * 20 + revisitLeft * 60 + 59) / 60) + annotate.left * 8
+        let allDone = reviewLeft == 0 && cardsLeft == 0 && revisitLeft == 0 && annotate.left == 0
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("今日试卷").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
@@ -57,8 +62,8 @@ struct TodayWorkBar: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 14) { steps(reviewLeft: reviewLeft, cardsLeft: cardsLeft); Spacer(minLength: 8); startButton(allDone: allDone) }
-                VStack(alignment: .leading, spacing: 12) { steps(reviewLeft: reviewLeft, cardsLeft: cardsLeft); startButton(allDone: allDone) }
+                HStack(spacing: 14) { steps(reviewLeft: reviewLeft, cardsLeft: cardsLeft, revisitLeft: revisitLeft); Spacer(minLength: 8); startButton(allDone: allDone) }
+                VStack(alignment: .leading, spacing: 12) { steps(reviewLeft: reviewLeft, cardsLeft: cardsLeft, revisitLeft: revisitLeft); startButton(allDone: allDone) }
             }
         }
         .padding(.horizontal, 22).padding(.vertical, 16)
@@ -67,15 +72,15 @@ struct TodayWorkBar: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(allDone ? ReviewPalette.hair : ReviewPalette.pending.opacity(0.35)))
     }
 
-    private func steps(reviewLeft: Int, cardsLeft: Int) -> some View {
+    private func steps(reviewLeft: Int, cardsLeft: Int, revisitLeft: Int) -> some View {
         HStack(spacing: 10) {
             step(1, "摘录", reviewLeft, unit: "题", done: summary.reviewCompletedCount)
             step(2, "记忆卡", cardsLeft, unit: "题", done: summary.cardsStudiedCount)
-            if revisit.left > 0 || revisit.done > 0 {
-                step(3, "札记·笔记·问题", revisit.left, unit: "题", done: revisit.done)
+            if revisitLeft > 0 || revisit.done > 0 {
+                step(3, "札记·笔记·问题", revisitLeft, unit: "题", done: revisit.done)
             }
             if annotate.total > 0 {
-                step(revisit.left > 0 || revisit.done > 0 ? 4 : 3, "标注文章", annotate.left, unit: "篇", done: annotate.done)
+                step(revisitLeft > 0 || revisit.done > 0 ? 4 : 3, "标注文章", annotate.left, unit: "篇", done: annotate.done)
             }
         }
     }

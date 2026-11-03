@@ -8,6 +8,19 @@ extension LibraryStore {
     /// 6.0.3：每周自测并入今日试卷，不再单列
     func dailyCheckCounts(now: Date = Date()) -> [DailyCheckGroup: DailyCheckCount] {
         let h = homeLearningSummary
+        // 6.0.7：设了每天的时长，应做按分到的题数算（顺延的不算今天欠的）
+        if let b = examBudget(now: now) {
+            func capped(_ done: Int, _ left: Int, _ cap: Int?) -> DailyCheckCount {
+                DailyCheckCount(done: done, left: cap.map { max(0, min(left, $0 - done)) } ?? left)
+            }
+            let revisitCap = [ExamKind.note, .block, .question].compactMap { b.cap($0) }.reduce(0, +)
+            return [
+                .review: capped(h.reviewCompletedCount, h.reviewPendingCount, b.cap(.highlight)),
+                .cards: capped(h.cardsStudiedCount, h.cardsDueCount, b.cap(.card)),
+                .revisit: capped(revisitCounts.done, revisitCounts.left, revisitCap),
+                .annotate: DailyCheckCount(done: annotate.done, left: annotate.left),
+            ]
+        }
         return [
             .review: DailyCheckCount(done: h.reviewCompletedCount, left: h.reviewPendingCount),
             .cards: DailyCheckCount(done: h.cardsStudiedCount, left: h.cardsDueCount),
@@ -25,7 +38,9 @@ extension LibraryStore {
     func refreshDailyCheck() {
         let snapshot = derivedDayKey == ReminderPlan.dayKey(Date()) && !derivedIsLoading
         refreshAnnotate()
-        dailyCheck = (try? db.dailyCheck(current: dailyCheckCounts(), groups: examGroups, snapshot: snapshot)) ?? .empty
+        // 6.0.7：设了每天考多久，应做按分到的题数随时重定
+        let resnapshot: Set<DailyCheckGroup> = ExamSettings.minutes() > 0 ? [.review, .cards, .revisit] : []
+        dailyCheck = (try? db.dailyCheck(current: dailyCheckCounts(), groups: examGroups, snapshot: snapshot, resnapshot: resnapshot)) ?? .empty
         refreshCheckin()
         dailyCheckRevision += 1
     }

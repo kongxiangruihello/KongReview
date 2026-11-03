@@ -10,6 +10,8 @@ struct ExamView: View {
     @Environment(LibraryStore.self) private var store
     @State private var paper = ExamPaperState()
     @State private var current: ExamQuestion?
+    /// 6.0.7：这一道是卷尾再考
+    @State private var relearnItem: ExamRelearnItem?
     @State private var turn = 0
     @State private var loaded = false
     @State private var reload = 0
@@ -62,8 +64,14 @@ struct ExamView: View {
         if let pick = ExamRotation.next(turn: turn, available: paper.available) {
             current = paper.question(pick.kind, day: Date())
             turn = pick.turn
+            relearnItem = nil
+        } else if let pair = store.examRelearnNext() {
+            // 6.0.7：常规的题答完了，忘了的再考一次
+            current = pair.1
+            relearnItem = pair.0
         } else {
             current = nil
+            relearnItem = nil
         }
         revealed = false
         myAnswer = ""
@@ -118,6 +126,13 @@ struct ExamView: View {
                         .foregroundStyle(row.due > 0 && row.done >= row.due ? ReviewPalette.done : ReviewPalette.sub)
                 }
                 Spacer()
+                let relearn = store.examRelearn
+                if !relearn.items.isEmpty || relearn.passed + relearn.failed > 0 {
+                    Label("卷尾再考 \(relearn.items.count) 道" + (relearn.passed > 0 ? " · 已过关 \(relearn.passed)" : ""), systemImage: "arrow.uturn.backward.circle")
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(relearn.items.isEmpty ? ReviewPalette.done : ReviewPalette.pending)
+                        .help("今天答“忘了”的摘录题、论证题与“需重读”的复述题，在常规的题答完后再考一次，答对才算过关；每道至多再考两轮。卷尾再考不记入掌握度。")
+                }
                 if current != nil && !store.examHandedIn {
                     Button("先交卷，看成绩单") { store.examHandedIn = true }
                         .buttonStyle(.link).font(.system(size: 12)).handCursor()
@@ -145,6 +160,10 @@ struct ExamView: View {
 
     private func badge(_ kind: ExamKind, _ title: String, _ detail: String = "") -> some View {
         HStack(spacing: 8) {
+            if let r = relearnItem {
+                Label("卷尾再考 · 第 \(r.rounds + 1) 轮", systemImage: "arrow.uturn.backward.circle")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.pending)
+            }
             Label(kind.title + " · " + title, systemImage: kind.symbol)
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
             if !detail.isEmpty { Text(detail).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1) }
@@ -252,11 +271,25 @@ struct ExamView: View {
                         RichWebText(text: h.text, style: .highlight, slot: "exam-highlight")
                         if !cite(h).isEmpty { Text("——" + cite(h)).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).padding(.top, 6) }
                     }
+                    if !myAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("我的回答：" + myAnswer).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                            .fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+                    }
                 } else {
+                    // 6.0.7：先写下来再对照（可不写）
+                    TextField(mode == .source ? "我的回答：书名、作者、大致位置（可不写）" : "我的回答：这一处说了什么（可不写）", text: $myAnswer, axis: .vertical)
+                        .lineLimit(1...4).textFieldStyle(.roundedBorder).focused($typing)
+                        .padding(.top, 12)
                     revealButton()
                 }
             }
-            if revealed {
+            if revealed, let item = relearnItem {
+                VStack(alignment: .leading, spacing: 8) {
+                    gradeButtons { r in store.examRelearnAnswer(item, passed: r == .remembered); next() }
+                    Text("卷尾再考：答“记得”才算过关；没过的排到后面再考一轮。这一次不记入掌握度。")
+                        .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
+                }
+            } else if revealed {
                 VStack(alignment: .leading, spacing: 8) {
                     gradeButtons { r in store.examAnswerHighlight(h, mode: mode, result: r); next() }
                     HStack(spacing: 14) {
@@ -270,7 +303,7 @@ struct ExamView: View {
                         Button("做成记忆卡") { store.makeCard(from: h) }.handCursor()
                     }
                     .buttonStyle(.link).font(.system(size: 12))
-                    Text("忘了的两天后起回到卷子上补考；记得的，隔得越来越久才再出。")
+                    Text("忘了的今天卷尾再考一次，两天后起回到卷子上补考；记得的，隔得越来越久才再出。")
                         .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                 }
             }
@@ -313,7 +346,12 @@ struct ExamView: View {
                     revealButton()
                 }
             }
-            if revealed {
+            if revealed, let item = relearnItem {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("卷尾再考：理由与依据这回想起来了吗？").font(.system(size: 13.5, weight: .medium)).foregroundStyle(ReviewPalette.ink)
+                    gradeButtons { r in store.examRelearnAnswer(item, passed: r == .remembered); next() }
+                }
+            } else if revealed {
                 if let g = noteGrade {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("已记：\(g.title)。还这么看吗？").font(.system(size: 13.5, weight: .medium)).foregroundStyle(ReviewPalette.ink)
@@ -362,11 +400,16 @@ struct ExamView: View {
                     revealButton("展开这一段")
                 }
             }
-            if revealed {
+            if revealed, let item = relearnItem {
                 choices([
-                    ("1", "已吸收", "checkmark", "能说出要点；下次在 \(AppDatabase.nextNoteInterval(after: k.intervalDays)) 天后", { store.revisitBlock(k.id, .absorbed); next() }),
-                    ("2", "需重读", "arrow.uturn.backward", "说不出或说错；\(AppDatabase.blockRereadDays) 天后再来", { store.revisitBlock(k.id, .reread); next() }),
-                    ("3", "待整理", "tray.full", "内容还乱；一周后再来，列入成绩单下的“待整理”", { store.revisitBlock(k.id, .organize); next() }),
+                    ("1", "记起来了", "checkmark", "过关", { store.examRelearnAnswer(item, passed: true); next() }),
+                    ("2", "还是想不起", "arrow.uturn.backward", "排到后面再考一轮；明天以后按“需重读”的间隔回来", { store.examRelearnAnswer(item, passed: false); next() }),
+                ])
+            } else if revealed {
+                choices([
+                    ("1", "已吸收", "checkmark", "能说出要点；下次在 \(AppDatabase.nextNoteInterval(after: k.intervalDays)) 天后", { store.examAnswerBlock(k, .absorbed); next() }),
+                    ("2", "需重读", "arrow.uturn.backward", "说不出或说错；\(AppDatabase.blockRereadDays) 天后再来", { store.examAnswerBlock(k, .reread); next() }),
+                    ("3", "待整理", "tray.full", "内容还乱；一周后再来，列入成绩单下的“待整理”", { store.examAnswerBlock(k, .organize); next() }),
                 ])
             }
         }
@@ -454,6 +497,24 @@ struct ExamView: View {
                 Text(s.done > 0 ? "在下面写一句日评，就算打卡。忘了的摘录两天后补考；记忆卡、札记、笔记按各自的间隔回来。"
                      : "记忆卡、札记、笔记还没到期，摘录也都答过了。可以去题库加几道题：录一条摘录、写一条札记或做几张卡。")
                     .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+                let relearn = store.examRelearn
+                if relearn.passed + relearn.failed > 0 {
+                    Text("卷尾再考：过关 \(relearn.passed) 道" + (relearn.failed > 0 ? "，两轮仍没想起 \(relearn.failed) 道（照常补考）" : "") + "。")
+                        .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.ink)
+                }
+                // 6.0.7：设了每天的时长，超出的顺延到明天
+                if paper.deferred > 0, let b = store.examBudget() {
+                    HStack(spacing: 10) {
+                        Text("今天约定的 \(b.minutes) 分钟已经答完，另有 \(paper.deferred) 题顺延到明天。")
+                            .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        PillButton(icon: "plus", title: "再考 10 分钟", style: .ghost) {
+                            store.examExtendBudget()
+                            next()
+                        }
+                    }
+                }
             }
         }
     }

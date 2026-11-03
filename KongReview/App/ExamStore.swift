@@ -38,6 +38,8 @@ struct ExamPaperState: Equatable {
     var highlights: [Highlight] = []
     var revisit = RevisitQueue.empty
     var nextCard: Card?
+    /// 6.0.7：设了每天的时长、今天顺延到明天的题数
+    var deferred = 0
 
     var available: Set<ExamKind> {
         var s = Set<ExamKind>()
@@ -110,6 +112,23 @@ extension LibraryStore {
         }
         paper.revisit = (try? db.revisitQueue(now: now)) ?? .empty
         paper.nextCard = examNextCard(now: now)
+        // 6.0.7：设了每天的时长，各类只出分到的题数，其余顺延到明天
+        if let budget = examBudget(now: now) {
+            func trim<T>(_ list: [T], _ kind: ExamKind, done: Int) -> [T] {
+                let allowed = max(0, (budget.cap(kind) ?? list.count + done) - done)
+                paper.deferred += max(0, list.count - allowed)
+                return Array(list.prefix(allowed))
+            }
+            let position = (try? todayReviewSession(now: now))?.position ?? 0
+            paper.highlights = trim(paper.highlights, .highlight, done: position)
+            paper.revisit.notes = trim(paper.revisit.notes, .note, done: paper.revisit.notesDone)
+            paper.revisit.blocks = trim(paper.revisit.blocks, .block, done: paper.revisit.blocksDone)
+            paper.revisit.questions = trim(paper.revisit.questions, .question, done: paper.revisit.questionsDone)
+            if paper.nextCard != nil, let cap = budget.cap(.card), ((try? db.cardsRatedToday(now: now)) ?? 0) >= cap {
+                paper.nextCard = nil
+                paper.deferred += todayCardPending.total
+            }
+        }
         return paper
     }
 
@@ -142,6 +161,8 @@ extension LibraryStore {
         do {
             try db.recordExamResult(kind: mode == .source ? .source : .gist, recordId: id, result: result, now: now)
         } catch { report(error); return }
+        // 6.0.7：忘了的，今天卷尾再考
+        if result == .forgot, action != .discard { examRelearnAdd(.highlight, id) }
         let kind: ReviewEvent.Kind = action == .favorite ? .favorite : action == .discard ? .discard : .keep
         logReview(kind, highlightId: id)
         let scheduler = ReviewScheduler(config: .init(dailyCount: 10, masteryLimit: 0))
@@ -175,8 +196,15 @@ extension LibraryStore {
         do {
             try db.recordExamResult(kind: .argument, recordId: note.id, result: result, now: now)
         } catch { report(error); return }
+        if result == .forgot { examRelearnAdd(.note, note.id) }
         if !reviewedToday { reviewedToday = true; onReviewedToday?() }
         revisitNote(note.id, outcome)
+    }
+
+    /// 复述题：需重读的，今天卷尾再考
+    func examAnswerBlock(_ block: RevisitBlockItem, _ outcome: RevisitOutcome) {
+        if outcome == .reread { examRelearnAdd(.block, block.id) }
+        revisitBlock(block.id, outcome)
     }
 
     /// 交卷：今天的成绩单显示在卷面下方（还有没答的题也可以先交；之后仍可接着答）

@@ -71,6 +71,13 @@ struct KongReviewApp: App {
                 Button("记忆卡（牌组）") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("成绩册") { store.openGradebook(); WindowOpener.showMain() }
+                Divider()
+                // 6.0.7：录入预设（含各栏的起始内容 HTML）
+                Button("记忆卡录入预设…") {
+                    WindowOpener.showMain()
+                    if store.cardEditor == nil { store.openCardsHome() }
+                    store.showsCardEntryPresetManager = true
+                }
                             }.disabled(store.fullBackupBusy || store.learningExplorer != nil || store.learningMaterialExport != nil)
             }
             CommandMenu("查找") {
