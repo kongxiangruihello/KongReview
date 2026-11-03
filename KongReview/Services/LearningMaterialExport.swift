@@ -6,7 +6,6 @@ struct LearningMaterialExportRequest: Identifiable {
     let id = UUID()
     let scope: LearningMaterialScope
 }
-}
 
 struct LearningMaterialExportPresentation: ViewModifier {
     @Environment(LibraryStore.self) private var store
