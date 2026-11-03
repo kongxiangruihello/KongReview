@@ -119,29 +119,45 @@ struct ExamView: View {
             if let c = s.completion {
                 ProgressView(value: c).tint(s.left == 0 ? ReviewPalette.done : ReviewPalette.accent)
             }
-            HStack(spacing: 14) {
-                ForEach(s.rows) { row in
-                    Label("\(row.group.title) \(min(row.done, row.due))/\(row.due)", systemImage: row.group.symbol)
-                        .font(.system(size: 12).monospacedDigit())
-                        .foregroundStyle(row.due > 0 && row.done >= row.due ? ReviewPalette.done : ReviewPalette.sub)
-                }
-                Spacer()
-                let relearn = store.examRelearn
-                if !relearn.items.isEmpty || relearn.passed + relearn.failed > 0 {
-                    Label("卷尾再考 \(relearn.items.count) 道" + (relearn.passed > 0 ? " · 已过关 \(relearn.passed)" : ""), systemImage: "arrow.uturn.backward.circle")
-                        .font(.system(size: 12).monospacedDigit())
-                        .foregroundStyle(relearn.items.isEmpty ? ReviewPalette.done : ReviewPalette.pending)
-                        .help("今天答“忘了”的摘录题、论证题与“需重读”的复述题，在常规的题答完后再考一次，答对才算过关；每道至多再考两轮。卷尾再考不记入掌握度。")
-                }
-                if current != nil && !store.examHandedIn {
-                    Button("先交卷，看成绩单") { store.examHandedIn = true }
-                        .buttonStyle(.link).font(.system(size: 12)).handCursor()
-                        .help("还没答的题仍留在卷子上，随时可以接着答")
+            // 6.1.0：窄时各组进度一行、卷尾再考与“先交卷”另起一行，不再把字挤成两行
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) { headerRows(s); Spacer(minLength: 8); headerActions }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 14) { headerRows(s) }
+                    HStack(spacing: 14) { headerActions; Spacer() }
                 }
             }
             Text("一律先想、再展开对照、再判分：先提取后对照，比重读记得牢。题目按各自的到期日出，卷面上交错排列；中途离开，回来接着答。")
                 .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func headerRows(_ s: DailyCheckState) -> some View {
+        ForEach(s.rows) { row in
+            Label("\(row.group.title) \(min(row.done, row.due))/\(row.due)", systemImage: row.group.symbol)
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(row.due > 0 && row.done >= row.due ? ReviewPalette.done : ReviewPalette.sub)
+                .lineLimit(1).fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private var headerActions: some View {
+        let relearn = store.examRelearn
+        if !relearn.items.isEmpty || relearn.passed + relearn.failed > 0 {
+            Label("卷尾再考 \(relearn.items.count) 道" + (relearn.passed > 0 ? " · 已过关 \(relearn.passed)" : ""), systemImage: "arrow.uturn.backward.circle")
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(relearn.items.isEmpty ? ReviewPalette.done : ReviewPalette.pending)
+                .lineLimit(1).fixedSize()
+                .help("今天答“忘了”的摘录题、论证题、解答题与“需重读”的复述题，在常规的题答完后再考一次，答对才算过关；每道至多再考两轮。卷尾再考不记入掌握度。")
+        }
+        if current != nil && !store.examHandedIn {
+            Button("先交卷，看成绩单") { store.examHandedIn = true }
+                .buttonStyle(.link).font(.system(size: 12)).handCursor()
+                .lineLimit(1).fixedSize()
+                .help("还没答的题仍留在卷子上，随时可以接着答")
         }
     }
 
