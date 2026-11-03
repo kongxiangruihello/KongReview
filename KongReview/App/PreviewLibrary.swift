@@ -153,7 +153,7 @@ import KongReviewCore
                 (1, "钱穆论国史之精神", ["治国史之第一任务，在能于国家民族之内部自身，求得其独特精神之所在。", "此种精神，即其民族文化之生命。", "国史所载，非帝王将相之家谱，乃一民族之全体生命史也。"]),
             ]
             for (i, essay) in essays.enumerated() {
-                let body = (0..<6).flatMap { round in essay.2.map { "\($0)（\(round + 1)）" } }.joined(separator: "\n\n")
+                let body = (0..<16).flatMap { round in essay.2.map { "\($0)（\(round + 1)）" } }.joined(separator: "\n\n")
                 _ = try db.save(Highlight(sourceId: sources[essay.0].id, text: "## \(essay.1)\n\n" + body + String(repeating: "\n\n读者按：此段宜反复读之。", count: 6), createdAt: day(-20 - i)))
             }
             _ = try db.save(Highlight(sourceId: sources[2].id, text: "## 已在别处划过的一篇\n\n" + String(repeating: "梁启超作清代学术概论，谓经世致用之学，起于明末清初诸大儒。顾炎武、黄宗羲、王夫之，皆以天下为己任。\n\n", count: 20), createdAt: day(-25)))
