@@ -78,6 +78,11 @@ struct KongReviewApp: App {
                     if store.cardEditor == nil { store.openCardsHome() }
                     store.showsCardEntryPresetManager = true
                 }
+                // 6.1.0：没有 HTML 模板的卡片共用的样式，也可从菜单栏打开
+                Button("普通卡片样式…") {
+                    WindowOpener.showMain()
+                    store.showsPlainCardStyle = true
+                }
                             }.disabled(store.fullBackupBusy || store.learningExplorer != nil || store.learningMaterialExport != nil)
             }
             CommandMenu("查找") {

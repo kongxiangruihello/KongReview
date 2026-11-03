@@ -7,8 +7,8 @@ struct CardEntryPresetManagerView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var library = CardEntryPresetLibrary()
-    @State private var editing: CardEntryPreset?
-    @State private var original: CardEntryPreset?
+    /// 6.1.0：要编辑的预设与它原来的样子放在一起交给 sheet，免得 sheet 读到上一次的 original（编辑时标题误显示“新建”）
+    @State private var editing: CardEntryPresetEditTarget?
     @State private var pendingDelete: CardEntryPreset?
     @State private var builtinPreview: CardEntryBuiltin?
     @State private var importRequest: CardEntryPresetImportRequest?
@@ -21,7 +21,7 @@ struct CardEntryPresetManagerView: View {
             Text("保存牌组、标签、栏目结构、填写提示与必填规则。内置模板可先预览示例，再复制修改；提示和示例不会写入卡片正文。")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button("新建预设") { original = nil; editing = CardEntryPreset(name: "") }
+                Button("新建预设") { editing = .init(preset: CardEntryPreset(name: "")) }
                     .handCursor().disabled(store.fullBackupBusy)
                 Button("从当前卡片结构创建") { captureCurrent() }
                     .handCursor().disabled(store.cardEditor == nil || store.fullBackupBusy)
@@ -40,7 +40,7 @@ struct CardEntryPresetManagerView: View {
                             }
                             Spacer()
                             Button("查看示例") { builtinPreview = builtin }.handCursor()
-                            Button("复制并编辑") { original = nil; editing = builtin.editableCopy() }.handCursor()
+                            Button("复制并编辑") { editing = .init(preset: builtin.editableCopy()) }.handCursor()
                         }.padding(.vertical, 4)
                     }
                 }
@@ -57,7 +57,7 @@ struct CardEntryPresetManagerView: View {
                             }
                             Spacer()
                             Button("复制") { copy(preset) }.handCursor()
-                            Button("编辑") { original = preset; editing = preset }.handCursor()
+                            Button("编辑") { editing = .init(preset: preset, original: preset) }.handCursor()
                             Button("导出…") { export([preset]) }.handCursor()
                             Button("删除", role: .destructive) { pendingDelete = preset }.handCursor()
                         }.padding(.vertical, 5)
@@ -74,8 +74,8 @@ struct CardEntryPresetManagerView: View {
         }.padding(22).frame(minWidth: 660, idealWidth: 720, minHeight: 430, idealHeight: 570)
             .task { reload() }
             .onChange(of: store.fullBackupBusy) { _, busy in if !busy { reload() } }
-            .sheet(item: $editing, onDismiss: { reload() }) { preset in
-                CardEntryPresetEditorView(preset: preset, expected: original)
+            .sheet(item: $editing, onDismiss: { reload() }) { target in
+                CardEntryPresetEditorView(preset: target.preset, expected: target.original)
             }
             .sheet(item: $builtinPreview) { builtin in CardEntryBuiltinPreviewView(builtin: builtin) }
             .sheet(item: $importRequest, onDismiss: { reload() }) { request in
@@ -111,14 +111,13 @@ struct CardEntryPresetManagerView: View {
             var preset = try CardEntryPreset.capture(name: "新预设", card: draft.card, tags: TagParser.parse(draft.tagsText), templates: store.db.noteTemplates())
                 .retainingGuidance(draft.entryGuidance, from: draft.card)
             preset.name = ""
-            original = nil; editing = preset
+            editing = .init(preset: preset)
         } catch { self.error = error.localizedDescription }
     }
     private func copy(_ preset: CardEntryPreset) {
         guard !store.fullBackupBusy else { return }
         let name = CardEntryPresetTransfer.suggestedCopyName(preset.name, existingNames: library.presets.map(\.name))
-        original = nil
-        editing = preset.copied(name: name)
+        editing = .init(preset: preset.copied(name: name))
     }
     private func chooseImport() {
         guard !store.fullBackupBusy else { return }
@@ -149,6 +148,13 @@ struct CardEntryPresetManagerView: View {
             message = "已导出 \(presets.count) 个录入模板。"; error = nil
         } catch { self.error = error.localizedDescription }
     }
+}
+
+struct CardEntryPresetEditTarget: Identifiable {
+    var preset: CardEntryPreset
+    /// 编辑已有预设时为它原来的样子；新建、复制时为 nil
+    var original: CardEntryPreset?
+    var id: UUID { preset.id }
 }
 
 private struct CardEntryPresetEditorView: View {
