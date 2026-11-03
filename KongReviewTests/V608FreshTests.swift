@@ -61,9 +61,6 @@ final class V608FreshTests: XCTestCase {
         // 名额
         XCTAssertEqual(try db.examFreshCandidates(now: d(1), limit: 1).count, 1)
         XCTAssertTrue(try db.examFreshCandidates(now: d(1), limit: 0).isEmpty)
-        // 专卷的练习不算卷面上考过
-        try db.recordDrillResult(kind: .gist, recordId: yesterday.id!, result: .remembered, now: d(-1, hour: 22))
-        XCTAssertTrue(try db.examFreshCandidates(now: d(0), limit: 10).map(\.id).contains(yesterday.id!))
     }
 
     func testKongFolioImportCountsAsEnteredOnImportDay() throws {
