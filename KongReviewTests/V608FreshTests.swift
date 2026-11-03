@@ -126,7 +126,8 @@ final class V608FreshTests: XCTestCase {
         try Data(catalog.utf8).write(to: file)
         let r = try KongFolioConverter.read(file)
         XCTAssertEqual(r.entries.count, 1)
-        XCTAssertEqual(r.skippedEmpty, 2, "找不到的图片、跳出文件夹的名字不导入")
+        XCTAssertEqual(r.missingImages, 2, "找不到的图片、跳出文件夹的名字不导入，另行计数")
+        XCTAssertEqual(r.skippedEmpty, 0)
         let e = r.entries[0]
         XCTAssertTrue(e.text.hasPrefix("![图片摘录](kr-media://media/kongfolio-"))
         XCTAssertEqual(e.media.values.first, png)

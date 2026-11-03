@@ -111,6 +111,8 @@ enum KongFolioConverter {
         var entries: [KongFolioEntry] = []
         /// 空记录（6.0.8 起，只有图片的摘录连图导入；找不到图片文件的仍算空）
         var skippedEmpty = 0
+        /// 6.0.8：图片摘录，但图片文件找不到（或超过 15 MB）
+        var missingImages = 0
         /// KongFolio 里已移到“最近删除”的
         var skippedRemoved = 0
     }
@@ -124,6 +126,7 @@ enum KongFolioConverter {
             if rec.removed != nil { r.skippedRemoved += 1; continue }
             if let e = entry(from: rec) { r.entries.append(e) }
             else if let e = imageEntry(from: rec, assets: assets) { r.entries.append(e) }
+            else if !(rec.imageAsset ?? "").isEmpty && trimmed(rec.quote).isEmpty { r.missingImages += 1 }
             else { r.skippedEmpty += 1 }
         }
         for essay in state.essays ?? [] {

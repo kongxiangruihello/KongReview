@@ -55,7 +55,8 @@ final class V606KongFolioTests: XCTestCase {
         let r = KongFolioConverter.convert(try KongFolioCatalog.decode(catalog()))
         XCTAssertEqual(r.entries.map(\.key), ["record:A1", "record:C3", "record:D4", "record:F6", "essay:G7", "essay:I9"])
         XCTAssertEqual(r.entries.last?.title, "kongreview", "题目去掉 Markdown 标题记号")
-        XCTAssertEqual(r.skippedEmpty, 2, "没有文字的图片摘录、空白札记")
+        XCTAssertEqual(r.skippedEmpty, 1, "空白札记")
+        XCTAssertEqual(r.missingImages, 1, "6.0.8：只有图片的摘录没给图片文件夹时另行计数")
         XCTAssertEqual(r.skippedRemoved, 1)
         let a = r.entries[0]
         XCTAssertEqual(a.kind, .highlight)
@@ -85,7 +86,7 @@ final class V606KongFolioTests: XCTestCase {
         XCTAssertEqual(first.newHighlights, 3, "A1、C3、D4 的原文")
         XCTAssertEqual(first.newNotes, 4, "D4、F6、G7、I9")
         XCTAssertEqual(first.sources, ["论语译注", "孟子"])
-        XCTAssertEqual(first.skippedEmpty, 2); XCTAssertEqual(first.skippedRemoved, 1)
+        XCTAssertEqual(first.skippedEmpty, 1); XCTAssertEqual(first.missingImages, 1); XCTAssertEqual(first.skippedRemoved, 1)
         XCTAssertEqual(try db.kongFolioCounts().highlights, 3)
         XCTAssertEqual(try db.kongFolioCounts().notes, 4)
 
