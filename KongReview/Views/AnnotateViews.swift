@@ -20,7 +20,7 @@ struct AnnotateSection: View {
                         .foregroundStyle(today.left == 0 ? ReviewPalette.done : ReviewPalette.ink)
                     Spacer()
                     if today.remaining > 0 {
-                        Text("库里还有约 \(today.remaining) 篇没标过").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
+                        Text("此外约 \(today.remaining) 篇待标").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
                     }
                 }
                 Text("全部摘录里整篇存进来、还没划过要点的文章。打开读一遍，选中要紧的一段按 H，就存为同一出处下的一条摘录，以后在卷子上出题；原文不动。划过一条或点了“标完了”即算这篇完成。")
@@ -103,7 +103,7 @@ struct AnnotateSheet: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 760, idealWidth: 920, minHeight: 560, idealHeight: 760)
+        .frame(minWidth: 600, idealWidth: 760, maxWidth: .infinity, minHeight: 460, idealHeight: 680, maxHeight: .infinity)
         .task(id: request.articleId) {
             article = try? store.db.annotationArticle(articleId: request.articleId)
         }
@@ -113,7 +113,6 @@ struct AnnotateSheet: View {
         var parts: [String] = []
         if let item { parts.append("约 \(item.length) 字") }
         if let item, item.marks > 0 { parts.append("在这里划了 \(item.marks) 条" + (item.marksToday > 0 ? "（今天 \(item.marksToday) 条）" : "")) }
-        if marks > 0 { parts.append("已有的摘录标黄") }
         parts.append("选中文字后按 H 摘录")
         return parts.joined(separator: " · ")
     }

@@ -35,7 +35,7 @@ struct AnnotateItem: Identifiable, Equatable, Sendable {
 /// 今天的标注任务
 struct AnnotateToday: Equatable, Sendable {
     var items: [AnnotateItem] = []
-    /// 还没在这里标过的长文一共多少篇（不扣除以前在别处划过的，故为“至多”）
+    /// 今天这几篇之外，还没在这里标过的长文篇数（不扣除以前在别处划过的，故为约数）
     var remaining = 0
     var done: Int { items.filter(\.doneToday).count }
     var left: Int { items.count - done }
@@ -161,8 +161,8 @@ extension AppDatabase {
                 items.append(AnnotateItem(id: e.id, sourceId: row["sourceId"], title: e.title, author: e.author, length: e.length,
                                           marksToday: marksToday, marks: marks, finishedToday: finishedToday, finished: finished))
             }
-            // 抽的时候的篇数，减去今天已动手的
-            let remaining = max(0, plan.pool - items.filter { $0.marks > 0 || $0.finished }.count)
+            // 今天这几篇之外，还没在这里标过的长文（含以前在别处划过的，故为约数）
+            let remaining = max(0, plan.pool - plan.entries.count)
             return AnnotateToday(items: items, remaining: remaining)
         }
     }
