@@ -204,6 +204,8 @@ import KongReviewCore
             UserDefaults.standard.set(10, forKey: SettingsKeys.dailyCount)
             UserDefaults.standard.set(3, forKey: AnnotateSettings.perDayKey)
             UserDefaults.standard.removeObject(forKey: ExamFresh.perDayKey)
+            // 每次打开都从“不限时长”开始（设置里改过的不带进下一次预览）
+            UserDefaults.standard.removeObject(forKey: ExamSettings.minutesKey)
             let store = LibraryStore(db: db, draftPersistence: nil, positionDefaults: nil)
             store.journeyNavigation.period = .week
             return store
