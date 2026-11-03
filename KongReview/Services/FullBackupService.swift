@@ -386,7 +386,10 @@ extension FullBackupService {
         "review.dailyCount": 0...100_000, "review.masteryLimit": 0...100_000,
         "cards.newPerDay": 0...100_000, "cards.reviewsPerDay": 0...100_000,
         "cards.totalNewPerDay": 0...100_000, "cards.totalReviewsPerDay": 0...100_000,
-        "reminder.hour": 0...23, "reminder.minute": 0...59
+        "reminder.hour": 0...23, "reminder.minute": 0...59,
+        // 6.1.1：今日试卷的题数与时长也随完整备份走（换电脑、预览载入备份时卷面一样）
+        "exam.minutesPerDay": 0...240, "exam.freshPerDay": 0...10, "annotate.perDay": 0...20,
+        "revisit.notesPerDay": 0...10, "revisit.questionsPerDay": 0...10, "revisit.blocksPerDay": 0...10, "revisit.answersPerDay": 0...10
     ]
     static let stringPreferenceKeys: Set<String> = [
         "editor.pasteStyle", "cards.fsrsInfo", "cards.syncFromHighlight", "citation.style", "sidebar.sourceSort", "hotkey.preset", "hotkey.lookup"
@@ -403,6 +406,16 @@ extension FullBackupService {
         }
         try validateSettings(result)
         return result
+    }
+
+    /// 6.1.1：预览载入备份时用——备份里的设置（已校验）
+    static func settings(of prepared: PreparedFullBackup) throws -> [String: Any] {
+        try readSettings(prepared.directory.appendingPathComponent(settingsName))
+    }
+
+    /// 6.1.1：预览载入备份时用——解出的数据库文件
+    static func databaseFile(of prepared: PreparedFullBackup) -> URL {
+        prepared.directory.appendingPathComponent(databaseName)
     }
 
     private static func readSettings(_ url: URL) throws -> [String: Any] {

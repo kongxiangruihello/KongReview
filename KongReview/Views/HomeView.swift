@@ -147,6 +147,14 @@ struct SidebarBrandView: View {
             Text("版本 \(version)")
                 .font(.system(size: 10.5).monospacedDigit())
                 .foregroundStyle(.secondary)
+            // 6.1.1：预览载入了完整备份时注明，免得与示例库混淆
+            if PreviewLibrary.isEnabled, let label = PreviewLibrary.backupLabel {
+                Text(label)
+                    .font(.system(size: 10))
+                    .foregroundStyle(ReviewPalette.pending)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 12)
