@@ -140,6 +140,8 @@ struct DailyCheckView: View {
         case .selfTest:
             let n = DailyCheckSettings.selfTestPerDay()
             return n == 0 ? "未开启（设置里可改为每天带 1–5 题）" : "每天从本周自测中带 \(n) 题"
+        case .annotate:
+            return "在还没划过的长文里划出要点（每天 \(AnnotateSettings.perDay()) 篇）"
         }
     }
 

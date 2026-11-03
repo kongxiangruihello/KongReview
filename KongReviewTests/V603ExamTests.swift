@@ -82,7 +82,7 @@ final class V603ExamTests: XCTestCase {
         let c = { (done: Int, left: Int) in DailyCheckCount(done: done, left: left) }
         let s = try db.dailyCheck(current: [.review: c(1, 4), .cards: c(0, 3), .revisit: c(0, 0), .selfTest: c(0, 2)],
                                   groups: DailyCheckGroup.exam, now: t0)
-        XCTAssertEqual(s.rows.map(\.group), [.review, .cards, .revisit])
+        XCTAssertEqual(s.rows.map(\.group), [.review, .cards, .revisit, .annotate], "6.0.4：加标注文章")
         XCTAssertEqual(s.due, 8)
         XCTAssertEqual(s.done, 1)
     }

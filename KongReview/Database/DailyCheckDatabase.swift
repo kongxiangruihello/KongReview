@@ -15,16 +15,19 @@ import KongReviewCore
 
 /// 今日检查的一组
 enum DailyCheckGroup: String, Codable, CaseIterable, Identifiable, Sendable {
-    case review, cards, revisit, selfTest
+    case review, cards, revisit, selfTest, annotate
     var id: String { rawValue }
-    /// 6.0.3：今日试卷上的三组（每周自测已并入摘录题与论证题）
-    static let exam: [DailyCheckGroup] = [.review, .cards, .revisit]
+    /// 6.0.3：今日试卷上的三组（每周自测已并入摘录题与论证题）；6.0.4 加“标注文章”
+    static let exam: [DailyCheckGroup] = [.review, .cards, .revisit, .annotate]
+    /// 5.2 起的四组（旧接口的默认值）
+    static let legacy: [DailyCheckGroup] = [.review, .cards, .revisit, .selfTest]
     var title: String {
         switch self {
         case .review: "摘录"
         case .cards: "记忆卡"
         case .revisit: "札记 · 笔记 · 问题"
         case .selfTest: "自测"
+        case .annotate: "标注文章"
         }
     }
     var unit: String {
@@ -33,6 +36,7 @@ enum DailyCheckGroup: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cards: "题"
         case .revisit: "题"
         case .selfTest: "题"
+        case .annotate: "篇"
         }
     }
     var symbol: String {
@@ -41,6 +45,7 @@ enum DailyCheckGroup: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cards: "brain"
         case .revisit: "arrow.counterclockwise.circle"
         case .selfTest: "checklist"
+        case .annotate: "highlighter"
         }
     }
 }
@@ -329,7 +334,7 @@ extension AppDatabase {
 
     /// 合成今天的检查。`snapshot` 为真时，还没定下应做数的组以此刻的“已做 + 未做”定下；为假时只显示、不定（统计还在加载时）。
     /// 6.0.3：`groups` 为今天卷子上的各组；每周自测并入卷子后，应用只传回顾、记忆卡、重温三组
-    func dailyCheck(current: [DailyCheckGroup: DailyCheckCount], groups: [DailyCheckGroup] = DailyCheckGroup.allCases,
+    func dailyCheck(current: [DailyCheckGroup: DailyCheckCount], groups: [DailyCheckGroup] = DailyCheckGroup.legacy,
                     snapshot: Bool = true, now: Date = Date()) throws -> DailyCheckState {
         try writer.write { db in
             guard try db.tableExists("daily_checkin") else { return .empty }
@@ -340,6 +345,8 @@ extension AppDatabase {
             for g in groups {
                 let c = current[g] ?? DailyCheckCount()
                 if plan.due[g.rawValue] == nil && snapshot { plan.due[g.rawValue] = c.total }
+                // 6.0.4：标注的篇数随设置当天改（篇目当天抽定，不会因做完而变少）
+                if g == .annotate && snapshot { plan.due[g.rawValue] = c.total }
                 let due = max(plan.due[g.rawValue] ?? c.total, c.done)
                 rows.append(DailyCheckRow(group: g, done: c.done, due: due, skipped: plan.skipped.contains(g.rawValue)))
             }

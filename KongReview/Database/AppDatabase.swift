@@ -468,6 +468,10 @@ final class AppDatabase {
         m.registerMigration("v25-template-html") { db in
             try db.alter(table: "note_template") { t in t.add(column: "html", .text) }
         }
+        // 6.0.4：每天标注文章——标注记录与“从哪篇划出”
+        m.registerMigration("v26-article-annotation") { db in
+            try AppDatabase.installAnnotate(in: db)
+        }
         return m
     }
 }

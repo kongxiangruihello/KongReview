@@ -37,6 +37,7 @@ struct ExamView: View {
                 } else {
                     finished(state)
                 }
+                AnnotateSection()
                 if loaded && (current == nil || store.examHandedIn) {
                     reportCard
                 }
@@ -46,6 +47,7 @@ struct ExamView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle("今日试卷")
+        .sheet(item: Bindable(store).annotating) { AnnotateSheet(request: $0) }
         .task(id: "\(store.today)|\(reload)") { load() }
         .task(id: "\(store.dailyCheckRevision)|\(store.revisitRevision)") {
             tally = (try? store.db.examTally()) ?? MasteryTally()
@@ -101,7 +103,7 @@ struct ExamView: View {
                 Text(DailyCheckView.dateLine()).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                 Spacer()
                 if s.due > 0 {
-                    Text("已答 \(s.done) / \(s.due) 题")
+                    Text("已做 \(s.done) / \(s.due)")
                         .font(.system(size: 14, weight: .semibold).monospacedDigit())
                         .foregroundStyle(s.left == 0 ? ReviewPalette.done : ReviewPalette.ink)
                 }
@@ -443,7 +445,7 @@ struct ExamView: View {
     private func finished(_ s: DailyCheckState) -> some View {
         ReviewCardContainer(padding: 28) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(s.done > 0 ? "今天的卷子答完了" : "今天的卷子上没有题")
+                Text(s.done > 0 ? (store.annotate.left > 0 ? "今天的题答完了，还有文章要标" : "今天的卷子答完了") : "今天的卷子上没有题")
                     .font(.system(size: 19, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 if s.done > 0 {
                     Text(summaryLine(s)).font(.system(size: 13.5)).foregroundStyle(ReviewPalette.ink)
@@ -457,7 +459,7 @@ struct ExamView: View {
     }
 
     private func summaryLine(_ s: DailyCheckState) -> String {
-        var parts = s.rows.filter { $0.done > 0 }.map { "\($0.group.title) \($0.done) 题" }
+        var parts = s.rows.filter { $0.done > 0 }.map { "\($0.group.title) \($0.done) \($0.group.unit)" }
         if tally.total > 0 { parts.append("摘录与札记：记得 \(tally.good)、大致 \(tally.mid)、忘了 \(tally.bad)") }
         return parts.joined(separator: "；") + "。"
     }

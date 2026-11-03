@@ -96,6 +96,7 @@ private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.reminderEnabled) private var reminderEnabled = false
     @AppStorage(SettingsKeys.reminderHour) private var hour = 8
     @AppStorage(SettingsKeys.reminderMinute) private var minute = 0
+    @AppStorage(AnnotateSettings.perDayKey) private var annotatePerDay = AnnotateSettings.defaultPerDay
 
     var body: some View {
         Form {
@@ -108,6 +109,13 @@ private struct ReviewSettings: View {
                 Stepper("进展题（「常念」的问题）：\(revisitQuestions) 道", value: $revisitQuestions, in: 0...5)
                 Stepper("复述题（笔记）：\(revisitBlocks) 道", value: $revisitBlocks, in: 0...10)
                 Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。「常念」且未解决的问题约每周回来一次。设为 0 即不出这一类。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("今日标注：每天标几篇文章") {
+                Stepper(annotatePerDay == 0 ? "不出" : "每天 \(annotatePerDay) 篇", value: $annotatePerDay, in: 0...20)
+                Text("从全部摘录里整篇存进来（至少 1000 字）、还没划过要点的文章中每天随机抽，在今日试卷上打开标注：选中一段按 H 即存为同一出处下的一条摘录，原文不动。以前在 Readwise 等处划过的（同一出处已有出现在正文里的短摘录）不再抽。调多了当天即补足；设为 0 不出这一项，不计入打卡。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -144,6 +152,7 @@ private struct ReviewSettings: View {
         }
         .formStyle(.grouped)
         .onChange(of: revisitNotes) { store.refreshRevisit() }
+        .onChange(of: annotatePerDay) { store.refreshDailyCheck() }
         .onChange(of: revisitQuestions) { store.refreshRevisit() }
         .onChange(of: revisitBlocks) { store.refreshRevisit() }
         .onChange(of: checkinReminder) { ReminderScheduler.shared.applyCheckinReminder() }
