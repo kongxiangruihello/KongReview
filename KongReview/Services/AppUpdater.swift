@@ -502,7 +502,23 @@ final class AppUpdater {
         UserDefaults.standard.set(version, forKey: updatedFromKey)
         log(isRollback ? "已启动回退，KongReview 即将退出。" : "已启动安装，KongReview 即将退出。")
         // 让进度窗口显示一下“完成”再退出
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { MainActor.assumeIsolated { quitForInstall() } }
+    }
+
+    /// 退出以便安装。窗口上挂着面板（如这个更新面板）时 macOS 不让退出，所以先收起面板；
+    /// 仍被拦下（例如还有别的对话框）就在 5 秒后直接结束进程——学习库每次保存都已写盘，草稿也已存到本机。
+    @MainActor static func quitForInstall() {
+        shared.showsPanel = false
+        for window in NSApp.windows {
+            if let sheet = window.attachedSheet { window.endSheet(sheet) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                log("应用没有按常规退出，直接结束以便安装。")
+                exit(0)
+            }
+        }
     }
 
     /// 当前版本的备份名，如“KongReview-6.0.2-512.app”
