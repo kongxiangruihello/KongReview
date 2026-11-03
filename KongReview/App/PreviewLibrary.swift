@@ -157,6 +157,31 @@ import KongReviewCore
                 _ = try db.save(Highlight(sourceId: sources[essay.0].id, text: "## \(essay.1)\n\n" + body + String(repeating: "\n\n读者按：此段宜反复读之。", count: 6), createdAt: day(-20 - i)))
             }
             _ = try db.save(Highlight(sourceId: sources[2].id, text: "## 已在别处划过的一篇\n\n" + String(repeating: "梁启超作清代学术概论，谓经世致用之学，起于明末清初诸大儒。顾炎武、黄宗羲、王夫之，皆以天下为己任。\n\n", count: 20), createdAt: day(-25)))
+            // 6.0.5：成绩册——近三周的每日成绩（有几天没打卡）、卷面作答（几条摘录常错）、一段笔记两次需重读
+            let notes = ["读完学而篇", "出处题错了两道", "", "记忆卡顺手", "补了昨天的", "", "札记想清楚了一条"]
+            for offset in -20...(-1) where offset % 6 != 0 {
+                let key = AppDatabase.revisitDay(day(offset))
+                let due = 18 + (offset + 20) % 7, done = offset % 5 == 0 ? due / 2 : due
+                let score = 3 + (offset + 20) % 3
+                try db.writer.write { d in
+                    try d.execute(sql: """
+                        INSERT INTO daily_checkin(day, status, selfScore, note, doneCount, dueCount, createdAt, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, arguments: [key, done == due ? "checked" : nil, done == due ? score : nil,
+                                         notes[(offset + 20) % notes.count], done, due, day(offset, hour: 21), day(offset, hour: 21)])
+                }
+                for (i, h) in highlights.prefix(8).enumerated() where (offset + i) % 3 == 0 {
+                    let result: SelfTestResult = i < 2 && offset % 2 == 0 ? .forgot : (i + offset) % 4 == 0 ? .partly : .remembered
+                    try db.recordExamResult(kind: i % 2 == 0 ? .gist : .source, recordId: h.id!, result: result, now: day(offset, hour: 20))
+                }
+                if offset % 4 == 0 {
+                    try db.recordExamResult(kind: .argument, recordId: identity.id!, result: offset % 8 == 0 ? .partly : .remembered, now: day(offset, hour: 20))
+                }
+            }
+            if let textBlock = try db.writer.read({ try Int64.fetchOne($0, sql: "SELECT id FROM notebook_block WHERE kind = 'text' ORDER BY id LIMIT 1") }) {
+                try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-10, hour: 20))
+                try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-3, hour: 20))
+            }
             UserDefaults.standard.set(10, forKey: SettingsKeys.dailyCount)
             UserDefaults.standard.set(3, forKey: AnnotateSettings.perDayKey)
             let store = LibraryStore(db: db, draftPersistence: nil, positionDefaults: nil)

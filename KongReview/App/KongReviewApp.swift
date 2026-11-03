@@ -70,7 +70,7 @@ struct KongReviewApp: App {
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("记忆卡（牌组）") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
-                Button("回顾统计") { store.selection = .stats }
+                Button("成绩册") { store.openGradebook(); WindowOpener.showMain() }
                             }.disabled(store.fullBackupBusy || store.learningExplorer != nil || store.learningMaterialExport != nil)
             }
             CommandMenu("查找") {

@@ -4,7 +4,7 @@ import KongReviewCore
 // MARK: - 5.0.1：复盘
 
 extension LibraryStore {
-    /// 打开某一周期的复盘（默认本周；周初而上周未复盘时为上周）
+    /// 打开某一周期的复盘（默认本周；周初而上周未复盘时为上周）。6.0.5 起打开成绩册的这一期报告
     func openReflection(period: GrowthPeriod = .week, date: Date? = nil) {
         guard period != .day else { return }
         checkDayChange()
@@ -12,7 +12,8 @@ extension LibraryStore {
         if let date { reflectionDate = date }
         else if period == .week { reflectionDate = db.reflectionTargetWeek().start }
         else { reflectionDate = Date() }
-        selection = .reflection
+        // 6.0.5：复盘并入成绩册的周报、月报
+        selection = .gradebook
     }
 
     /// 完成这一期的复盘

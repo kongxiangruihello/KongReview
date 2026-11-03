@@ -188,10 +188,9 @@ struct ContentView: View {
             HighlightListView(title: "收藏", filter: .init(favoritesOnly: true))
         case .cards:
             CardsHomeView()
-        case .growth:
-            GrowthView()
-        case .stats:
-            StatsView()
+        // 6.0.5：个人成长、回顾统计、复盘并入成绩册
+        case .growth, .stats, .reflection, .gradebook:
+            GradebookView()
         case .unsorted:
             HighlightListView(title: "未归类", filter: .init(unsortedOnly: true))
         case .trash:
@@ -216,13 +215,8 @@ struct ContentView: View {
             QuestionBookView()
         case .question(let id):
             QuestionView(questionId: id).id(id)
-        case .revisit:
-            RevisitView()
-        case .reflection:
-            ReflectionView()
-        case .selfTest:
-            SelfTestView()
-        case .dailyCheck:
+        // 6.0.3 起重温、自测、今日检查都在今日试卷里
+        case .revisit, .selfTest, .dailyCheck:
             ExamView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
@@ -246,16 +240,14 @@ struct SidebarView: View {
             set: { destination in
                 if destination == .review { store.openTodayReview() }
                 else if destination == .cards { store.openCardsHome() }
-                else if destination == .revisit { store.openRevisit() }
-                else if destination == .reflection { store.openReflection() }
-                else if destination == .selfTest { store.openSelfTest() }
-                else if destination == .dailyCheck { store.openDailyCheck() }
+                else if destination == .dailyCheck { store.openExam() }
+                else if destination == .gradebook { store.openGradebook() }
                 else { store.selection = destination }
             }
         )) {
             // 6.0.1：侧栏改为三组——考场（每天来考）、题库（考的内容）、其他。各组可折叠，记住状态。
             Section(isExpanded: store.sidebarGroupBinding("exam")) {
-                Label("首页", systemImage: "house")
+                Label("考场门口", systemImage: "door.left.hand.open")
                     .sidebarMenuRow()
                     .tag(SidebarItem.home)
                 // 6.0.3：今日试卷——今日检查、今日回顾、记忆卡学习、重温、自测合成一张卷子；行尾为还没答的题数
@@ -266,16 +258,10 @@ struct SidebarView: View {
                 }
                 .sidebarMenuRow()
                 .tag(SidebarItem.dailyCheck)
-                // 5.0.1：复盘——每周五步，月度、年度
-                Label("复盘", systemImage: "arrow.triangle.2.circlepath")
+                // 6.0.5：成绩册——日评、打卡、走势、常错的题、周报月报（复盘、个人成长、回顾统计并入）
+                Label("成绩册", systemImage: "chart.line.uptrend.xyaxis")
                     .sidebarMenuRow()
-                    .tag(SidebarItem.reflection)
-                Label("个人成长", systemImage: "leaf")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.growth)
-                Label("回顾统计", systemImage: "chart.bar.xaxis")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.stats)
+                    .tag(SidebarItem.gradebook)
             } header: {
                 Text("考场")
             }
