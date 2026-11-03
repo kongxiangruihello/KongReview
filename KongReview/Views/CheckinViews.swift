@@ -15,7 +15,7 @@ struct CheckinStatusStrip: View {
             } else if c.todayRest {
                 Label("今天是休息日，打卡照样计入", systemImage: "cup.and.saucer").foregroundStyle(ReviewPalette.sub)
             } else {
-                Label("做完一组并写下日评即打卡", systemImage: "seal").foregroundStyle(ReviewPalette.sub)
+                Label("卷子上答完一类并写下日评即打卡", systemImage: "seal").foregroundStyle(ReviewPalette.sub)
             }
             Spacer(minLength: 8)
             if c.current > 0 { number(c.current, "连续") } else { number(c.month, "本月") }

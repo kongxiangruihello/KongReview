@@ -137,7 +137,7 @@ struct HomeLearningDashboard: View {
 
     private var reviewStatus: String {
         if summary.reviewIsComplete { return "已完成" }
-        if summary.reviewPendingCount > 0 { return "待回顾" }
+        if summary.reviewPendingCount > 0 { return "待答" }
         return summary.reviewCandidateCount > 0 ? "尚未开始" : "暂无摘录"
     }
 
