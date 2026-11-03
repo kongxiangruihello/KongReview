@@ -35,7 +35,7 @@ struct RevisitLimits: Equatable, Sendable {
     static func saved(_ defaults: UserDefaults = .standard) -> RevisitLimits {
         RevisitLimits(notes: max(0, min(10, defaults.object(forKey: notesKey) as? Int ?? 2)),
                       questions: max(0, min(5, defaults.object(forKey: questionsKey) as? Int ?? 1)),
-                      books: 0,
+                      books: SlimSwitch.featuresOff ? 0 : max(0, min(3, defaults.object(forKey: booksKey) as? Int ?? 1)),
                       blocks: max(0, min(10, defaults.object(forKey: blocksKey) as? Int ?? 2)))
     }
 }

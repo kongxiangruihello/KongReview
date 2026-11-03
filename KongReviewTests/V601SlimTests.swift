@@ -45,7 +45,8 @@ final class V601SlimTests: XCTestCase {
         // 快照是完整的数据库
         let snap = try DatabaseQueue(path: r.snapshot.path)
         XCTAssertEqual(try snap.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM book_summary") }, 1)
-        XCTAssertEqual(try snap.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM source") }, 1)
+        XCTAssertEqual(try snap.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM source") },
+                       try db.writer.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM source") })
 
         // 原始记录不删
         XCTAssertNotNil(try db.bookSummary(sourceId: src.id!))
@@ -83,7 +84,20 @@ final class V601SlimTests: XCTestCase {
         XCTAssertEqual(Set(GlobalSearchKind.shown), Set(GlobalSearchKind.allCases).subtracting([.article]))
     }
 
-    func testFocusIsOff() throws {
+    func testFocusIsOffInApp() throws {
         XCTAssertTrue(LibraryStore.slimmedFeaturesOff)
+        try MainActor.assumeIsolated {
+            let db = try AppDatabase(DatabaseQueue())
+            let source = try db.save(Source(title: "焦点书"))
+            let h = try db.save(Highlight(sourceId: source.id, text: "焦点"))
+            _ = try db.save(Card(deck: "甲", front: "焦点新卡", highlightId: h.id))
+            try db.setLearningFocus(LearningFocus(kind: .source, id: source.id!, title: "焦点书"))
+            let store = LibraryStore(db: db)
+            XCTAssertNil(store.learningFocus, "旧的本期焦点不再生效")
+            XCTAssertTrue(store.focusHighlightIDs.isEmpty)
+            XCTAssertTrue(store.focusDeckCounts.isEmpty)
+            XCTAssertNil(store.currentProjectID)
+            XCTAssertNotNil(try db.validatedLearningFocus(), "存着的设定不动")
+        }
     }
 }

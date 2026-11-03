@@ -5,6 +5,10 @@ import KongReviewCore
 
 /// 3.15：本期焦点、回顾与记忆卡互补、按语计入成果、学习质量、今日功课与札记
 final class V315LearningLoopTests: XCTestCase {
+    // 6.0.1：这里测的是已舍弃、代码暂留到 6.0.3 的旧功能——测试时临时打开
+    override func setUp() { super.setUp(); SlimSwitch.featuresOff = false }
+    override func tearDown() { SlimSwitch.featuresOff = true; super.tearDown() }
+
     private var calendar: Calendar {
         var c = Calendar(identifier: .gregorian); c.timeZone = .current; return c
     }
