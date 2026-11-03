@@ -269,7 +269,7 @@ private struct DataSettings: View {
                     Button("立即导入") { store.checkKongFolio(quiet: false, force: true) }
                     Button("从文件导入…") { store.chooseKongFolioFile() }
                     Spacer()
-                    let c = (try? store.db.kongFolioCounts()) ?? (0, 0)
+                    let c: (highlights: Int, notes: Int) = (try? store.db.kongFolioCounts()) ?? (highlights: 0, notes: 0)
                     Text("已导入摘录 \(c.highlights) 条、札记 \(c.notes) 条").font(.caption).foregroundStyle(.secondary)
                 }
                 if !kfLast.isEmpty {
