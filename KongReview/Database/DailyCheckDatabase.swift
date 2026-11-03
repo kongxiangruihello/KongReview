@@ -334,8 +334,9 @@ extension AppDatabase {
 
     /// 合成今天的检查。`snapshot` 为真时，还没定下应做数的组以此刻的“已做 + 未做”定下；为假时只显示、不定（统计还在加载时）。
     /// 6.0.3：`groups` 为今天卷子上的各组；每周自测并入卷子后，应用只传回顾、记忆卡、重温三组
+    /// resnapshot（6.0.7）：这些组的应做每次按当前数重定（设了每天考多久时，题数按分到的算）
     func dailyCheck(current: [DailyCheckGroup: DailyCheckCount], groups: [DailyCheckGroup] = DailyCheckGroup.legacy,
-                    snapshot: Bool = true, now: Date = Date()) throws -> DailyCheckState {
+                    snapshot: Bool = true, resnapshot: Set<DailyCheckGroup> = [], now: Date = Date()) throws -> DailyCheckState {
         try writer.write { db in
             guard try db.tableExists("daily_checkin") else { return .empty }
             let day = Self.revisitDay(now)
@@ -346,8 +347,8 @@ extension AppDatabase {
                 let c = current[g] ?? DailyCheckCount()
                 if plan.due[g.rawValue] == nil && snapshot { plan.due[g.rawValue] = c.total }
                 // 6.0.4：标注的篇数随设置当天改（篇目当天抽定，不会因做完而变少）
-                if g == .annotate && snapshot { plan.due[g.rawValue] = c.total }
-                let due = max(plan.due[g.rawValue] ?? c.total, c.done)
+                if (g == .annotate || resnapshot.contains(g)) && snapshot { plan.due[g.rawValue] = c.total }
+                let due = resnapshot.contains(g) ? c.total : max(plan.due[g.rawValue] ?? c.total, c.done)
                 rows.append(DailyCheckRow(group: g, done: c.done, due: due, skipped: plan.skipped.contains(g.rawValue)))
             }
             let state = DailyCheckState(day: day, rows: rows)

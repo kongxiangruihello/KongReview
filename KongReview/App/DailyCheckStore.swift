@@ -38,7 +38,9 @@ extension LibraryStore {
     func refreshDailyCheck() {
         let snapshot = derivedDayKey == ReminderPlan.dayKey(Date()) && !derivedIsLoading
         refreshAnnotate()
-        dailyCheck = (try? db.dailyCheck(current: dailyCheckCounts(), groups: examGroups, snapshot: snapshot)) ?? .empty
+        // 6.0.7：设了每天考多久，应做按分到的题数随时重定
+        let resnapshot: Set<DailyCheckGroup> = ExamSettings.minutes() > 0 ? [.review, .cards, .revisit] : []
+        dailyCheck = (try? db.dailyCheck(current: dailyCheckCounts(), groups: examGroups, snapshot: snapshot, resnapshot: resnapshot)) ?? .empty
         refreshCheckin()
         dailyCheckRevision += 1
     }

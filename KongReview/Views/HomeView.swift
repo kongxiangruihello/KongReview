@@ -20,6 +20,7 @@ struct HomeView: View {
 
                 TodayWorkBar(summary: store.homeLearningSummary, revisit: store.revisitCounts,
                              annotate: DailyCheckCount(done: store.annotate.done, left: store.annotate.left),
+                             capped: ExamSettings.minutes() > 0 ? store.dailyCheckCounts() : nil,
                              gains: store.todayGains, focus: nil,
                              check: store.dailyCheck, checkedIn: store.checkin.todayChecked,
                              onStart: { store.startTodayWork() },
