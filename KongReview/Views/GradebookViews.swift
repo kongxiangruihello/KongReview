@@ -63,13 +63,27 @@ struct GradebookCard<Content: View>: View {
         self.title = title; self.subtitle = subtitle; self.trailing = trailing; self.content = content
     }
 
+    private var titleLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title).font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+            if !subtitle.isEmpty { Text(subtitle).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub) }
+        }
+        .fixedSize()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(title).font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
-                if !subtitle.isEmpty { Text(subtitle).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub) }
-                Spacer()
-                trailing
+            // 窄时标题一行、按钮另起一行，免得按钮被挤掉
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    titleLine
+                    Spacer(minLength: 12)
+                    trailing.fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    titleLine
+                    trailing.fixedSize()
+                }
             }
             content()
         }
@@ -183,7 +197,7 @@ struct GradebookReportSection: View {
 
     private func tiles(_ r: GradebookReport) -> some View {
         // 宽时一行四格，窄时两行两格
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
             tileViews(r)
         }
     }
