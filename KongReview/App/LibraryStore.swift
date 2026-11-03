@@ -34,8 +34,10 @@ enum SidebarItem: Hashable {
     case reflection
     /// 5.0.2：每周自测
     case selfTest
-    /// 5.2.0：今日检查
+    /// 5.2.0：今日检查（6.0.3 起为今日试卷）
     case dailyCheck
+    /// 6.0.5：成绩册（日评、打卡、走势、弱项、周报月报；复盘、个人成长、回顾统计并入）
+    case gradebook
     case tag(String)
 }
 

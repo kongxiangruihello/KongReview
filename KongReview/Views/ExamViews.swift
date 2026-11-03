@@ -100,7 +100,7 @@ struct ExamView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("今日试卷").font(.system(size: 24, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
-                Text(DailyCheckView.dateLine()).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                Text(ExamDate.line()).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                 Spacer()
                 if s.due > 0 {
                     Text("已做 \(s.done) / \(s.due)")
@@ -474,7 +474,17 @@ struct ExamView: View {
                 }
             }
             DailyScoreSection()
-            CheckinSection()
+            // 6.0.5：打卡热力图、补签、走势与常错的题移到成绩册
+            HStack(spacing: 10) {
+                Image(systemName: "chart.line.uptrend.xyaxis").foregroundStyle(ReviewPalette.accent)
+                Text("一年的打卡图、补签、每天的成绩、掌握度走势与常错的题都在成绩册里。")
+                    .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                PillButton(icon: "chart.line.uptrend.xyaxis", title: "打开成绩册", style: .ghost) { store.openGradebook() }
+            }
+            .padding(14)
+            .background(ReviewPalette.soft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             if !organize.isEmpty { organizeSection }
         }
     }

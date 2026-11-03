@@ -118,7 +118,7 @@ final class V501ReflectionTests: XCTestCase {
             var calls = 0
             store.onReflectionChanged = { calls += 1 }
             store.openReflection(period: .month)
-            XCTAssertEqual(store.selection, .reflection)
+            XCTAssertEqual(store.selection, .gradebook, "6.0.5：复盘并入成绩册")
             XCTAssertEqual(store.reflectionPeriod, .month)
             let w = store.reflectionPeriod.window(containing: store.reflectionDate)
             let before = store.reflectionRevision

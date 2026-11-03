@@ -3,7 +3,7 @@ import KongReviewCore
 
 // MARK: - 5.2.2：打卡
 
-/// 今日检查页顶部的一行：今天是否已打卡，连续 / 最长 / 累计 / 本月
+/// 今日试卷、考场门口、成绩册顶部的一行：今天是否已打卡，连续 / 最长 / 累计 / 本月
 struct CheckinStatusStrip: View {
     @Environment(LibraryStore.self) private var store
 
@@ -50,10 +50,10 @@ struct StreakBreakPrompt: View {
                         Button(r.title) { store.recordStreakBreak(r) }.controlSize(.small).handCursor()
                     }
                     Spacer()
-                    Text("只记录，月度复盘时列出").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
+                    Text("只记录，周报、月报里列出").font(.system(size: 11)).foregroundStyle(ReviewPalette.sub)
                 }
                 if !store.checkin.makeupDays.isEmpty {
-                    Text("那天做过检查、只是忘了写日评，可以在今日检查页下方补签（本月还剩 \(store.checkin.makeupLeft) 次）。")
+                    Text("那天做过检查、只是忘了写日评，可以在成绩册下方补签（本月还剩 \(store.checkin.makeupLeft) 次）。")
                         .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -72,7 +72,7 @@ struct StreakBreakPrompt: View {
     }
 }
 
-/// 今日检查页下方：一年打卡热力图、休息日、补签
+/// 成绩册下方：一年打卡热力图、休息日、补签
 struct CheckinSection: View {
     @Environment(LibraryStore.self) private var store
     @State private var makeupDay: String?
