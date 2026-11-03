@@ -45,6 +45,7 @@ final class V606KongFolioTests: XCTestCase {
           {"id":"G7","title":"学而为己","tags":[],"created":\(ref(d(-1))),"modified":\(ref(d(-1))),
            "blocks":[{"id":"b1","text":"","record":\(excerpt(id: "A1", quote: "学而时习之，不亦说乎", modified: d(-3)))},
                      {"id":"b2","text":"学习是为了**成就自己**。"}]},
+          {"id":"I9","title":"# kongreview","tags":[],"created":\(ref(d(-1))),"modified":\(ref(d(-1))),"blocks":[{"id":"b4","text":"1 窗口拖动"}]},
           {"id":"H8","title":"未命名札记","tags":[],"created":\(ref(d(-1))),"modified":\(ref(d(-1))),"blocks":[{"id":"b3","text":""}]}
          ]}
         """.utf8)
@@ -52,7 +53,8 @@ final class V606KongFolioTests: XCTestCase {
 
     func testConvertCatalog() throws {
         let r = KongFolioConverter.convert(try KongFolioCatalog.decode(catalog()))
-        XCTAssertEqual(r.entries.map(\.key), ["record:A1", "record:C3", "record:D4", "record:F6", "essay:G7"])
+        XCTAssertEqual(r.entries.map(\.key), ["record:A1", "record:C3", "record:D4", "record:F6", "essay:G7", "essay:I9"])
+        XCTAssertEqual(r.entries.last?.title, "kongreview", "题目去掉 Markdown 标题记号")
         XCTAssertEqual(r.skippedEmpty, 2, "没有文字的图片摘录、空白札记")
         XCTAssertEqual(r.skippedRemoved, 1)
         let a = r.entries[0]
@@ -81,11 +83,11 @@ final class V606KongFolioTests: XCTestCase {
         let db = try AppDatabase(DatabaseQueue())
         let first = try db.importKongFolio(KongFolioConverter.convert(try KongFolioCatalog.decode(catalog())), now: t0)
         XCTAssertEqual(first.newHighlights, 3, "A1、C3、D4 的原文")
-        XCTAssertEqual(first.newNotes, 3, "D4、F6、G7")
+        XCTAssertEqual(first.newNotes, 4, "D4、F6、G7、I9")
         XCTAssertEqual(first.sources, ["论语译注", "孟子"])
         XCTAssertEqual(first.skippedEmpty, 2); XCTAssertEqual(first.skippedRemoved, 1)
         XCTAssertEqual(try db.kongFolioCounts().highlights, 3)
-        XCTAssertEqual(try db.kongFolioCounts().notes, 3)
+        XCTAssertEqual(try db.kongFolioCounts().notes, 4)
 
         let all = try db.highlights(tag: nil)
         let a = try XCTUnwrap(all.first { $0.text == "学而时习之，不亦说乎" })
@@ -178,7 +180,7 @@ final class V606KongFolioTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let json = dir.appendingPathComponent("catalog.json")
         try catalog().write(to: json)
-        XCTAssertEqual(try KongFolioConverter.read(json).entries.count, 5)
+        XCTAssertEqual(try KongFolioConverter.read(json).entries.count, 6)
         XCTAssertThrowsError(try KongFolioConverter.read(dir.appendingPathComponent("没有.json"))) { e in
             if case .missing = e as? KongFolioImportError {} else { XCTFail("应提示没有找到") }
         }
@@ -192,7 +194,7 @@ final class V606KongFolioTests: XCTestCase {
             let db = try AppDatabase(DatabaseQueue())
             let store = LibraryStore(db: db)
             let r = try XCTUnwrap(store.importKongFolio(try KongFolioConverter.read(json), quiet: true))
-            XCTAssertEqual(r.added, 6)
+            XCTAssertEqual(r.added, 7)
             XCTAssertEqual(store.infoMessage, r.summary, "有新内容时提示")
             XCTAssertTrue(store.kongFolioLast.contains("从 KongFolio 导入"))
             XCTAssertEqual(store.sources.count, 2, "导入后刷新出处列表")

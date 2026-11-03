@@ -166,7 +166,7 @@ enum KongFolioConverter {
         if !quote.isEmpty { body += blockquote(quote, cite: cite(c)) }
         if !note.isEmpty { body += Markdown.richHTML(note) }
         let book = trimmed(c?.title)
-        var title = trimmed(rec.title)
+        var title = cleanTitle(rec.title)
         if title.isEmpty || (rec.wholeBook == true && title == "整本书心得") {
             title = rec.wholeBook == true && !book.isEmpty ? "读《\(book)》" : firstLine(note.isEmpty ? quote : note)
         }
@@ -195,7 +195,7 @@ enum KongFolioConverter {
                 if firstText.isEmpty { firstText = text }
             }
         }
-        var title = trimmed(essay.title)
+        var title = cleanTitle(essay.title)
         if title.isEmpty || title == "未命名札记" { title = firstLine(firstText.isEmpty ? quotes.first?.text ?? "" : firstText) }
         guard !title.isEmpty, !body.isEmpty else { return nil }
         return KongFolioEntry(key: "essay:" + essay.id, kind: .note, title: title, html: body, tags: tags(essay.tags),
@@ -212,6 +212,11 @@ enum KongFolioConverter {
     static func blockquote(_ quote: String, cite: String) -> String {
         let lines = quote.components(separatedBy: "\n").map(Markdown.escape).joined(separator: "<br>")
         return "<blockquote><p>" + lines + "</p>" + (cite.isEmpty ? "" : "<p>——" + Markdown.escape(cite) + "</p>") + "</blockquote>"
+    }
+
+    /// 写好的题目：去掉开头的 Markdown 标题记号（如“# kongreview”）
+    static func cleanTitle(_ s: String?) -> String {
+        trimmed(s).trimmingCharacters(in: CharacterSet(charactersIn: "#>*_ \t　"))
     }
 
     /// 题目：第一行，去掉 Markdown 记号，至多 40 字
