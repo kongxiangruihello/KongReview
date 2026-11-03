@@ -42,7 +42,7 @@ final class StatusItemController: NSObject {
             button.imagePosition = .imageLeading
             item?.length = NSStatusItem.variableLength
         }
-        button.toolTip = "今日回顾还剩 \(c.highlights) 条，记忆卡待学 \(c.cards) 张"
+        button.toolTip = "今日试卷：摘录题还剩 \(c.highlights) 道，记忆卡 \(c.cards) 道"
     }
 
     private func install() {
@@ -63,12 +63,12 @@ final class StatusItemController: NSObject {
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
         add(menu, "快速录入（\(HotKeyPreset.current.label)）", #selector(quickCapture))
-        if let c = QuickCaptureController.shared.store?.todayCounts() {
-            add(menu, "今日回顾（还剩 \(c.highlights) 条）", #selector(review))
-            add(menu, "记忆卡（待学 \(c.cards) 张）", #selector(cards))
+        if let left = QuickCaptureController.shared.store?.dailyCheck.left, left > 0 {
+            add(menu, "今日试卷（还有 \(left) 题）", #selector(review))
         } else {
-            add(menu, "今日回顾", #selector(review))
+            add(menu, "今日试卷", #selector(review))
         }
+        add(menu, "记忆卡（牌组）", #selector(cards))
         add(menu, "打开 KongReview", #selector(openMain))
         menu.addItem(.separator())
         add(menu, "立即备份", #selector(backup))
@@ -86,7 +86,7 @@ final class StatusItemController: NSObject {
     @objc private func quickCapture() { QuickCaptureController.shared.show() }
 
     @objc private func review() {
-        QuickCaptureController.shared.store?.openTodayReview()
+        QuickCaptureController.shared.store?.openExam()
         WindowOpener.showMain()
     }
 

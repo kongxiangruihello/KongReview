@@ -554,7 +554,7 @@ struct StudyView: View {
                                            onReturn: { store.openCardsHome() },
                                            onResume: { store.nextCard(); store.refreshDerived() },
                                            revisitLeft: store.revisitCounts.left,
-                                           onRevisit: { store.openRevisit() })
+                                           onRevisit: { store.openExam() })
                     .padding(24)
                     .frame(maxWidth: .infinity)
             } else {

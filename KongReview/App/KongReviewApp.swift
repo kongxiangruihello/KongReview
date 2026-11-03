@@ -66,11 +66,10 @@ struct KongReviewApp: App {
             }
             CommandMenu("考场") {
                 Group {
-                Button("今日回顾") { store.openTodayReview(); WindowOpener.showMain() }
+                Button("今日试卷") { store.openExam(); WindowOpener.showMain() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                Button("记忆卡") { store.openCardsHome(); WindowOpener.showMain() }
+                Button("记忆卡（牌组）") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
-                Button("今日检查") { store.openDailyCheck(); WindowOpener.showMain() }
                 Button("回顾统计") { store.selection = .stats }
                             }.disabled(store.fullBackupBusy || store.learningExplorer != nil || store.learningMaterialExport != nil)
             }

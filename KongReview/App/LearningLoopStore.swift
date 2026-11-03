@@ -43,20 +43,8 @@ extension LibraryStore {
         return seconds == 0 ? 0 : max(1, Int((Double(seconds) / 60).rounded()))
     }
 
-    /// 按顺序进入今天还没完成的功课：先回顾，回顾完成后进入记忆卡（两个以上牌组有卡时混合学习），最后重温
+    /// 6.0.3：今天的功课就是今日试卷
     func startTodayWork() {
-        checkDayChange()
-        refreshDerived()
-        refreshRevisit()
-        if homeLearningSummary.reviewPendingCount > 0 {
-            openTodayReview()
-        } else if todayCardPending.total > 0 {
-            if deckSummaryCache.filter({ $0.counts.total > 0 }).count > 1 { startStudyAllDecks() } else { startSuggestedStudy() }
-            selection = .cards
-        } else if revisitCounts.left > 0 {
-            openRevisit()
-        } else {
-            openTodayReview()
-        }
+        openExam()
     }
 }

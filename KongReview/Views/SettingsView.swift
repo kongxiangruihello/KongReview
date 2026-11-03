@@ -18,7 +18,7 @@ struct SettingsView: View {
             QuickCaptureSettings()
                 .tabItem { Label("快速录入", systemImage: "keyboard") }
             ReviewSettings()
-                .tabItem { Label("回顾", systemImage: "sun.max") }
+                .tabItem { Label("考场", systemImage: "list.clipboard") }
             CardSettingsTab()
                 .tabItem { Label("记忆卡", systemImage: "brain") }
             CaptureSettings()
@@ -86,7 +86,6 @@ private struct ReviewSettings: View {
     @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
     @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
     @AppStorage(RevisitLimits.blocksKey) private var revisitBlocks = 2
-    @AppStorage(DailyCheckSettings.selfTestPerDayKey) private var dailySelfTest = 2
     @AppStorage(CheckinReminderPlan.enabledKey) private var checkinReminder = true
     @AppStorage(CheckinReminderPlan.hourKey) private var checkinHour = CheckinReminderPlan.defaultHour
     @AppStorage(CheckinReminderPlan.minuteKey) private var checkinMinute = 0
@@ -100,24 +99,20 @@ private struct ReviewSettings: View {
 
     var body: some View {
         Form {
-            Stepper("每日回顾条数：\(dailyCount)", value: $dailyCount, in: 3...50)
-            Text("改动从明天（或点“再抽一组”）开始生效。")
-                .font(.caption).foregroundStyle(.secondary)
-
-            Section("重温（今日功课第三步）") {
-                Stepper("每天至多重温札记：\(revisitNotes) 条", value: $revisitNotes, in: 0...10)
-                Stepper("每天至多重温「常念」的问题：\(revisitQuestions) 个", value: $revisitQuestions, in: 0...5)
-                Stepper("每天至多重温笔记：\(revisitBlocks) 段", value: $revisitBlocks, in: 0...10)
-                Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。「常念」且未解决的问题约每周回来一次。设为 0 即不重温这一类。")
+            Section("今日试卷：每天至多出几道") {
+                Stepper("摘录题：\(dailyCount) 道", value: $dailyCount, in: 3...50)
+                Text("从全库按加权抽样（收藏、写过按语、被札记引用的更常出），忘了的两天后补考（至多 3 道，占名额）。改动从明天开始生效。记忆卡的题数在记忆卡的“每日学习量”里设。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Stepper("论证题（札记）：\(revisitNotes) 道", value: $revisitNotes, in: 0...10)
+                Stepper("进展题（「常念」的问题）：\(revisitQuestions) 道", value: $revisitQuestions, in: 0...5)
+                Stepper("复述题（笔记）：\(revisitBlocks) 道", value: $revisitBlocks, in: 0...10)
+                Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。「常念」且未解决的问题约每周回来一次。设为 0 即不出这一类。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section("今日检查") {
-                Stepper("每天从本周自测中带：\(dailySelfTest) 题", value: $dailySelfTest, in: 0...5)
-                Text("今日检查把回顾、记忆卡、重温与自测放在一页；自测每周 10 题，每天带几题就把几题算进今天的应做。设为 0 即今日检查不含自测，每周自测照常。")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            Section("打卡") {
                 // 5.2.2：晚间打卡提醒
                 Toggle("还没打卡时提醒", isOn: $checkinReminder)
                 DatePicker("打卡提醒时间", selection: Binding(
@@ -125,20 +120,16 @@ private struct ReviewSettings: View {
                     set: { let c = Calendar.current.dateComponents([.hour, .minute], from: $0); checkinHour = c.hour ?? 21; checkinMinute = c.minute ?? 0 }
                 ), displayedComponents: .hourAndMinute)
                 .disabled(!checkinReminder)
-                Text("做完一组并写下日评即打卡；到点还没打卡就提醒一次，打了就不提醒。休息日与补签在今日检查页下方设置。")
+                Text("卷子上答完一类并写下日评即打卡；到点还没打卡就提醒一次，打了就不提醒。休息日与补签在今日试卷的成绩单里设置。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("提醒") {
-                Toggle("每周一显示上周小结（回顾页顶部；已允许通知时另推送一条）", isOn: Binding(
-                    get: { UserDefaults.standard.object(forKey: LibraryStore.digestEnabledKey) as? Bool ?? true },
-                    set: { UserDefaults.standard.set($0, forKey: LibraryStore.digestEnabledKey); store.revisionBump() }
-                ))
-                Toggle("每日提醒", isOn: $reminderEnabled)
+                Toggle("每天提醒来考", isOn: $reminderEnabled)
                 DatePicker("提醒时间", selection: timeBinding, displayedComponents: .hourAndMinute)
                     .disabled(!reminderEnabled)
-                Text("当天已经回顾过（每日回顾看过一条，或复习过一张记忆卡），就不再提醒。")
+                Text("当天已经在今日试卷上答过题，就不再提醒。")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("每周复盘提醒", isOn: $reflectionReminder)
                 Picker("提醒日", selection: $reflectionWeekday) {
@@ -155,7 +146,6 @@ private struct ReviewSettings: View {
         .onChange(of: revisitNotes) { store.refreshRevisit() }
         .onChange(of: revisitQuestions) { store.refreshRevisit() }
         .onChange(of: revisitBlocks) { store.refreshRevisit() }
-        .onChange(of: dailySelfTest) { store.refreshDailyCheck() }
         .onChange(of: checkinReminder) { ReminderScheduler.shared.applyCheckinReminder() }
         .onChange(of: checkinHour) { ReminderScheduler.shared.applyCheckinReminder() }
         .onChange(of: checkinMinute) { ReminderScheduler.shared.applyCheckinReminder() }

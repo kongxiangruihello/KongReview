@@ -223,7 +223,7 @@ struct ContentView: View {
         case .selfTest:
             SelfTestView()
         case .dailyCheck:
-            DailyCheckView()
+            ExamView()
         case .source(let id):
             let title = store.sources.first { $0.id == id }?.title ?? "出处"
             HighlightListView(title: title, filter: .init(sourceId: id))
@@ -258,49 +258,14 @@ struct SidebarView: View {
                 Label("首页", systemImage: "house")
                     .sidebarMenuRow()
                     .tag(SidebarItem.home)
-                // 5.2.0：今日检查——行尾为今天还剩的项数
+                // 6.0.3：今日试卷——今日检查、今日回顾、记忆卡学习、重温、自测合成一张卷子；行尾为还没答的题数
                 HStack {
-                    Label("今日检查", systemImage: "checklist.checked")
+                    Label("今日试卷", systemImage: "list.clipboard")
                     Spacer()
                     if store.dailyCheck.left > 0 { SidebarCount(store.dailyCheck.left) }
                 }
                 .sidebarMenuRow()
                 .tag(SidebarItem.dailyCheck)
-                // 已选中时再点，也要从主题范围回到全库今日队列。
-                Button { store.openTodayReview() } label: {
-                    Label("今日回顾", systemImage: "sun.max")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .sidebarMenuRow()
-                .tag(SidebarItem.review)
-                Button { store.openCardsHome() } label: {
-                    HStack {
-                        Label("记忆卡", systemImage: "brain")
-                        Spacer()
-                        if store.cardCount > 0 {
-                            SidebarCount(store.cardCount)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .sidebarMenuRow()
-                .tag(SidebarItem.cards)
-                // 5.0.0：重温——今日功课第三步，行尾为今天还剩的张数
-                HStack {
-                    Label("重温", systemImage: "arrow.counterclockwise.circle")
-                    Spacer()
-                    if store.revisitCounts.left > 0 { SidebarCount(store.revisitCounts.left) }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.revisit)
-                // 5.0.2：每周自测
-                Label("自测", systemImage: "checklist")
-                    .sidebarMenuRow()
-                    .tag(SidebarItem.selfTest)
                 // 5.0.1：复盘——每周五步，月度、年度
                 Label("复盘", systemImage: "arrow.triangle.2.circlepath")
                     .sidebarMenuRow()
@@ -316,6 +281,21 @@ struct SidebarView: View {
             }
 
             Section(isExpanded: store.sidebarGroupBinding("bank")) {
+                // 6.0.3：记忆卡的牌组、浏览、录入放在题库；学习在今日试卷里
+                Button { store.openCardsHome() } label: {
+                    HStack {
+                        Label("记忆卡", systemImage: "brain")
+                        Spacer()
+                        if store.cardCount > 0 {
+                            SidebarCount(store.cardCount)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .sidebarMenuRow()
+                .tag(SidebarItem.cards)
                 Label("全部摘录", systemImage: "text.quote")
                     .sidebarMenuRow()
                     .tag(SidebarItem.all)

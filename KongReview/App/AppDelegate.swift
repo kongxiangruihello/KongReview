@@ -105,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .quick(let capture):
             QuickCaptureController.shared.show(prefill: capture)
         case .review:
-            QuickCaptureController.shared.store?.openTodayReview()
+            QuickCaptureController.shared.store?.openExam()
             WindowOpener.showMain()
         case .save(let url):
             // 6.0.1：网页存档已舍弃；旧的“整页存档”书签改为把网址带进快速录入

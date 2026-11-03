@@ -821,6 +821,8 @@ struct DailyReviewView: View {
                 ?? chapterScope.map { try store.db.sourceChapterHighlights($0.id, chapter: $0.chapter) }
             let notebookIDs = try ReviewScope.notebookID(state.theme).map { try store.db.notebookHighlights($0).compactMap(\.id) }
                 ?? bookHighlights?.compactMap(\.id)
+            // 6.0.3：全库当天这一组与今日试卷共用（补考的摘录排在最前）
+            if !forceNew, state.theme == nil { _ = try? store.todayReviewSession() }
             if !forceNew,
                let saved = ReviewSessionRecord.load(key: key),
                saved.day == today,
