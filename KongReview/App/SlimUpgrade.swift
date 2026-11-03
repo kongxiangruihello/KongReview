@@ -11,7 +11,7 @@ import KongReviewCore
 // 数据一律不删：第一次打开 6.0.1 时，把这些功能里自己写的内容导出成 Markdown，并留一份完整的数据库快照。
 
 /// 舍弃功能的总开关。应用里始终为 true；旧版的单元测试把它临时设为 false，
-/// 以便在 6.0.3 清理代码之前，留着的旧逻辑仍有测试看着。
+/// 以便在 6.0.4（成绩册）清理代码之前，留着的旧逻辑仍有测试看着。
 enum SlimSwitch {
     nonisolated(unsafe) static var featuresOff = true
 }

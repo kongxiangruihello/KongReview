@@ -537,30 +537,67 @@ struct RestoreBackupView: View {
     }
 }
 
-/// 5.2.1：在线更新
+/// 6.0.2：点一下就更新（仿 KongSeek）
 private struct UpdateSettings: View {
     @AppStorage(AppUpdater.autoCheckKey) private var autoCheck = true
+    @AppStorage(AppUpdater.proxyKey) private var proxy = ""
+    @State private var confirmsLocal = false
+    @State private var confirmsRollback = false
     private var updater = AppUpdater.shared
 
     var body: some View {
         Form {
             Section("版本") {
-                LabeledContent("当前版本", value: updater.currentVersionText)
-                if let r = updater.release { LabeledContent("最新发布", value: r.version.description) }
+                LabeledContent("当前", value: updater.currentVersionText)
+                LabeledContent("签名", value: AppUpdater.signingDescription())
                 LabeledContent("上次检查", value: updater.lastChecked.map(Self.time) ?? "还没有检查过")
+                if let v = updater.remoteVersion { LabeledContent("GitHub 上", value: v) }
                 HStack {
-                    Button("立即检查更新") { updater.check(manual: true) }
-                    Button("在网页上查看所有版本") { NSWorkspace.shared.open(AppUpdater.releasesPage) }
+                    Button("检查更新") { updater.check(manual: true) }.disabled(updater.isBusy)
+                    Button("立即更新") { updater.update() }.disabled(updater.isBusy || !updater.hasUpdate)
                 }
             }
-            Section("自动检查") {
-                Toggle("启动时自动检查（每天至多一次）", isOn: $autoCheck)
-                Text("有新版本时弹出说明，可下载并安装：显示下载进度，下载后核对文件，安装前先备份学习库，旧版留在缓存目录作后备。新版发布在 GitHub（kongxiangruihello/KongReview）。")
+            Section("更新方式") {
+                Text("仿 KongSeek：不用等发布安装包。点“立即更新”，应用在源码文件夹里取 GitHub 上 main 分支的最新代码，先跑全部测试，再编译、签名；测试或编译不通过就停下，当前版本不动。装之前先备份学习库，换下来的旧版本放在“应用备份”里，可以回退。完成后自动重新打开。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Toggle("自动检查（启动后与每 6 小时一次；有更新只在首页提示）", isOn: $autoCheck)
+                    .onChange(of: autoCheck) { if autoCheck { updater.startAutomaticChecks() } else { updater.stopAutomaticChecks() } }
+                HStack {
+                    Text("代理")
+                    TextField("", text: $proxy, prompt: Text("自动（使用系统代理）"))
+                }
+                Text("连不上 GitHub 时用：如 127.0.0.1:7890。现在的系统代理：" + (AppUpdater.systemProxy ?? "无（直连）"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("源码与备份") {
+                LabeledContent("源码文件夹", value: (AppUpdater.sourceRoot.path as NSString).abbreviatingWithTildeInPath)
+                HStack {
+                    Button("在访达中显示") {
+                        let root = AppUpdater.sourceRoot
+                        if FileManager.default.fileExists(atPath: root.path) { NSWorkspace.shared.activateFileViewerSelecting([root]) }
+                    }
+                    Button("用本地源码重新构建…") { confirmsLocal = true }.disabled(updater.isBusy)
+                    Button("回退到上一版…") { confirmsRollback = true }.disabled(updater.isBusy || updater.backups.isEmpty)
+                    Button("更新日志") { NSWorkspace.shared.open(AppUpdater.logURL) }
+                }
+                Text(updater.backups.isEmpty ? "还没有可回退的旧版本。" : "可回退：" + updater.backups.prefix(3).map { $0.replacingOccurrences(of: ".app", with: "") }.joined(separator: "、"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .confirmationDialog("用本地源码重新构建？", isPresented: $confirmsLocal, titleVisibility: .visible) {
+            Button("重新构建") { updater.update(fromLocalSource: true) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("不连 GitHub，直接用源码文件夹里现有的代码测试、编译并安装（约几分钟），之后 KongReview 自动重新打开。")
+        }
+        .confirmationDialog("回退到 \(updater.backups.first?.replacingOccurrences(of: ".app", with: "") ?? "")？", isPresented: $confirmsRollback, titleVisibility: .visible) {
+            Button("回退") { updater.rollback() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只换回应用本身，学习库保持现在的样子（新版本加过的内容旧版本可能不显示）。每次更新前都备份过学习库，可在“数据 → 从备份恢复”找回。")
+        }
     }
 
     static func time(_ d: Date) -> String {

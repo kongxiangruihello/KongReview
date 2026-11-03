@@ -73,14 +73,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 6.0.1：引文速查、每周小结推送已舍弃。记下最近用的浏览器，供“服务”录入摘录时取网址
         BrowserWatcher.shared.start()
 
-        // 5.2.1：在线更新——安装前先备份学习库；启动时每天至多自动检查一次（晚一点，免得和启动维护抢资源）
+        // 6.0.2：点一下就更新——安装前先备份学习库；刚更新过就显示改动；启动 30 秒后与每 6 小时自动检查
         AppUpdater.shared.beforeInstall = {
             guard let s = QuickCaptureController.shared.store else { return }
             _ = try BackupService.backupNow(db: s.db)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            MainActor.assumeIsolated { AppUpdater.shared.checkIfDue() }
-        }
+        AppUpdater.shared.launched()
     }
 
     /// 关掉主窗口后应用继续在后台运行（快捷键、菜单栏图标仍可用）

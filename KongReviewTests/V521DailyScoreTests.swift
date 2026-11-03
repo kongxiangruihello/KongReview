@@ -125,21 +125,4 @@ final class V521DailyScoreTests: XCTestCase {
             XCTAssertEqual(u.phase, .idle, "开发构建不自动检查")
         }
     }
-
-    func testVerifyDownloadSizeAndDigest() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let f = dir.appendingPathComponent("KongReview-9.9.9.dmg")
-        try Data("abc".utf8).write(to: f)
-        let sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"   // “abc”的 SHA-256
-        XCTAssertEqual(try AppUpdater.sha256(of: f), sha)
-        func release(size: Int64, digest: String?) -> UpdateRelease {
-            UpdateRelease(version: AppVersion("9.9.9")!, tag: "v9.9.9", notes: "", publishedAt: nil, pageURL: nil,
-                          dmgName: "KongReview-9.9.9.dmg", dmgURL: URL(string: "https://example.com/a.dmg")!, dmgSize: size, sha256: digest)
-        }
-        XCTAssertNoThrow(try AppUpdater.verifyDownload(f, release: release(size: 3, digest: sha)))
-        XCTAssertNoThrow(try AppUpdater.verifyDownload(f, release: release(size: 3, digest: nil)))
-        XCTAssertThrowsError(try AppUpdater.verifyDownload(f, release: release(size: 4, digest: nil)), "大小不对")
-        XCTAssertThrowsError(try AppUpdater.verifyDownload(f, release: release(size: 3, digest: String(repeating: "0", count: 64))), "校验码不对")
-    }
 }
