@@ -182,9 +182,9 @@ struct GradebookReportSection: View {
     }
 
     private func tiles(_ r: GradebookReport) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 10) { tileViews(r) }
-            VStack(alignment: .leading, spacing: 10) { tileViews(r) }
+        // 宽时一行四格，窄时两行两格
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+            tileViews(r)
         }
     }
 
