@@ -30,7 +30,7 @@ struct GlobalSearchView: View {
                 }
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(ReviewPalette.sub)
-                    TextField("搜索摘录、记忆卡、网页正文或出处", text: $state.query)
+                    TextField("搜索摘录、记忆卡、出处、札记或问题", text: $state.query)
                         .textFieldStyle(.plain)
                         .font(.body)
                         .focused($searchFocused)
@@ -84,7 +84,7 @@ struct GlobalSearchView: View {
             ContentUnavailableView {
                 Label("从全部资料中查找", systemImage: "magnifyingglass")
             } description: {
-                Text("可搜索摘录原文、译文、按语，记忆卡正反面与标签，网页正文和出处信息。")
+                Text("可搜索摘录原文、译文、按语，记忆卡正反面与标签，出处信息，札记与问题。")
             }
         } else if state.isLoading {
             VStack(spacing: 12) {

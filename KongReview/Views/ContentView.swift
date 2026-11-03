@@ -36,7 +36,7 @@ struct ContentView: View {
                 Button { store.showGlobalSearch() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
                     .disabled(!store.canShowGlobalSearch)
                     .handCursor()
-                    .help("查找摘录、记忆卡、网页、出处、札记和问题（⌘⇧F）")
+                    .help("查找摘录、记忆卡、出处、札记和问题（⌘⇧F）")
             }
         }
         // 5.2.1：在线更新
