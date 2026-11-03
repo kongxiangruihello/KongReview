@@ -318,14 +318,19 @@ extension AppDatabase {
         var r = GradebookReport(key: window.key, period: window.period, start: window.start, end: window.end)
         let today = Self.revisitDay(now)
         var d = window.start
-        var totals: [(String, Int)] = []
-        while d < window.fullEnd {
-            let key = Self.revisitDay(d)
-            if key > today { break }
+        while d < window.fullEnd, Self.revisitDay(d) <= today {
             r.days += 1
-            let score = try dailyScore(day: key, now: now)
-            if let t = score.total { totals.append((key, t)) }
             d = calendar.date(byAdding: .day, value: 1, to: d)!
+        }
+        // 总分要先写自评：只算写了自评的日子（年报不必逐日重算）
+        let scored: [String] = try writer.read { db in
+            guard try db.tableExists("daily_checkin") else { return [] }
+            return try String.fetchAll(db, sql: "SELECT day FROM daily_checkin WHERE selfScore IS NOT NULL AND day >= ? AND day <= ? ORDER BY day",
+                                       arguments: [Self.revisitDay(window.start), today])
+        }
+        var totals: [(String, Int)] = []
+        for key in scored where key < Self.revisitDay(window.fullEnd) {
+            if let t = try dailyScore(day: key, now: now).total { totals.append((key, t)) }
         }
         if !totals.isEmpty {
             r.scoredDays = totals.count
