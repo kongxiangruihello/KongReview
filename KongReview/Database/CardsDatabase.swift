@@ -313,7 +313,14 @@ extension AppDatabase {
             for n in importedNotes {
                 guard let type = n.noteType, !n.fieldNames.isEmpty, seenTypes.insert(type).inserted else { continue }
                 if try NoteTemplate.fetchOne(db, key: type) == nil {
-                    try NoteTemplate.defaultTemplate(name: type, fieldNames: n.fieldNames, isCloze: n.isCloze).insert(db)
+                    var t = NoteTemplate.defaultTemplate(name: type, fieldNames: n.fieldNames, isCloze: n.isCloze)
+                    // 6.0.0：带上 Anki 的卡片模板与样式（只用得到这种笔记类型已有的字段时才用，免得显示成空白）
+                    if let h = n.templateHTML,
+                       CardTemplateEngine.issues(h.front, fieldNames: n.fieldNames, side: .front).isEmpty,
+                       CardTemplateEngine.issues(h.back, fieldNames: n.fieldNames, side: .back).isEmpty {
+                        t.html = h
+                    }
+                    try t.insert(db)
                     r.templates += 1
                 }
             }
@@ -381,6 +388,23 @@ extension AppDatabase {
 
     func save(_ template: NoteTemplate) throws {
         try writer.write { db in try template.save(db) }
+    }
+
+    /// 6.0.0：模板编辑器预览用的几张卡（可“换一张”）
+    func sampleCards(noteType: String, limit: Int = 8) throws -> [Card] {
+        try writer.read { db in
+            try Card.fetchAll(db, sql: """
+                SELECT * FROM card WHERE noteType = ? AND deletedAt IS NULL AND fields IS NOT NULL AND fields NOT IN ('', '[]')
+                ORDER BY id LIMIT ?
+                """, arguments: [noteType, limit])
+        }
+    }
+
+    /// 6.0.0：普通卡片样式预览用的一张卡（没有笔记类型、最近改过的）
+    func samplePlainCard() throws -> Card? {
+        try writer.read { db in
+            try Card.fetchOne(db, sql: "SELECT * FROM card WHERE deletedAt IS NULL AND (noteType IS NULL OR fields IN ('', '[]')) ORDER BY id DESC LIMIT 1")
+        }
     }
 
     /// 模板编辑器的示例卡：这个笔记类型下第一张有字段的卡（不读出全部卡片）
@@ -665,11 +689,18 @@ enum AnkiCollectionReader {
             var clozeModels = Set<Int64>()
             var modelNames: [Int64: String] = [:]
             var modelFields: [Int64: [String]] = [:]
+            // 6.0.0：笔记类型的第一张卡片模板与样式
+            var modelHTML: [Int64: NoteTemplateHTML] = [:]
             if let obj = json("models") {
                 for (k, v) in obj {
                     guard let m = v as? [String: Any], let id = Int64(k) else { continue }
                     if (m["type"] as? Int) == 1 { clozeModels.insert(id) }
                     modelNames[id] = m["name"] as? String
+                    if let tmpls = m["tmpls"] as? [[String: Any]],
+                       let first = tmpls.min(by: { ($0["ord"] as? Int ?? 0) < ($1["ord"] as? Int ?? 0) }),
+                       let q = first["qfmt"] as? String, let a = first["afmt"] as? String {
+                        modelHTML[id] = NoteTemplateHTML(front: q, back: a, css: m["css"] as? String ?? "")
+                    }
                     if let flds = m["flds"] as? [[String: Any]] {
                         modelFields[id] = flds.sorted { ($0["ord"] as? Int ?? 0) < ($1["ord"] as? Int ?? 0) }
                             .compactMap { $0["name"] as? String }
@@ -678,10 +709,26 @@ enum AnkiCollectionReader {
             }
             // schema 18（新格式）：笔记类型在 notetypes 表（config 为 protobuf，开头 08 01 表示完形填空），字段在 fields 表
             if try db.tableExists("notetypes") {
-                for r in try Row.fetchAll(db, sql: "SELECT id, name, hex(substr(config, 1, 2)) AS k FROM notetypes") {
+                for r in try Row.fetchAll(db, sql: "SELECT id, name, hex(substr(config, 1, 2)) AS k, config FROM notetypes") {
                     let id: Int64 = r["id"]
                     modelNames[id] = r["name"]
                     if (r["k"] as String?) == "0801" { clozeModels.insert(id) }
+                    // 6.0.0：样式在 config 的第 3 个字段
+                    if let config: Data = r["config"], let css = AnkiProtobuf.strings(config)[3] {
+                        modelHTML[id, default: NoteTemplateHTML(front: "", back: "")].css = css
+                    }
+                }
+            }
+            // 6.0.0：卡片模板在 templates 表，config 的第 1、2 个字段为正面、背面
+            if try db.tableExists("templates") {
+                for r in try Row.fetchAll(db, sql: "SELECT ntid, config FROM templates t WHERE ord = (SELECT MIN(ord) FROM templates t2 WHERE t2.ntid = t.ntid)") {
+                    let id: Int64 = r["ntid"]
+                    guard let config: Data = r["config"] else { continue }
+                    let s = AnkiProtobuf.strings(config)
+                    if let q = s[1], let a = s[2] {
+                        modelHTML[id, default: NoteTemplateHTML(front: "", back: "")].front = q
+                        modelHTML[id, default: NoteTemplateHTML(front: "", back: "")].back = a
+                    }
                 }
             }
             if try db.tableExists("fields") {
@@ -771,6 +818,7 @@ enum AnkiCollectionReader {
                 note.fieldNames = modelFields[mid] ?? []
                 note.fields = fields
                 note.isCloze = isCloze
+                if let h = modelHTML[mid], !h.front.isEmpty { note.templateHTML = h }
                 note.memory = AnkiNote.memory(fromCardData: r["data"])
                 note.revlog = revlog[cid] ?? []
                 if let conf = deckConfigOf[did].flatMap({ configs[$0] }) {

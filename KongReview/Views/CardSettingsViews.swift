@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import KongReviewCore
 
 // MARK: - 牌组选项
@@ -97,6 +98,9 @@ struct DeckOptionsView: View {
 }
 
 // MARK: - 卡片模板（多字段笔记类型）
+//
+// 6.0.0：两种方式——“放置”（字段放正面、背面或折叠）与“HTML”（正面模板、背面模板、样式，写法同 Anki）。
+// 写了 HTML 就以 HTML 为准；右侧用这类卡片中的一张实时预览，可换一张。
 
 struct NoteTemplateEditorView: View {
     @Environment(LibraryStore.self) private var store
@@ -105,6 +109,16 @@ struct NoteTemplateEditorView: View {
         case front = "正面", back = "背面", collapsed = "背面·折叠", hidden = "不显示"
         var id: String { rawValue }
     }
+
+    enum CodeTab: String, CaseIterable, Identifiable {
+        case front = "正面", back = "背面", css = "样式"
+        var id: String { rawValue }
+    }
+
+    @State private var tab: CodeTab = .front
+    @State private var samples: [Card] = []
+    @State private var sampleIndex = 0
+    @State private var inserter = TemplateCodeInserter()
 
     private func placement(_ t: NoteTemplate, _ i: Int) -> Placement {
         if t.front.contains(i) { return .front }
@@ -127,45 +141,65 @@ struct NoteTemplateEditorView: View {
         store.templateEditor = t
     }
 
+    /// 改 HTML 的三栏之一
+    private func codeBinding(_ which: CodeTab) -> Binding<String> {
+        Binding(get: {
+            guard let h = store.templateEditor?.html else { return "" }
+            switch which { case .front: return h.front; case .back: return h.back; case .css: return h.css }
+        }, set: { v in
+            guard var t = store.templateEditor, var h = t.html else { return }
+            switch which { case .front: h.front = v; case .back: h.back = v; case .css: h.css = v }
+            t.html = h
+            store.templateEditor = t
+        })
+    }
+
+    private var usesHTML: Binding<Bool> {
+        Binding(get: { store.templateEditor?.html != nil }, set: { on in
+            guard var t = store.templateEditor else { return }
+            t.html = on ? (t.html ?? CardTemplateEngine.html(from: t)) : nil
+            store.templateEditor = t
+        })
+    }
+
+    /// HTML 模板里的问题（有就不让保存）
+    private func issues(_ t: NoteTemplate) -> [String] {
+        guard let h = t.html else { return t.front.isEmpty ? ["正面至少要放一个字段"] : [] }
+        let f = CardTemplateEngine.issues(h.front, fieldNames: t.fieldNames, side: .front).map { "正面：" + $0 }
+        let b = CardTemplateEngine.issues(h.back, fieldNames: t.fieldNames, side: .back).map { "背面：" + $0 }
+        var all = f + b
+        if h.front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { all.insert("正面模板是空的", at: 0) }
+        return all
+    }
+
     var body: some View {
         let t = store.templateEditor
-        let sample = t.flatMap { tpl in try? store.db.sampleCard(noteType: tpl.name) }
         let count = t.flatMap { try? store.db.cardCount(noteType: $0.name) } ?? 0
+        let problems = t.map(issues) ?? []
         return VStack(alignment: .leading, spacing: 12) {
-            Text("卡片模板").font(.title2.bold())
-            Text("笔记类型“\(t?.name ?? "")”，\(count) 张卡。改动只影响显示，不改卡片内容。")
-                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Text("卡片模板").font(.title2.bold())
+                Text("笔记类型“\(t?.name ?? "")”，\(count) 张卡。改动只影响显示，不改卡片内容。")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("", selection: usesHTML) {
+                    Text("放置").tag(false)
+                    Text("HTML").tag(true)
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 160)
+            }
             HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let t {
-                        ForEach(Array(t.fieldNames.enumerated()), id: \.offset) { i, name in
-                            HStack {
-                                Text(name).frame(width: 90, alignment: .leading)
-                                Picker("", selection: Binding(get: { placement(t, i) }, set: { setPlacement($0, i) })) {
-                                    ForEach(Placement.allCases) { Text($0.rawValue).tag($0) }
-                                }
-                                .labelsHidden()
-                                .frame(width: 130)
-                            }
-                        }
-                    }
-                    Text("正面放要回想的内容（如正文），背面放答案；注释这类长内容放“背面·折叠”，需要时点开。")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if t?.html != nil { htmlColumn(t!) } else { placementColumn(t) }
                 }
-                .frame(width: 250)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("预览（用这类卡片中的一张）").font(.headline)
-                    if let t, let c = sample {
-                        let f = t.render(c.fields)
-                        CardWebView(front: f.front, back: f.back, store: store)
-                            .background(Color(nsColor: .textBackgroundColor))
-                            .border(Color.secondary.opacity(0.3))
-                    } else {
-                        Text("没有可预览的卡片").foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                .frame(width: 400)
+                previewColumn(t)
+            }
+            if !problems.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(problems, id: \.self) { Label($0, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
                 }
+                .font(.caption)
             }
             HStack {
                 Button("恢复默认") {
@@ -173,6 +207,7 @@ struct NoteTemplateEditorView: View {
                         store.templateEditor = NoteTemplate.defaultTemplate(name: t.name, fieldNames: t.fieldNames, isCloze: t.isCloze)
                     }
                 }
+                .help("回到默认的放置（第一个字段在正面，其余在背面），不用 HTML")
                 Spacer()
                 Button("取消", role: .cancel) { store.templateEditor = nil }
                     .keyboardShortcut(.cancelAction)
@@ -180,11 +215,208 @@ struct NoteTemplateEditorView: View {
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .handCursor()
-                    .disabled(t?.front.isEmpty ?? true)
+                    .disabled(!problems.isEmpty)
             }
         }
         .padding(20)
-        .frame(minWidth: 860, minHeight: 560)
+        .frame(minWidth: 980, minHeight: 620)
+        .task(id: t?.name) {
+            samples = (try? store.db.sampleCards(noteType: t?.name ?? "", limit: 8)) ?? []
+            sampleIndex = 0
+        }
+    }
+
+    private func placementColumn(_ t: NoteTemplate?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let t {
+                ForEach(Array(t.fieldNames.enumerated()), id: \.offset) { i, name in
+                    HStack {
+                        Text(name).frame(width: 120, alignment: .leading)
+                        Picker("", selection: Binding(get: { placement(t, i) }, set: { setPlacement($0, i) })) {
+                            ForEach(Placement.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 140)
+                    }
+                }
+            }
+            Text("正面放要回想的内容（如正文），背面放答案；注释这类长内容放“背面·折叠”，需要时点开。要改格式，切到右上角的“HTML”。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+    }
+
+    private func htmlColumn(_ t: NoteTemplate) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("", selection: $tab) { ForEach(CodeTab.allCases) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented).labelsHidden()
+            if tab != .css {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        Text("插入：").font(.caption).foregroundStyle(.secondary)
+                        ForEach(t.fieldNames, id: \.self) { name in
+                            Button(name) { inserter.insert("{{\(name)}}") }.controlSize(.small)
+                        }
+                        if tab == .back { Button("FrontSide") { inserter.insert("{{FrontSide}}") }.controlSize(.small) }
+                        Menu("更多") {
+                            ForEach(t.fieldNames, id: \.self) { name in
+                                Button("有“\(name)”时才显示") { inserter.insert("{{#\(name)}}\n\n{{/\(name)}}") }
+                            }
+                            Divider()
+                            ForEach(t.fieldNames, id: \.self) { name in
+                                Button("“\(name)”作提示") { inserter.insert("{{hint:\(name)}}") }
+                            }
+                            if t.isCloze, let first = t.fieldNames.first {
+                                Divider()
+                                Button("完形填空：\(first)") { inserter.insert("{{cloze:\(first)}}") }
+                            }
+                        }
+                        .controlSize(.small).fixedSize()
+                    }
+                }
+            }
+            TemplateCodeEditor(text: codeBinding(tab), inserter: inserter)
+                .id(tab)
+                .frame(minHeight: 360)
+                .border(Color.secondary.opacity(0.3))
+            Text(tab == .css
+                 ? "样式（CSS）作用于这类卡片的正反面，加在默认样式之后；可用 .kr-field、.kr-label、.cloze、.kr-hint 等类名。"
+                 : "写法同 Anki：{{字段}}、{{#字段}}…{{/字段}}（有内容才显示）、{{^字段}}…{{/字段}}（为空才显示）、{{cloze:字段}}、{{hint:字段}}、{{text:字段}}。背面的 {{FrontSide}} 不重复显示正面。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func previewColumn(_ t: NoteTemplate?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("预览").font(.headline)
+                if samples.count > 1 {
+                    Text("第 \(sampleIndex + 1) / \(samples.count) 张").font(.caption).foregroundStyle(.secondary)
+                    Button("换一张") { sampleIndex = (sampleIndex + 1) % samples.count }.controlSize(.small)
+                }
+                Spacer()
+            }
+            if let t, samples.indices.contains(sampleIndex) {
+                let f = t.render(samples[sampleIndex].fields)
+                CardWebView(front: f.front, back: f.back, store: store, css: t.html != nil ? t.css : store.plainCardCSS)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .border(Color.secondary.opacity(0.3))
+            } else {
+                Text("没有可预览的卡片").foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+// MARK: - 6.0.0：普通卡片样式
+
+/// 没有 HTML 模板的卡片（只有正面、背面，或用“放置”的多字段卡片）共用的样式
+struct PlainCardStyleEditorView: View {
+    @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var css = ""
+    @State private var sample: Card?
+    @State private var inserter = TemplateCodeInserter()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("普通卡片样式").font(.title2.bold())
+            Text("作用于所有没有 HTML 模板的卡片，加在默认样式之后。改样式只影响显示，不改卡片内容。")
+                .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    TemplateCodeEditor(text: $css, inserter: inserter)
+                        .frame(minHeight: 360)
+                        .border(Color.secondary.opacity(0.3))
+                    Text("例：.face { font-size: 24px; } 或 .back { color: #555; }。可用的类名：.face（正面）、.back（背面）、.kr-field、.kr-label、.cloze。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(width: 400)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("预览").font(.headline)
+                    if let c = sample {
+                        let f = store.faces(of: c)
+                        CardWebView(front: f.front, back: f.back, store: store, css: css)
+                            .background(Color(nsColor: .textBackgroundColor))
+                            .border(Color.secondary.opacity(0.3))
+                    } else {
+                        CardWebView(front: "学而时习之，不亦说乎？", back: "出自《论语·学而》。", store: store, css: css)
+                            .background(Color(nsColor: .textBackgroundColor))
+                            .border(Color.secondary.opacity(0.3))
+                    }
+                }
+            }
+            HStack {
+                Button("清空") { css = "" }
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("保存") { store.savePlainCardCSS(css); dismiss() }
+                    .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 900, minHeight: 560)
+        .onAppear {
+            css = store.plainCardCSS
+            sample = try? store.db.samplePlainCard()
+        }
+    }
+}
+
+/// 代码编辑框（等宽、不自动替换引号），可在光标处插入
+@MainActor
+final class TemplateCodeInserter {
+    weak var textView: NSTextView?
+    func insert(_ s: String) {
+        guard let v = textView else { return }
+        v.window?.makeFirstResponder(v)
+        v.insertText(s, replacementRange: v.selectedRange())
+    }
+}
+
+struct TemplateCodeEditor: NSViewRepresentable {
+    @Binding var text: String
+    let inserter: TemplateCodeInserter
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        guard let v = scroll.documentView as? NSTextView else { return scroll }
+        v.font = .monospacedSystemFont(ofSize: 12.5, weight: .regular)
+        v.isRichText = false
+        v.allowsUndo = true
+        v.isAutomaticQuoteSubstitutionEnabled = false
+        v.isAutomaticDashSubstitutionEnabled = false
+        v.isAutomaticTextReplacementEnabled = false
+        v.isAutomaticSpellingCorrectionEnabled = false
+        v.isContinuousSpellCheckingEnabled = false
+        v.textContainerInset = NSSize(width: 6, height: 8)
+        v.string = text
+        v.delegate = context.coordinator
+        inserter.textView = v
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let v = scroll.documentView as? NSTextView else { return }
+        inserter.textView = v
+        if v.string != text { v.string = text }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: TemplateCodeEditor
+        init(_ p: TemplateCodeEditor) { parent = p }
+        func textDidChange(_ n: Notification) {
+            guard let v = n.object as? NSTextView else { return }
+            parent.text = v.string
+        }
     }
 }
 

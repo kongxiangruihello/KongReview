@@ -608,6 +608,9 @@ struct CardSheets: ViewModifier {
             .sheet(item: $store.templateEditor) { _ in
                 NoteTemplateEditorView()
             }
+            .sheet(isPresented: $store.showsPlainCardStyle) {
+                PlainCardStyleEditorView()
+            }
             .sheet(item: $store.apkgExport) { _ in
                 ApkgExportView()
             }

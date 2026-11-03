@@ -68,8 +68,11 @@ enum ApkgWriter {
             }
 
             for (i, c) in cards.enumerated() {
-                let faces = c.faces(using: c.noteType.flatMap { templates[$0] })
-                let front = Markdown.html(faces.front)
+                let template = c.noteType.flatMap { templates[$0] }
+                let faces = c.faces(using: template)
+                // 6.0.0：HTML 模板的样式随正面一起带到 Anki
+                let css = template?.css.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let front = (css.isEmpty ? "" : "<style>\(css)</style>") + Markdown.html(faces.front)
                 let back = Markdown.html(faces.back)
                 let nid = uniqueID(nowMs + Int64(i))
                 let guid = c.ankiGuid ?? "kr\(c.id ?? Int64(i))"

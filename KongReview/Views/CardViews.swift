@@ -10,6 +10,8 @@ struct CardWebView: NSViewRepresentable {
     let front: String
     let back: String?
     let store: LibraryStore
+    /// 6.0.0：卡片的样式（HTML 模板的样式，或普通卡片样式）；加在默认样式之后
+    var css: String = ""
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -23,7 +25,7 @@ struct CardWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ wv: WKWebView, context: Context) {
-        let html = Self.page(front: front, back: back, adjustDarkColors: CardSettings.adjustDarkColors)
+        let html = Self.page(front: front, back: back, adjustDarkColors: CardSettings.adjustDarkColors, css: css)
         guard context.coordinator.loaded != html else { return }
         context.coordinator.loaded = html
         wv.loadHTMLString(html, baseURL: nil)
@@ -42,7 +44,17 @@ struct CardWebView: NSViewRepresentable {
         }
     }
 
-    static func page(front: String, back: String?, adjustDarkColors: Bool = true) -> String {
+    /// 6.0.0：用户写的样式；去掉能跳出 <style> 的写法与外部资源
+    static func userStyle(_ css: String) -> String {
+        var c = css.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !c.isEmpty else { return "" }
+        c = c.replacingOccurrences(of: #"(?i)</\s*style"#, with: "", options: .regularExpression)
+        c = c.replacingOccurrences(of: #"(?i)@import[^;]*;?"#, with: "", options: .regularExpression)
+        c = c.replacingOccurrences(of: #"(?i)url\(\s*['"]?\s*(https?:|//)[^)]*\)"#, with: "none", options: .regularExpression)
+        return "<style>" + c + "</style>"
+    }
+
+    static func page(front: String, back: String?, adjustDarkColors: Bool = true, css: String = "") -> String {
         var body = "<div class=\"face\">" + Card.renderHTML(front) + "</div>"
         if let back {
             // 1.8：正反面之间用“答”字小印隔开
@@ -80,7 +92,7 @@ struct CardWebView: NSViewRepresentable {
           body { color: #EDEBE6; } .back { color: #D6D2CA; } .cloze { color: #5B8CF5; } blockquote { color: #bbb; }
           #answer.sep { color: #D9826F; } .kr-label { color: #C9906F; }
         }
-        </style></head><body>\(body)
+        </style>\(Self.userStyle(css))</head><body>\(body)
         <script>(function(){
           var f=document.querySelector('.face'); if(f){ var t=(f.innerText||'').trim();
             if(t.length>0 && t.length<=16 && t.indexOf('\\n')<0 && !f.querySelector('img,table,ul,ol,pre,blockquote,details')) f.classList.add('short'); }
@@ -177,6 +189,8 @@ struct CardsHomeView: View {
                 .disabled(decks.isEmpty)
                 Menu {
                     Button("管理常用录入预设…") { store.showsCardEntryPresetManager = true }
+                    // 6.0.0：没有 HTML 模板的卡片共用的样式
+                    Button("普通卡片样式…") { store.showsPlainCardStyle = true }
                     Divider()
                     let templates = store.noteTemplates.values.sorted { $0.name < $1.name }
                     if templates.isEmpty { Text("没有多字段的笔记类型（从 Anki 导入后出现）") }
@@ -301,7 +315,7 @@ struct StudyView: View {
                                 }.padding(20)
                             }.frame(maxWidth:.infinity,maxHeight:.infinity)
                         } else {
-                            CardWebView(front: f.front, back: study.showingAnswer ? f.back : nil, store: store)
+                            CardWebView(front: f.front, back: study.showingAnswer ? f.back : nil, store: store, css: store.cardCSS(for: card))
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .padding(.horizontal, 8)
                                 .padding(.bottom, 8)

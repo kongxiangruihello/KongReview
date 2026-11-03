@@ -464,6 +464,10 @@ final class AppDatabase {
         m.registerMigration("v24-checkin-legacy") { db in
             try AppDatabase.installCheckinLegacy(in: db)
         }
+        // 6.0.0：卡片模板的 HTML（正面、背面、样式，JSON）
+        m.registerMigration("v25-template-html") { db in
+            try db.alter(table: "note_template") { t in t.add(column: "html", .text) }
+        }
         return m
     }
 }

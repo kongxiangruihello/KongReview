@@ -490,6 +490,8 @@ public struct AnkiNote: Equatable, Sendable {
     public var fieldNames: [String] = []
     public var fields: [String] = []
     public var isCloze = false
+    /// 6.0.0：这种笔记类型在 Anki 里的第一张卡片模板（正面、背面）与样式
+    public var templateHTML: NoteTemplateHTML?
     /// Anki 的 FSRS 记忆状态（cards.data 里的 s、d），没有则为 nil
     public var memory: Memory?
     /// 这张卡在 Anki 里的复习记录
