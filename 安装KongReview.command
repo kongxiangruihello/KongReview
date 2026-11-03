@@ -15,6 +15,8 @@ PROXY_ON=$(scutil --proxy 2>/dev/null | awk '/HTTPSEnable/ {print $3}')
 if [ "$PROXY_ON" = "1" ] && [ -n "$PROXY_HOST" ] && [ -n "$PROXY_PORT" ]; then
   echo "→ 使用系统代理 http://$PROXY_HOST:$PROXY_PORT"
   GITOPTS+=(-c "http.proxy=http://$PROXY_HOST:$PROXY_PORT")
+  # 编译时 SwiftPM 要从 GitHub 取依赖，也走代理
+  export https_proxy="http://$PROXY_HOST:$PROXY_PORT" http_proxy="http://$PROXY_HOST:$PROXY_PORT"
 fi
 
 echo "→ 第 1 步：准备源码（${src}，分支 ${branch}）"

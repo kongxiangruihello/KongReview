@@ -545,6 +545,10 @@ final class AppUpdater {
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
         environment["GIT_TERMINAL_PROMPT"] = "0"
+        // 编译时 SwiftPM 要从 GitHub 取依赖（GRDB）：与 git 走同一个代理
+        if let proxy {
+            for key in ["https_proxy", "http_proxy", "HTTPS_PROXY", "HTTP_PROXY", "all_proxy", "ALL_PROXY"] { environment[key] = proxy }
+        }
         process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
