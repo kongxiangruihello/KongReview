@@ -49,16 +49,6 @@ struct ReviewBias: Sendable, Equatable {
     static let refreshLimit = 3
 }
 
-/// 焦点进展（学习小结表 4）
-struct FocusProgress: Equatable, Sendable {
-    var totalHighlights = 0
-    var reviewedHighlights = 0
-    var newHighlights = 0
-    var notes = 0
-    var totalCards = 0
-    var studiedCards = 0
-}
-
 /// 学习质量（学习小结表 2）
 struct GrowthQuality: Equatable, Sendable {
     /// 复习卡评分中非“重来”的比例；分母为 0 时为 nil
@@ -77,15 +67,6 @@ struct GrowthQuality: Equatable, Sendable {
 
     var curationRate: Double? { reviewed == 0 ? nil : Double(curated) / Double(reviewed) }
     var cardingRate: Double? { newHighlights == 0 ? nil : Double(newHighlightsCarded) / Double(newHighlights) }
-}
-
-/// 札记的一条：摘录、按语与出处
-struct NotebookEntry: Equatable, Sendable {
-    var highlight: Highlight
-    var sourceTitle: String?
-    var sourceAuthor: String?
-    var favorited: Bool
-    var noted: Bool
 }
 
 extension AppDatabase {
@@ -195,35 +176,6 @@ extension AppDatabase {
 
     // MARK: 焦点进展
 
-    func focusProgress(_ focus: LearningFocus, start: Date, end: Date) async throws -> FocusProgress {
-        try await writer.read { db in
-            let ids = try Self.focusHighlightIDs(db, focus)
-            var p = FocusProgress(totalHighlights: ids.count)
-            guard !ids.isEmpty else { return p }
-            let reviewed = Set(try Int64.fetchAll(db, sql: """
-                SELECT DISTINCT highlightId FROM review_event
-                WHERE at >= ? AND at < ? AND highlightId IS NOT NULL AND kind NOT IN ('card','note')
-                """, arguments: [start, end]))
-            p.reviewedHighlights = reviewed.intersection(ids).count
-            let noted = Set(try Int64.fetchAll(db, sql: """
-                SELECT DISTINCT highlightId FROM review_event WHERE at >= ? AND at < ? AND kind = 'note' AND highlightId IS NOT NULL
-                """, arguments: [start, end]))
-            p.notes = noted.intersection(ids).count
-            let created = Set(try Int64.fetchAll(db, sql: "SELECT id FROM highlight WHERE createdAt >= ? AND createdAt < ?", arguments: [start, end]))
-            p.newHighlights = created.intersection(ids).count
-            let cards = try Row.fetchAll(db, sql: "SELECT id, highlightId FROM card WHERE deletedAt IS NULL AND highlightId IS NOT NULL")
-                .filter { ids.contains($0["highlightId"]) }.map { $0["id"] as Int64 }
-            p.totalCards = cards.count
-            if !cards.isEmpty {
-                let studied = Set(try Int64.fetchAll(db, sql: """
-                    SELECT DISTINCT cardId FROM review_event WHERE kind = 'card' AND at >= ? AND at < ? AND cardId IS NOT NULL
-                    """, arguments: [start, end]))
-                p.studiedCards = Set(cards).intersection(studied).count
-            }
-            return p
-        }
-    }
-
     // MARK: 学习质量
 
     func growthQuality(start: Date, end: Date) async throws -> GrowthQuality {
@@ -263,28 +215,4 @@ extension AppDatabase {
 
     // MARK: 札记
 
-    /// 本期收藏或写过按语的摘录，按出处、位置排列
-    func notebookEntries(start: Date, end: Date) throws -> [NotebookEntry] {
-        try writer.read { db in
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT highlightId AS id,
-                       MAX(CASE WHEN kind = 'favorite' THEN 1 ELSE 0 END) AS fav,
-                       MAX(CASE WHEN kind = 'note' THEN 1 ELSE 0 END) AS noted
-                FROM review_event WHERE at >= ? AND at < ? AND highlightId IS NOT NULL AND kind IN ('favorite','note')
-                GROUP BY highlightId
-                """, arguments: [start, end])
-            var flags: [Int64: (Bool, Bool)] = [:]
-            for row in rows { flags[row["id"]] = ((row["fav"] as Int) == 1, (row["noted"] as Int) == 1) }
-            guard !flags.isEmpty else { return [] }
-            let highlights = try Highlight.filter(keys: Array(flags.keys)).filter(Column("deletedAt") == nil).fetchAll(db)
-            let sources = Dictionary(uniqueKeysWithValues: try Source.fetchAll(db).compactMap { s in s.id.map { ($0, s) } })
-            return highlights.map { h in
-                let s = h.sourceId.flatMap { sources[$0] }
-                let f = flags[h.id ?? -1] ?? (false, false)
-                return NotebookEntry(highlight: h, sourceTitle: s?.title, sourceAuthor: s?.author, favorited: f.0, noted: f.1)
-            }
-            .sorted { ($0.sourceTitle ?? "\u{FFFF}", $0.highlight.location ?? "", $0.highlight.id ?? 0)
-                    < ($1.sourceTitle ?? "\u{FFFF}", $1.highlight.location ?? "", $1.highlight.id ?? 0) }
-        }
-    }
 }

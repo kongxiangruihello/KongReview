@@ -65,41 +65,6 @@ final class V41IdeaNoteTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(try await db.ideaNoteDetail(id: note.id!))
     }
 
-    func testWritingProjectsAndSearch() async throws {
-        let db = try AppDatabase(DatabaseQueue())
-        let h = try db.save(Highlight(text: "士不可以不弘毅"))
-        let note = try db.createIdeaNote(title: "弘毅", body: "<p>弘言其量</p>", highlightIDs: [h.id!], now: day(-1))
-        try db.saveIdeaNote(id: note.id!, title: "弘毅", body: "<p>弘言其量，毅言其守</p>", now: day(-1))
-        let rows = try await db.writer.read { try Row.fetchAll($0, sql: "SELECT origin, noteId, added FROM writing_log") }
-        XCTAssertEqual(rows.count, 1, "同一札记同一天合并")
-        XCTAssertEqual(rows.first?["origin"] as String?, "note")
-        XCTAssertEqual(rows.first?["added"] as Int?, 8)
-
-        let p = try db.saveResearchProject(ResearchProject(title: "何以为士"))
-        try db.linkToResearchProject(p.id!, kind: .note, recordId: note.id!)
-        let links = try db.researchProjectLinks(projectId: p.id!)
-        XCTAssertEqual(links.map(\.kind), [.note])
-        XCTAssertEqual(links.first?.highlightCount, 1)
-        XCTAssertEqual(try db.focusHighlightIDs(LearningFocus(kind: .project, id: p.id!, title: p.title)), [h.id!], "当前项目的札记所引摘录计入加权")
-        let w = try await db.projectWritingSummary(projectId: p.id!, start: day(-3), end: day(1))
-        XCTAssertEqual(w.added, 8, "归入项目的札记，写作计入该项目")
-        let pw = try await db.projectWriting(projectId: p.id!, now: now, calendar: calendar)
-        XCTAssertEqual(pw.entries.first?.ideaNoteTitle, "弘毅")
-        try db.setIdeaNoteDeleted(note.id!, deleted: true)
-        XCTAssertTrue(try db.researchProjectLinks(projectId: p.id!).isEmpty, "已删除的札记不在项目材料里显示")
-        try db.setIdeaNoteDeleted(note.id!, deleted: false)
-        try db.purgeIdeaNote(note.id!)
-        let remaining = try await db.writer.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM research_project_link WHERE kind = 'note'") }
-        XCTAssertEqual(remaining, 0, "彻底删除时去掉项目关联")
-
-        _ = try db.createIdeaNote(title: "經世致用", body: "<p>顾炎武</p>", now: now)
-        let found = try await db.ideaNoteSummaries(query: "经世")
-        XCTAssertEqual(found.map(\.title), ["經世致用"], "繁简通搜")
-        let pages = try await db.globalSearch(query: "顾炎武", kind: .note)
-        XCTAssertEqual(pages.first?.items.map(\.title), ["經世致用"])
-        let created = try await db.ideaNotesCreated(start: day(-1), end: day(2))
-        XCTAssertEqual(created, 1)
-    }
 
     func testStoreComposerLinksAndNavigation() throws {
         try MainActor.assumeIsolated {

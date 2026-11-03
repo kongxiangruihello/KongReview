@@ -42,19 +42,6 @@ extension LibraryStore {
         revisionBump()
     }
 
-    /// 打开新建项目面板；从笔记本或出处页进入时，保存后自动归入
-    func newResearchProject(linking link: ResearchProjectPendingLink? = nil) {
-        guard !fullBackupBusy else { return }
-        researchProjectPendingLink = link
-        researchProjectEditor = ResearchProject(title: "")
-    }
-
-    func editResearchProject(_ project: ResearchProject) {
-        guard !fullBackupBusy else { return }
-        researchProjectPendingLink = nil
-        researchProjectEditor = project
-    }
-
     /// 保存项目；新建的项目在没有当前项目时自动设为当前项目，并打开项目页
     @discardableResult
     func saveResearchProject(_ project: ResearchProject) -> ResearchProject? {
@@ -97,13 +84,6 @@ extension LibraryStore {
         } catch { report(error) }
     }
 
-    /// 设为当前项目：回顾抽样对项目材料中的摘录加权，记忆卡优先其卡片（与 3.15 本期焦点相同）
-    func setCurrentProject(_ project: ResearchProject?) {
-        guard let project else { setLearningFocus(nil); return }
-        guard let id = project.id, !project.isArchived else { return }
-        setLearningFocus(LearningFocus(kind: .project, id: id, title: project.title))
-    }
-
     func linkToResearchProject(_ project: ResearchProject, kind: ResearchProjectLink.Kind, recordId: Int64) {
         guard !fullBackupBusy, let id = project.id else { return }
         do { try db.linkToResearchProject(id, kind: kind, recordId: recordId); afterResearchProjectChange() } catch { report(error) }
@@ -112,18 +92,6 @@ extension LibraryStore {
     func unlinkFromResearchProject(_ project: ResearchProject, kind: ResearchProjectLink.Kind, recordId: Int64) {
         guard !fullBackupBusy, let id = project.id else { return }
         do { try db.unlinkFromResearchProject(id, kind: kind, recordId: recordId); afterResearchProjectChange() } catch { report(error) }
-    }
-
-    /// 记一笔写作；byTotal 时按外部稿件全文字数与上次登记的差计
-    @discardableResult
-    func recordWriting(_ project: ResearchProject, words: Int, byTotal: Bool, day: Date, note: String) -> Bool {
-        guard !fullBackupBusy, let id = project.id else { return false }
-        do {
-            if byTotal { try db.recordExternalWritingTotal(projectId: id, total: words, day: day, note: note) }
-            else { try db.addManualWriting(projectId: id, words: words, day: day, note: note) }
-            afterResearchProjectChange()
-            return true
-        } catch { report(error); return false }
     }
 
     func deleteWritingEntry(_ id: Int64) {

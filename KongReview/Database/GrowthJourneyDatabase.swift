@@ -2,23 +2,6 @@ import Foundation
 import GRDB
 import KongReviewCore
 
-enum GrowthTrendRange: String, CaseIterable, Identifiable {
-    case days, weeks, months
-    var id: String { rawValue }
-    var title: String { switch self { case .days: "近30天"; case .weeks: "近12周"; case .months: "近12个月" } }
-    var period: GrowthPeriod { switch self { case .days: .day; case .weeks: .week; case .months: .month } }
-    func windows(now: Date = Date(), calendar: Calendar = .current) -> [GrowthWindow] {
-        let start = calendar.dateInterval(of: period.component, for: now)!.start
-        return (0..<(self == .days ? 30 : 12)).reversed().map {
-            period.window(containing: calendar.date(byAdding: period.component, value: -$0, to: start)!, now: now, calendar: calendar)
-        }
-    }
-}
-struct GrowthTrendPoint: Identifiable, Sendable {
-    let window: GrowthWindow
-    let summary: GrowthSummary
-    var id: String { window.key }
-}
 struct GrowthHistoryEntry: Identifiable, Sendable {
     let id: String
     let period: GrowthPeriod
@@ -88,34 +71,6 @@ struct CardCareComparison: Sendable {
     }
 }
 extension AppDatabase {
-    func growthTrend(_ range: GrowthTrendRange, now: Date = Date(), calendar: Calendar = .current) async throws -> [GrowthTrendPoint] {
-        let windows = range.windows(now: now, calendar: calendar)
-        return try await writer.read { db in
-            try windows.map { window in
-                let row = try Row.fetchOne(db, sql: """
-                    SELECT COUNT(DISTINCT CASE WHEN kind NOT IN ('card','note') THEN highlightId END) AS highlights,
-                    COUNT(DISTINCT CASE WHEN kind='card' THEN cardId END) AS cards,
-                    COUNT(CASE WHEN kind='card' AND cardId IS NOT NULL THEN 1 END) AS ratings
-                    FROM review_event WHERE at>=? AND at<?
-                    """, arguments: [window.start, window.end])!
-                return .init(window: window, summary: .init(values: [.highlights: row["highlights"], .cards: row["cards"], .ratings: row["ratings"]]))
-            }
-        }
-    }
-    func growthHistory(query: String = "", period: GrowthPeriod? = nil, offset: Int = 0) async throws -> GrowthPage<GrowthHistoryEntry> {
-        try await writer.read { db in
-            let rows = try Row.fetchAll(db, sql: "SELECT key,payload FROM app_progress WHERE key LIKE 'growth.%'")
-            let needle = ChineseFold.fold(query.trimmingCharacters(in: .whitespacesAndNewlines)).lowercased()
-            let entries = try rows.compactMap { row -> GrowthHistoryEntry? in
-                let reflection = try JSONDecoder().decode(GrowthReflection.self, from: row["payload"] as Data)
-                guard let entry = GrowthHistoryEntry.parse(key: row["key"], reflection: reflection), period == nil || entry.period == period else { return nil }
-                guard !reflection.gains.isEmpty || !reflection.challenges.isEmpty || !reflection.nextSteps.isEmpty || reflection.goalCards > 0 || reflection.goalHighlights > 0 else { return nil }
-                let text = ChineseFold.fold(Markdown.plainText(fromHTML: [reflection.gains, reflection.challenges, reflection.nextSteps].joined(separator: "\n"))).lowercased()
-                return needle.isEmpty || text.contains(needle) ? entry : nil
-            }.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date > $1.date }
-            return .init(items: Array(entries.dropFirst(max(0,offset)).prefix(50)), total: entries.count)
-        }
-    }
     func saveLearningPlan(_ plan: LearningPlan) throws {
         var value = plan
         value.title = value.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -145,18 +100,6 @@ extension AppDatabase {
             let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(kind.rawValue) WHERE \(whereSQL)", arguments: [query]) ?? 0
             let rows = try Row.fetchAll(db, sql: "SELECT id,\(column) AS title FROM \(kind.rawValue) WHERE \(whereSQL) ORDER BY id DESC LIMIT 50 OFFSET ?", arguments: [query,max(0,offset)])
             return .init(items: rows.map { .init(kind: kind, recordID: $0["id"], title: String(Markdown.plainText(fromHTML: Card.renderHTML($0["title"])).prefix(160))) }, total: total)
-        }
-    }
-    func planLinkExists(_ link: LearningPlanLink) async throws -> Bool {
-        try await writer.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(link.kind.rawValue) WHERE id=?" + (link.kind == .card ? " AND deletedAt IS NULL" : ""), arguments: [link.recordID]) == 1
-        }
-    }
-    func difficultCareList(offset: Int = 0) async throws -> GrowthPage<(DifficultCardCare, String)> {
-        try await writer.read { db in
-            let total = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM app_progress WHERE key LIKE 'difficult-care.%'") ?? 0
-            let rows = try Row.fetchAll(db, sql: "SELECT p.payload,c.front FROM app_progress p LEFT JOIN card c ON c.id=CAST(substr(p.key,16) AS INTEGER) AND c.deletedAt IS NULL WHERE p.key LIKE 'difficult-care.%' ORDER BY p.updatedAt DESC,p.key LIMIT 50 OFFSET ?", arguments: [max(0,offset)])
-            return .init(items: try rows.map { (try JSONDecoder().decode(DifficultCardCare.self, from: $0["payload"] as Data), $0["front"] as String? ?? "原卡片已删除") }, total: total)
         }
     }
     func cardCareComparison(_ care: DifficultCardCare, now: Date = Date(), calendar: Calendar = .current) async throws -> CardCareComparison? {

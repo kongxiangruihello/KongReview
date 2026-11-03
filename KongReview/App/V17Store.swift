@@ -380,24 +380,6 @@ extension LibraryStore {
         return sources.filter { $0.id != sid && classicKey($0) == key }
     }
 
-    /// 笔记本里出现的古籍，以及每部可选的版本（至少两个版本才列出）
-    func notebookClassics() -> [(title: String, editions: [Source])] {
-        var order: [String] = []
-        for h in notebookState.highlights.values.sorted(by: { ($0.id ?? 0) < ($1.id ?? 0) }) {
-            if let k = classicKey(source(for: h)), !order.contains(k) { order.append(k) }
-        }
-        return order.compactMap { k in
-            let eds = sources.filter { classicKey($0) == k }
-            return eds.count >= 2 ? (k, eds) : nil
-        }
-    }
-
-    func setNotebookEdition(_ classic: String, _ sourceId: Int64?) {
-        let st = notebookState
-        st.exportEditions[classic] = sourceId
-        if let nid = st.notebookId { NotebookEditionChoice.save(st.exportEditions, nid) }
-    }
-
     /// 导出这条摘录时改用的版本与位置；不需要换（没选版本、选的就是原出处）时为 nil；
     /// 选了别的版本但这条没有该版页码时 location 为 nil
     func editionChoice(for h: Highlight) -> (source: Source, location: String?)? {
@@ -422,9 +404,6 @@ extension LibraryStore {
 // MARK: - 2.2：版本页码批量导入、统计页的古籍进度
 
 extension LibraryStore {
-    func openEditionImport(_ sourceId: Int64) {
-        editionImport = EditionImportDraft(sourceId: sourceId, editionId: editions(for: sourceId).first?.id)
-    }
 
     /// 按当前对照表预览：这本书的摘录能对上几条
     func editionImportPreview(_ d: EditionImportDraft) -> EditionPageImport.Result {
@@ -447,31 +426,4 @@ extension LibraryStore {
         refreshNotebookHighlights()
     }
 
-    struct ClassicOverview: Identifiable {
-        var source: Source
-        var chapters: [ChapterProgress]
-        /// 最近一周回顾过的篇（按书中顺序）
-        var recent: [String]
-        var id: Int64 { source.id ?? 0 }
-        var total: Int { chapters.reduce(0) { $0 + $1.total } }
-        var reviewed: Int { chapters.reduce(0) { $0 + $1.reviewed } }
-        var finished: Int { chapters.filter { $0.total > 0 && $0.reviewed == $0.total }.count }
-    }
-
-    /// 统计页：设了古籍体例、位置里有篇名的出处，各篇进度与最近一周回顾了哪些篇（最近读的排前）
-    func classicOverview(now: Date = Date()) -> [ClassicOverview] {
-        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
-        let recentIds = (try? db.reviewedHighlightIds(since: weekAgo)) ?? []
-        var out: [ClassicOverview] = []
-        for s in sources where s.isClassic {
-            guard let sid = s.id, let groups = try? db.sourceChapters(sid), !groups.isEmpty else { continue }
-            let ids = groups.flatMap { $0.highlights.compactMap(\.id) }
-            let carded = Set(((try? db.cards(highlightIds: ids)) ?? []).compactMap(\.highlightId))
-            let recent = groups.filter { g in g.highlights.contains { $0.id.map(recentIds.contains) ?? false } }.map(\.name)
-            out.append(ClassicOverview(source: s, chapters: ChapterProgress.compute(groups, carded: carded), recent: recent))
-        }
-        return out.sorted { a, b in
-            a.recent.count != b.recent.count ? a.recent.count > b.recent.count : a.source.title < b.source.title
-        }
-    }
 }

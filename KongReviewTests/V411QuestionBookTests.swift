@@ -48,8 +48,8 @@ final class V411QuestionBookTests: XCTestCase {
         XCTAssertEqual(try db.question(id: longQ.id)?.detail, long.question)
         let solvedQ = try XCTUnwrap(try db.question(id: byTitle["已解决的问题"]!.id))
         XCTAssertEqual(solvedQ.answer, "<p>答案</p>"); XCTAssertEqual(solvedQ.legacyKey, solved.key)
-        let facts = try await db.periodReviewFacts(window: GrowthPeriod.month.window(containing: date(18), now: date(19), calendar: calendar))
-        XCTAssertEqual(facts.solvedQuestions, 1, "迁移前后“已解决问题”计数一致")
+        let solvedCount = try await db.writer.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM question WHERE status = 'solved'") }
+        XCTAssertEqual(solvedCount, 1, "迁移前后“已解决问题”计数一致")
 
         let left = try await db.writer.read { try String.fetchAll($0, sql: "SELECT key FROM app_progress WHERE key LIKE 'topic-question.%' OR key LIKE 'question-draft.%'") }
         XCTAssertEqual(left, ["topic-question.broken"], "解不开的记录原样保留，其余旧键删去")
@@ -88,8 +88,6 @@ final class V411QuestionBookTests: XCTestCase {
         XCTAssertEqual(page.items.map(\.id), [a.id!, b.id!, c.id!], "「常念」在前，其次当前项目，再按最近修改")
         let inProject = try await db.questionPage(QuestionFilter(projectID: p.id))
         XCTAssertEqual(Set(inProject.items.map(\.id)), [a.id!, b.id!], "项目筛选含其专题中的问题")
-        let o = try await db.researchProjectOverview(id: p.id!)
-        XCTAssertEqual(o.openQuestions.map(\.id), [a.id!, b.id!], "项目页与问题簿读到同一批问题")
 
         try db.setQuestionStatus(id: c.id!, .shelved)
         let unsolved = try await db.questionPage(QuestionFilter())

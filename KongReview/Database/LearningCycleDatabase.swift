@@ -13,27 +13,6 @@ struct PlanOutcome: Codable, Equatable, Sendable {
     var gains = ""
     var evidence: PlanEvidence?
 }
-struct PlanOutcomeDraft: Codable, Equatable, Sendable {
-    var original: LearningPlan
-    var outcome: PlanOutcome
-    var key: String { "plan-outcome-draft.\(original.id.uuidString)" }
-}
-enum WeeklyPlanFilter: String, CaseIterable, Identifiable {
-    case completed, delayed, cancelled
-    var id: String { rawValue }
-    var title: String { switch self { case .completed: "已完成"; case .delayed: "待处理／延期"; case .cancelled: "已取消" } }
-}
-enum WeeklyDecision: String, Codable { case continued, adjusted, dropped }
-struct PlanReviewDecision: Codable, Sendable {
-    var planID: UUID
-    var title: String
-    var weekKey: String
-    var decision: WeeklyDecision
-    var at: Date
-    var previousDue: Date
-    var nextDue: Date?
-    var key: String { "plan-review.\(weekKey).\(planID.uuidString)" }
-}
 struct TopicTimelineEntry: Identifiable, Sendable {
     var id: String
     var at: Date
@@ -49,84 +28,6 @@ struct TopicCardEdit: Codable, Sendable {
     var title: String
 }
 extension AppDatabase {
-    /// Patch just the goals so editing today's arrangement never overwrites the day's reflection.
-    func saveDailyArrangement(date: Date, highlights: Int, cards: Int, calendar: Calendar = .current) throws {
-        let key = GrowthPeriod.day.window(containing:date,now:date,calendar:calendar).key
-        try writer.write { db in
-            var value = try Self.readProgress(GrowthReflection.self,key:key,in:db) ?? .init()
-            value.goalHighlights = min(100000,max(0,highlights)); value.goalCards = min(100000,max(0,cards))
-            try Self.putProgress(value,key:key,in:db)
-        }
-    }
-    func finishPlan(_ draft: PlanOutcomeDraft, now: Date = Date()) throws {
-        try writer.write { db in
-            guard var plan = try Self.readProgress(LearningPlan.self,key:draft.original.key,in:db), plan == draft.original else { throw JourneyError.changedPlan }
-            // Completion is idempotent and editing a result preserves its original completion date.
-            guard plan.cancelledAt == nil else { throw JourneyError.changedPlan }
-            plan.completedAt = plan.completedAt ?? now
-            plan.outcome = draft.outcome
-            try Self.putProgress(plan,key:plan.key,in:db)
-            try db.execute(sql:"DELETE FROM app_progress WHERE key=?",arguments:[draft.key])
-        }
-    }
-    func evidenceChoices(kind: PlanEvidence.Kind, query: String, offset: Int = 0) async throws -> GrowthPage<PlanEvidence> {
-        try await writer.read { db in
-            let column = kind == .card ? "front" : "text"
-            let table = kind == .highlight ? "highlight" : kind == .card ? "card" : "notebook_block"
-            let active = kind == .block ? "kind='text'" : "deletedAt IS NULL"
-            let from = " FROM \(table) WHERE \(active) AND instr(kr_fold(\(column)),kr_fold(?))>0"
-            let count = try Int.fetchOne(db,sql:"SELECT COUNT(*)" + from,arguments:[query]) ?? 0
-            let rows = try Row.fetchAll(db,sql:"SELECT id,\(column) AS text" + from + " ORDER BY id DESC LIMIT 50 OFFSET ?",arguments:[query,max(0,offset)])
-            return .init(items:rows.map { .init(kind:kind,recordID:$0["id"],title:String(($0["text"] as String).prefix(160))) },total:count)
-        }
-    }
-    func evidenceTarget(_ evidence: PlanEvidence) async throws -> (GlobalSearchTarget?, Int64?) {
-        try await writer.read { db in
-            if evidence.kind != .block {
-                let table = evidence.kind == .card ? "card" : "highlight"
-                let id = try Int64.fetchOne(db,sql:"SELECT id FROM \(table) WHERE id=? AND deletedAt IS NULL",arguments:[evidence.recordID])
-                return (id.map { .init(kind:evidence.kind == .card ? .card : .highlight,recordID:$0) },nil)
-            }
-            return (nil,try Int64.fetchOne(db,sql:"SELECT notebookId FROM notebook_block WHERE id=?",arguments:[evidence.recordID]))
-        }
-    }
-    /// Current plan status, bounded by the selected week's end; not a historical status reconstruction.
-    func weeklyPlans(window: GrowthWindow, filter: WeeklyPlanFilter, offset: Int = 0) async throws -> GrowthPage<LearningPlan> {
-        try await writer.read { db in
-            let completed = "json_extract(CAST(payload AS TEXT),'$.completedAt')", cancelled = "json_extract(CAST(payload AS TEXT),'$.cancelledAt')", due = "json_extract(CAST(payload AS TEXT),'$.dueDate')"
-            let condition: String
-            var args: [any DatabaseValueConvertible]
-            switch filter {
-            case .completed: condition = "\(completed)>=? AND \(completed)<? AND \(cancelled) IS NULL"; args = [window.start.timeIntervalSinceReferenceDate,window.end.timeIntervalSinceReferenceDate]
-            case .cancelled: condition = "\(cancelled)>=? AND \(cancelled)<?"; args = [window.start.timeIntervalSinceReferenceDate,window.end.timeIntervalSinceReferenceDate]
-            case .delayed: condition = "\(completed) IS NULL AND \(cancelled) IS NULL AND \(due)<?"; args = [window.end.timeIntervalSinceReferenceDate]
-            }
-            let from = " FROM app_progress WHERE key LIKE 'learning-plan.%' AND " + condition
-            let count = try Int.fetchOne(db,sql:"SELECT COUNT(*)" + from,arguments:StatementArguments(args)) ?? 0
-            args.append(max(0,offset))
-            let rows = try Data.fetchAll(db,sql:"SELECT payload" + from + " ORDER BY \(due),key LIMIT 50 OFFSET ?",arguments:StatementArguments(args))
-            return .init(items:try rows.map { try JSONDecoder().decode(LearningPlan.self,from:$0) },total:count)
-        }
-    }
-    func weeklyDecisions(window: GrowthWindow, offset: Int = 0) async throws -> GrowthPage<PlanReviewDecision> {
-        try await writer.read { db in
-            let from = " FROM app_progress WHERE key LIKE 'plan-review.%' AND json_extract(CAST(payload AS TEXT),'$.weekKey')=?"
-            let count = try Int.fetchOne(db,sql:"SELECT COUNT(*)" + from,arguments:[window.key]) ?? 0
-            let rows = try Data.fetchAll(db,sql:"SELECT payload" + from + " ORDER BY updatedAt DESC,key LIMIT 50 OFFSET ?",arguments:[window.key,max(0,offset)])
-            return .init(items:try rows.map { try JSONDecoder().decode(PlanReviewDecision.self,from:$0) },total:count)
-        }
-    }
-    func reviewPlan(_ original: LearningPlan, window: GrowthWindow, decision: WeeklyDecision, due: Date, now: Date = Date()) throws {
-        try writer.write { db in
-            guard var plan = try Self.readProgress(LearningPlan.self,key:original.key,in:db), plan == original else { throw JourneyError.changedPlan }
-            guard plan.completedAt == nil else { throw JourneyError.changedPlan }
-            let record = PlanReviewDecision(planID:plan.id,title:plan.title,weekKey:window.key,decision:decision,at:now,previousDue:plan.dueDate,nextDue:decision == .dropped ? nil : due)
-            if decision == .dropped { plan.cancelledAt = now }
-            else { plan.cancelledAt = nil; plan.dueDate = due }
-            try Self.putProgress(plan,key:plan.key,in:db)
-            try Self.putProgress(record,key:record.key,in:db)
-        }
-    }
     static func recordTopicCardEdit(before: Card, after: Card, in db: Database) throws {
         guard let id = after.id, before.deletedAt == nil, after.deletedAt == nil,
               before.front != after.front || before.back != after.back || before.fields != after.fields || before.sections != after.sections || before.noteType != after.noteType else { return }

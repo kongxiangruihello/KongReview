@@ -18,43 +18,11 @@ struct WritingSummary: Equatable, Sendable {
     var days = 0
 }
 
-/// 一周的新增字数（项目页柱形）
-struct WritingWeek: Identifiable, Equatable, Sendable {
-    var start: Date
-    var added: Int
-    var id: Date { start }
-}
-
-/// 一条写作记录（项目页最近记录）
-struct WritingEntry: Identifiable, Equatable, Sendable {
-    var id: Int64
-    var day: String
-    var added: Int
-    var removed: Int
-    var manual: Bool
-    var notebookTitle: String?
-    var note: String
-    /// 4.1：来自札记的写作
-    var ideaNoteTitle: String? = nil
-}
-
 /// Word 等外部稿件最近一次登记的全文字数
 struct ExternalWritingTotal: Codable, Equatable, Sendable {
     var total: Int
     var at: Date
     static func key(_ projectId: Int64) -> String { "writing.external-total.\(projectId)" }
-}
-
-/// 项目页“写作”一块
-struct ProjectWriting: Equatable, Sendable {
-    var weeks: [WritingWeek] = []
-    /// 近 12 周新增与写作天数
-    var recent = WritingSummary()
-    /// 稿件现有字数：所归笔记本中自写的字＋外部稿件最近登记的全文字数
-    var notebookWords = 0
-    var external: ExternalWritingTotal?
-    var entries: [WritingEntry] = []
-    var manuscriptWords: Int { notebookWords + (external?.total ?? 0) }
 }
 
 extension AppDatabase {
@@ -101,16 +69,6 @@ extension AppDatabase {
 
     // MARK: 手记
 
-    /// 记一笔：本次新写的字数
-    func addManualWriting(projectId: Int64, words: Int, day: Date, note: String = "", now: Date = Date()) throws {
-        guard words > 0 else { return }
-        try writer.write { db in
-            try Self.logWriting(db, projectId: projectId, manual: true, added: words, removed: 0,
-                                note: note.trimmingCharacters(in: .whitespacesAndNewlines), now: now, day: day)
-            try db.execute(sql: "UPDATE research_project SET updatedAt = ? WHERE id = ?", arguments: [now, projectId])
-        }
-    }
-
     /// 登记外部稿件当前全文字数，返回算出的新增字数。第一次登记只作为起点，不计新增；之后按与上次的差计（减少时记删减）
     @discardableResult
     func recordExternalWritingTotal(projectId: Int64, total: Int, day: Date, note: String = "", now: Date = Date()) throws -> Int {
@@ -154,11 +112,6 @@ extension AppDatabase {
         try await writer.read { db in try Self.writingSummary(db, start: start, end: end, projectId: nil) }
     }
 
-    /// 某项目一段时间的写作量（学习小结表 4）
-    func projectWritingSummary(projectId: Int64, start: Date, end: Date) async throws -> WritingSummary {
-        try await writer.read { db in try Self.writingSummary(db, start: start, end: end, projectId: projectId) }
-    }
-
     private static func writingSummary(_ db: Database, start: Date, end: Date, projectId: Int64?) throws -> WritingSummary {
         let (a, b) = dayRange(start, end)
         var sql = "SELECT COALESCE(SUM(w.added),0) AS added, COALESCE(SUM(w.removed),0) AS removed, COUNT(DISTINCT CASE WHEN w.added > 0 THEN w.day END) AS days FROM writing_log w WHERE w.day >= ? AND w.day <= ?"
@@ -168,44 +121,4 @@ extension AppDatabase {
         return WritingSummary(added: row?["added"] ?? 0, removed: row?["removed"] ?? 0, days: row?["days"] ?? 0)
     }
 
-    /// 项目页：近 weeks 周每周新增、稿件字数、最近记录
-    func projectWriting(projectId: Int64, weeks: Int = 12, now: Date = Date(), calendar: Calendar = .current) async throws -> ProjectWriting {
-        try await writer.read { db in
-            var out = ProjectWriting()
-            let thisWeek = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? calendar.startOfDay(for: now)
-            let starts = (0..<weeks).reversed().compactMap { calendar.date(byAdding: .weekOfYear, value: -$0, to: thisWeek) }
-            guard let first = starts.first else { return out }
-            let (a, b) = Self.dayRange(first, now.addingTimeInterval(1))
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT w.day, SUM(w.added) AS added FROM writing_log w
-                WHERE w.day >= ? AND w.day <= ? AND \(Self.projectFilter) GROUP BY w.day
-                """, arguments: [a, b, projectId, projectId, projectId])
-            var byWeek: [Date: Int] = [:]
-            var days = 0, added = 0
-            let parser = DateFormatter(); parser.calendar = calendar; parser.timeZone = calendar.timeZone; parser.dateFormat = "yyyy-MM-dd"
-            for row in rows {
-                let n: Int = row["added"] ?? 0
-                guard n > 0, let date = parser.date(from: row["day"]),
-                      let week = calendar.dateInterval(of: .weekOfYear, for: date)?.start else { continue }
-                byWeek[week, default: 0] += n
-                days += 1; added += n
-            }
-            out.weeks = starts.map { WritingWeek(start: $0, added: byWeek[$0] ?? 0) }
-            out.recent = WritingSummary(added: added, removed: 0, days: days)
-            let notebookIDs = try Int64.fetchAll(db, sql: "SELECT recordId FROM research_project_link WHERE projectId = ? AND kind = 'notebook'", arguments: [projectId])
-            out.notebookWords = try notebookIDs.reduce(0) { $0 + (try Self.notebookOwnWords(db, $1)) }
-            out.external = try Self.readProgress(ExternalWritingTotal.self, key: ExternalWritingTotal.key(projectId), in: db)
-            out.entries = try Row.fetchAll(db, sql: """
-                SELECT w.id, w.day, w.added, w.removed, w.origin, w.note, n.title AS notebookTitle, i.title AS ideaTitle FROM writing_log w
-                LEFT JOIN notebook n ON n.id = w.notebookId
-                LEFT JOIN idea_note i ON i.id = w.noteId
-                WHERE \(Self.projectFilter) ORDER BY w.day DESC, w.id DESC LIMIT 8
-                """, arguments: [projectId, projectId, projectId]).map {
-                    WritingEntry(id: $0["id"], day: $0["day"], added: $0["added"], removed: $0["removed"],
-                                 manual: ($0["origin"] as String?) == "manual", notebookTitle: $0["notebookTitle"], note: $0["note"] ?? "",
-                                 ideaNoteTitle: $0["ideaTitle"])
-                }
-            return out
-        }
-    }
 }

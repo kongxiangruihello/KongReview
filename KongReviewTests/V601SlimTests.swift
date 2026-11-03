@@ -49,7 +49,7 @@ final class V601SlimTests: XCTestCase {
                        try db.writer.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM source") })
 
         // 原始记录不删
-        XCTAssertNotNil(try db.bookSummary(sourceId: src.id!))
+        XCTAssertNotNil(try db.writer.read { try Int64.fetchOne($0, sql: "SELECT sourceId FROM book_summary WHERE sourceId = ?", arguments: [src.id!]) })
         XCTAssertEqual(try db.researchProjects().count, 1)
 
         XCTAssertNil(try SlimUpgrade.run(db: db, defaults: d, directory: dir), "只做一次")

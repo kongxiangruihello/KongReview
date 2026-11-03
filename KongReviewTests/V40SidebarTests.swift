@@ -29,22 +29,4 @@ final class V40SidebarTests: XCTestCase {
         }
     }
 
-    func testCurrentProjectFollowsArchiveAndHomeCardData() async throws {
-        let db = try AppDatabase(DatabaseQueue())
-        let p = try db.saveResearchProject(ResearchProject(title: "讲稿", kind: .lecture))
-        let notebook = try db.createNotebook(title: "讲稿底本")
-        try db.linkToResearchProject(p.id!, kind: .notebook, recordId: notebook.id!)
-        _ = try db.insertBlocks([NotebookBlock(notebookId: notebook.id!, position: 0, kind: .text, text: "第一讲：何以为士")], into: notebook.id!, after: nil)
-        try await MainActor.run {
-            let store = LibraryStore(db: db)
-            store.setCurrentProject(store.researchProjects.first)
-            XCTAssertEqual(store.currentProject?.title, "讲稿")
-            store.setResearchProjectArchived(try XCTUnwrap(store.currentProject), true)
-            XCTAssertNil(store.currentProject, "归档后首页不再显示为当前项目")
-            XCTAssertTrue(store.researchProjects.isEmpty)
-        }
-        let week = GrowthPeriod.week.window(containing: Date())
-        let w = try await db.projectWritingSummary(projectId: p.id!, start: week.start, end: week.end)
-        XCTAssertEqual(w.added, 7, "本周写作：第一讲何以为士")
-    }
 }

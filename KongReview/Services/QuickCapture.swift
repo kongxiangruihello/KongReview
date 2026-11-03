@@ -342,22 +342,6 @@ enum RichClipboard {
         return pb.string(forType: .string)
     }
 
-    /// 剪贴板里是否有带格式的内容
-    @MainActor
-    static func hasFormatting(_ pb: NSPasteboard = .general) -> Bool {
-        pb.availableType(from: [.html, .rtf]) != nil
-    }
-}
-
-/// 纯文本框，但粘贴时保留格式（转成 Markdown）；⌥⇧⌘V 仍粘贴纯文本
-final class MarkdownPasteTextView: NSTextView {
-    override func paste(_ sender: Any?) {
-        if RichClipboard.hasFormatting(), let md = RichClipboard.markdown() {
-            insertText(md, replacementRange: selectedRange())
-        } else {
-            super.paste(sender)
-        }
-    }
 }
 
 // MARK: - 1.3：快速录入的正文编辑器

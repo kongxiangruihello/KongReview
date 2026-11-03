@@ -687,17 +687,6 @@ extension AppDatabase {
         }
     }
 
-    /// 项目页“未解问题”：归入该项目、或归入其专题的未解决问题（「常念」在前，再按最近修改）
-    static func openQuestions(_ db: Database, projectId: Int64, limit: Int = 50) throws -> [QuestionRef] {
-        try Row.fetchAll(db, sql: """
-            SELECT q.id, q.title, q.status, q.pinned FROM question q
-            WHERE q.status IN ('open', 'lead') AND \(projectScopeSQL)
-            ORDER BY q.pinned DESC, q.updatedAt DESC, q.id DESC LIMIT ?
-            """, arguments: [projectId, projectId, limit]).map {
-                QuestionRef(id: $0["id"], title: $0["title"], status: Question.Status(rawValue: $0["status"]) ?? .open, pinned: $0["pinned"])
-            }
-    }
-
     /// 本期解决的问题（学习小结、复盘引导）；重新打开的不计
     func questionsSolved(start: Date, end: Date) async throws -> Int {
         try await writer.read { db in try Self.questionsSolved(db, start: start, end: end) }
@@ -707,21 +696,4 @@ extension AppDatabase {
         try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM question WHERE status = 'solved' AND solvedAt >= ? AND solvedAt < ?", arguments: [start, end]) ?? 0
     }
 
-    /// 本期新写或修改过的札记（“本期札记”导出）：题目、正文、引用摘录
-    func ideaNotesTouched(start: Date, end: Date) async throws -> [IdeaNoteDetail] {
-        try await writer.read { db in
-            let notes = try IdeaNote.fetchAll(db, sql: """
-                SELECT * FROM idea_note WHERE deletedAt IS NULL AND ((createdAt >= ? AND createdAt < ?) OR (updatedAt >= ? AND updatedAt < ?))
-                ORDER BY createdAt, id
-                """, arguments: [start, end, start, end])
-            return try notes.map { note in
-                var d = IdeaNoteDetail(note: note)
-                d.highlights = try Highlight.fetchAll(db, sql: """
-                    SELECT h.* FROM idea_note_highlight x JOIN highlight h ON h.id = x.highlightId
-                    WHERE x.noteId = ? AND h.deletedAt IS NULL ORDER BY x.position, x.addedAt
-                    """, arguments: [note.id])
-                return d
-            }
-        }
-    }
 }

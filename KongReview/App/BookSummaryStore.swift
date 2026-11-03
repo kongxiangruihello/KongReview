@@ -12,10 +12,6 @@ struct BookSummaryEditorRequest: Identifiable, Sendable {
 }
 
 extension LibraryStore {
-    func editBookSummary(_ sourceId: Int64, markFinished: Bool = false) {
-        guard !fullBackupBusy else { return }
-        bookSummaryEditor = BookSummaryEditorRequest(sourceId: sourceId, markFinished: markFinished)
-    }
 
     @discardableResult
     func saveBookSummary(sourceId: Int64, oneLine: String, body: String, finishedAt: Date?) -> Bool {
@@ -28,13 +24,4 @@ extension LibraryStore {
         } catch { report(error); return false }
     }
 
-    /// 书的重温：“要修订”随即打开提要
-    func revisitBook(_ sourceId: Int64, _ outcome: RevisitOutcome) {
-        guard !fullBackupBusy else { return }
-        do {
-            try db.recordBookRevisit(sourceId: sourceId, outcome: outcome)
-            refreshRevisit()
-            if outcome == .revise { editBookSummary(sourceId) }
-        } catch { report(error) }
-    }
 }

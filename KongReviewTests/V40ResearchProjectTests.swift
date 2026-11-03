@@ -81,120 +81,13 @@ final class V40ResearchProjectTests: XCTestCase {
 
     // MARK: 阶段、归档、排序
 
-    func testStageHistoryArchiveAndOrdering() async throws {
-        let db = try AppDatabase(DatabaseQueue())
-        var p = try db.saveResearchProject(ResearchProject(title: "  晚明讲学  ", kind: .paper, targetWords: 0), now: day(-10))
-        XCTAssertEqual(p.title, "晚明讲学", "题目去掉首尾空白")
-        XCTAssertNil(p.targetWords, "0 视为不设目标字数")
-        p.stage = .material
-        p = try db.saveResearchProject(p, now: day(-5))
-        try db.setResearchProjectStage(id: p.id!, stage: .material, now: day(-4)) // 未变化，不记录
-        try db.setResearchProjectStage(id: p.id!, stage: .draft, now: day(-1))
-        var o = try await db.researchProjectOverview(id: p.id!)
-        XCTAssertEqual(o.stages.map(\.stage), [.draft, .material, .idea], "新的在前")
-        XCTAssertEqual(o.project.stage, .draft)
-        XCTAssertThrowsError(try db.saveResearchProject(ResearchProject(title: "  ")))
 
-        let due = try db.saveResearchProject(ResearchProject(title: "有截止", dueDate: day(30)), now: now)
-        let later = try db.saveResearchProject(ResearchProject(title: "更晚截止", dueDate: day(60)), now: now)
-        XCTAssertEqual(try db.researchProjects().map(\.title), ["有截止", "更晚截止", "晚明讲学"], "按截止日期，无截止的在后")
-
-        try db.setLearningFocus(LearningFocus(kind: .project, id: due.id!, title: due.title))
-        try db.setResearchProjectArchived(id: due.id!, archived: true, now: now)
-        XCTAssertNil(try db.learningFocus(), "归档当前项目时取消当前项目")
-        XCTAssertEqual(try db.researchProjects().map(\.id), [later.id, p.id])
-        XCTAssertEqual(try db.researchProjects(includeArchived: true).last?.id, due.id, "归档的排最后")
-        try db.setResearchProjectArchived(id: due.id!, archived: false, now: now)
-        XCTAssertEqual(try db.researchProjects().first?.id, due.id)
-
-        try db.deleteResearchProject(id: p.id!)
-        await XCTAssertThrowsErrorAsync(try await db.researchProjectOverview(id: p.id!))
-        o = try await db.researchProjectOverview(id: later.id!)
-        XCTAssertTrue(o.stages.count == 1)
-    }
-
-    func testDaysLeft() {
-        let p = ResearchProject(title: "x", dueDate: calendar.date(from: .init(year: 2026, month: 12, day: 31, hour: 0)))
-        XCTAssertEqual(p.daysLeft(now: now, calendar: calendar), 71)
-        XCTAssertNil(ResearchProject(title: "y").daysLeft(now: now, calendar: calendar))
-    }
 
     // MARK: 项目页汇总
 
-    func testOverviewCollectsPlansQuestionsAndDedupedMaterials() async throws {
-        let db = try AppDatabase(DatabaseQueue())
-        let source = try db.save(Source(title: "论语译注"))
-        let h = try db.save(Highlight(sourceId: source.id, text: "学而时习之"))
-        _ = try db.save(Card(front: "学而", highlightId: h.id))
-        let notebook = try db.createNotebook(title: "论语专题")
-        _ = try db.insertBlocks([NotebookBlock(notebookId: notebook.id!, position: 1, kind: .highlight, highlightId: h.id)], into: notebook.id!, after: nil)
-        let other = try db.createNotebook(title: "无关")
-        let p = try db.saveResearchProject(ResearchProject(title: "论语译注修订", kind: .book), now: now)
-        try db.linkToResearchProject(p.id!, kind: .notebook, recordId: notebook.id!)
-        try db.linkToResearchProject(p.id!, kind: .source, recordId: source.id!)
-
-        let link = LearningPlanLink(kind: .project, recordID: p.id!, title: p.title)
-        XCTAssertEqual(link.kind.rawValue, "research_project", "原始值即表名")
-        var later = LearningPlan(title: "改第二章", link: link); later.dueDate = day(5)
-        var sooner = LearningPlan(title: "核引文", link: link); sooner.dueDate = day(1)
-        var done = LearningPlan(title: "已完成", link: link); done.completedAt = now
-        var cancelled = LearningPlan(title: "已取消", link: link); cancelled.cancelledAt = now
-        for plan in [later, sooner, done, cancelled, LearningPlan(title: "无关计划")] { try db.saveLearningPlan(plan) }
-        _ = try db.createQuestion(title: "学与习之别？", scopes: [(.notebook, notebook.id!)], now: now)
-        let solved = try db.createQuestion(title: "已解决", scopes: [(.notebook, notebook.id!)], now: now)
-        try db.saveQuestion(id: solved.id!, title: solved.title, detail: "", answer: "答案"); try db.setQuestionStatus(id: solved.id!, .solved)
-        _ = try db.createQuestion(title: "别处的问题", scopes: [(.notebook, other.id!)], now: now)
-        _ = try db.createQuestion(title: "直接归入项目", scopes: [(.project, p.id!)], now: now.addingTimeInterval(-60))
-
-        let o = try await db.researchProjectOverview(id: p.id!)
-        XCTAssertEqual(o.highlightCount, 1, "笔记本与出处中的同一条摘录只计一次")
-        XCTAssertEqual(o.cardCount, 1)
-        XCTAssertEqual(o.pendingPlans.map(\.title), ["核引文", "改第二章"], "只列未完成、未取消的，按日期")
-        XCTAssertEqual(o.openQuestions.map(\.title), ["学与习之别？", "直接归入项目"], "归入项目或其专题的未解问题")
-        let exists = try await db.planLinkExists(link)
-        XCTAssertTrue(exists)
-        let choices = try await db.planLinkChoices(kind: .project, query: "论语")
-        XCTAssertEqual(choices.items.map(\.recordID), [p.id!])
-    }
 
     // MARK: 界面状态
 
-    func testStoreCreatesLinksAndSetsCurrentProject() throws {
-        try MainActor.assumeIsolated {
-            let db = try AppDatabase(DatabaseQueue())
-            let source = try db.save(Source(title: "中国近三百年学术史"))
-            _ = try db.save(Highlight(sourceId: source.id, text: "经世致用"))
-            let store = LibraryStore(db: db)
-            store.newResearchProject(linking: ResearchProjectPendingLink(kind: .source, recordId: source.id!))
-            XCTAssertNotNil(store.researchProjectEditor)
-            var draft = try XCTUnwrap(store.researchProjectEditor)
-            draft.title = "清代学术史讲稿"; draft.kind = .lecture
-            let first = try XCTUnwrap(store.saveResearchProject(draft))
-            XCTAssertEqual(store.selection, .project(first.id!), "新建后打开项目页")
-            XCTAssertEqual(store.currentProjectID, first.id, "没有当前项目时自动设为当前")
-            XCTAssertEqual(store.learningFocus?.label, "项目《清代学术史讲稿》")
-            XCTAssertEqual(store.researchProjects(containing: .source, recordId: source.id!).map(\.id), [first.id])
-            XCTAssertEqual(store.focusHighlightIDs.count, 1)
-
-            store.newResearchProject()
-            var second = try XCTUnwrap(store.researchProjectEditor)
-            second.title = "第二个项目"
-            let saved = try XCTUnwrap(store.saveResearchProject(second))
-            XCTAssertEqual(store.currentProjectID, first.id, "已有当前项目时不替换")
-            store.setCurrentProject(saved)
-            XCTAssertEqual(store.currentProjectID, saved.id)
-            XCTAssertTrue(store.focusHighlightIDs.isEmpty, "第二个项目还没有材料")
-
-            var renamed = saved; renamed.title = "改名后的项目"
-            store.saveResearchProject(renamed)
-            XCTAssertEqual(store.learningFocus?.title, "改名后的项目", "改名同步到当前项目")
-
-            store.deleteResearchProject(renamed)
-            XCTAssertEqual(store.selection, .projects)
-            XCTAssertNil(store.currentProjectID)
-            XCTAssertEqual(store.researchProjects.map(\.id), [first.id])
-        }
-    }
 }
 
 private func XCTAssertThrowsErrorAsync<T>(_ expression: @autoclosure () async throws -> T, file: StaticString = #filePath, line: UInt = #line) async {

@@ -947,29 +947,6 @@ final class V13NotebookTests: XCTestCase {
     XCTAssertEqual(store.notebookState.blocks.count, 4)
   }
 
-  func testWeeklyDigest() throws {
-    let db = try AppDatabase(DatabaseQueue())
-    let now = Date()
-    let (start, _) = WeeklyDigest.previousWeek(of: now)
-    let inWeek = start.addingTimeInterval(36 * 3600)
-    let h = try db.save(Highlight(text: "上週收藏的一條", createdAt: inWeek))
-    let old = try db.save(Highlight(text: "很久以前", createdAt: start.addingTimeInterval(-30 * 86400)))
-    try db.writer.write { d in
-      var e1 = ReviewEvent(kind: .favorite, highlightId: h.id, at: inWeek); try e1.insert(d)
-      var e2 = ReviewEvent(kind: .keep, highlightId: old.id, at: inWeek.addingTimeInterval(86400)); try e2.insert(d)
-      var e3 = ReviewEvent(kind: .card, cardId: 1, answer: 3, at: inWeek); try e3.insert(d)
-      var e4 = ReviewEvent(kind: .card, cardId: 2, answer: 1, at: inWeek); try e4.insert(d)
-      var e5 = ReviewEvent(kind: .keep, highlightId: old.id, at: start.addingTimeInterval(-3600)); try e5.insert(d)
-    }
-    let w = try db.weeklyDigest(now: now)
-    XCTAssertEqual(w.highlightsReviewed, 2)
-    XCTAssertEqual(w.cardsReviewed, 2)
-    XCTAssertEqual(w.cardsCorrect, 1)
-    XCTAssertEqual(w.activeDays, 2)
-    XCTAssertEqual(w.newHighlights, 1)
-    XCTAssertEqual(w.quoteID, h.id, "上周收藏的优先")
-    XCTAssertFalse(w.isEmpty)
-  }
 }
 
 final class V14NotebookTests: XCTestCase {
@@ -1381,68 +1358,6 @@ final class V20Tests: XCTestCase {
 }
 
 final class V21Tests: XCTestCase {
-  func testProgressAndEditions() throws {
-    try MainActor.assumeIsolated {
-      let db = try AppDatabase(DatabaseQueue())
-      let store = LibraryStore(db: db)
-      var yang = Source(title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980", place: "北京")
-      yang.classicTitle = "论语"
-      yang = try db.save(yang)
-      var cheng = Source(title: "论语集释", author: "程树德", publisher: "中华书局", year: "1990", place: "北京")
-      cheng.classicTitle = "《论语》"
-      cheng = try db.save(cheng)
-      let other = try db.save(Source(title: "孟子译注", author: "杨伯峻"))
-      var a = Highlight(sourceId: yang.id, text: "学而时习之", location: "学而第一 · 第1页")
-      a.surfacedCount = 1
-      a = try db.save(a)
-      let b = try db.save(Highlight(sourceId: yang.id, text: "巧言令色", location: "学而第一 · 第3页"))
-      _ = try db.save(Highlight(sourceId: yang.id, text: "为政以德", location: "为政第二 · 第11页"))
-      store.reload()
-
-      // 篇目进度
-      _ = try db.makeCards(fromHighlights: [b.id!], deck: "x")
-      let p = try db.chapterProgress(yang.id!)
-      XCTAssertEqual(p.map(\.name), ["学而", "为政"])
-      XCTAssertEqual(p[0].reviewed, 1); XCTAssertEqual(p[0].withCards, 1); XCTAssertEqual(p[0].total, 2)
-
-      // 版本：同一古籍（书名号不影响）
-      XCTAssertEqual(store.editions(for: yang.id).map(\.id), [cheng.id])
-      XCTAssertEqual(store.editions(for: other.id).count, 0)
-      // 编辑器保存版本页码（非同一古籍的版本不存）
-      store.edit(a)
-      store.editorDraft?.editionPages = [cheng.id!: "5", other.id!: "9"]
-      XCTAssertTrue(store.save(draft: store.editorDraft!))
-      XCTAssertEqual(try db.editionPages(a.id!), [cheng.id!: "5"])
-      store.edit(a)
-      XCTAssertEqual(store.editorDraft?.editionPages, [cheng.id!: "5"])
-      store.editorDraft = nil
-
-      // 笔记本：改用《论语集释》出注
-      let nid = try XCTUnwrap(store.createNotebook(title: "学而", with: [a.id!, b.id!]))
-      store.reload()
-      store.loadNotebook(nid)
-      XCTAssertEqual(store.notebookClassics().first?.title, "论语")
-      XCTAssertEqual(store.notebookClassics().first?.editions.count, 2)
-      XCTAssertTrue(store.notebookCitation(for: a).hasPrefix("《论语·学而》，杨伯峻"))
-      store.setNotebookEdition("论语", cheng.id)
-      XCTAssertEqual(NotebookEditionChoice.load(nid)["论语"], cheng.id)
-      XCTAssertEqual(store.notebookCitation(for: a), "《论语·学而》，程树德：《论语集释》，北京：中华书局，1990年，第5页。")
-      XCTAssertTrue(store.notebookCitation(for: b).contains("杨伯峻"), "没有该版页码的仍按原出处")
-      XCTAssertTrue(store.notebookBibliography().joined().contains("论语集释"))
-      // 核对：b 缺该版页码，可在清单里补
-      var req = try XCTUnwrap(store.notebookCitationCheck())
-      XCTAssertEqual(req.issues.map(\.kind), [.editionPage])
-      XCTAssertEqual(req.issues.first?.highlightId, b.id)
-      req.pageDrafts[b.id!] = "12"
-      store.citationCheck = req
-      store.applyCitationPages()
-      XCTAssertNil(store.citationCheck)
-      XCTAssertEqual(try db.editionPages(b.id!)[cheng.id!], "第12页")
-      XCTAssertTrue(store.notebookCitation(for: b).contains("程树德"))
-      XCTAssertEqual(try db.highlights(ids: [b.id!]).first?.location, "学而第一 · 第3页", "原位置不变")
-      UserDefaults.standard.removeObject(forKey: NotebookEditionChoice.key(nid))
-    }
-  }
 }
 
 final class V22CountTests: XCTestCase {
@@ -1486,47 +1401,6 @@ final class V22CountTests: XCTestCase {
 }
 
 final class V22StoreTests: XCTestCase {
-  func testEditionImportAndOverview() throws {
-    try MainActor.assumeIsolated {
-      let db = try AppDatabase(DatabaseQueue())
-      let store = LibraryStore(db: db)
-      var yang = Source(title: "论语译注", author: "杨伯峻", publisher: "中华书局", year: "1980")
-      yang.classicTitle = "论语"
-      yang = try db.save(yang)
-      var cheng = Source(title: "论语集释", author: "程树德", publisher: "中华书局", year: "1990")
-      cheng.classicTitle = "论语"
-      cheng = try db.save(cheng)
-      let a = try db.save(Highlight(sourceId: yang.id, text: "a", location: "学而第一 · 第1页"))
-      let b = try db.save(Highlight(sourceId: yang.id, text: "b", location: "学而第一 · 第3页"))
-      let c = try db.save(Highlight(sourceId: yang.id, text: "c", location: "为政第二 · 第11页"))
-      store.reload()
-      try db.setEditionPages(b.id!, [cheng.id!: "旧"])
-      store.openEditionImport(yang.id!)
-      let d = try XCTUnwrap(store.editionImport)
-      XCTAssertEqual(d.editionId, cheng.id)
-      d.cells = EditionPageImport.cells(fromText: "篇名\t杨\t集释\n学而\t1\t3\n学而\t3\t12\n")
-      let p = store.editionImportPreview(d)
-      XCTAssertEqual(p.matches.count, 2); XCTAssertEqual(p.unmatched, [c.id!])
-      store.commitEditionImport()
-      XCTAssertNil(store.editionImport)
-      XCTAssertEqual(try db.editionPages(a.id!)[cheng.id!], "3")
-      XCTAssertEqual(try db.editionPages(b.id!)[cheng.id!], "旧", "默认不覆盖")
-      XCTAssertTrue(store.infoMessage?.contains("1 条原来就有") ?? false, store.infoMessage ?? "")
-      store.openEditionImport(yang.id!)
-      store.editionImport!.cells = EditionPageImport.cells(fromText: "3,12")
-      store.editionImport!.overwrite = true
-      store.commitEditionImport()
-      XCTAssertEqual(try db.editionPages(b.id!)[cheng.id!], "12")
-
-      // 统计页概览
-      store.logReview(.keep, highlightId: c.id)
-      let o = store.classicOverview()
-      XCTAssertEqual(o.count, 1)
-      XCTAssertEqual(o.first?.source.id, yang.id)
-      XCTAssertEqual(o.first?.recent, ["为政"])
-      XCTAssertEqual(o.first?.chapters.map(\.name), ["学而", "为政"])
-    }
-  }
 }
 
 final class V23Tests: XCTestCase {

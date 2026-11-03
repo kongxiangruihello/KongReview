@@ -502,10 +502,4 @@ extension AppDatabase {
         }
     }
 
-    /// 本期重温过的札记（条，去重；学习小结表 1）
-    func notesRevisited(start: Date, end: Date) async throws -> Int {
-        try await writer.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT recordId) FROM revisit_log WHERE kind = 'note' AND at >= ? AND at < ?", arguments: [start, end]) ?? 0
-        }
-    }
 }

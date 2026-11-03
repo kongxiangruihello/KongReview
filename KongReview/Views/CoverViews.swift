@@ -44,15 +44,4 @@ final class CoverCache {
         return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85])
     }
 
-    /// 按 ISBN 从 Open Library 取封面（https://openlibrary.org/dev/docs/api/covers）；没有时返回 nil
-    nonisolated static func fetchOpenLibrary(isbn raw: String) async -> Data? {
-        let isbn = raw.uppercased().filter { $0.isNumber || $0 == "X" }
-        guard isbn.count == 10 || isbn.count == 13,
-              let url = URL(string: "https://covers.openlibrary.org/b/isbn/\(isbn)-L.jpg?default=false") else { return nil }
-        var req = URLRequest(url: url, timeoutInterval: 20)
-        req.setValue("KongReview (macOS)", forHTTPHeaderField: "User-Agent")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              let http = resp as? HTTPURLResponse, http.statusCode == 200, data.count > 1000 else { return nil }
-        return normalized(data)
-    }
 }

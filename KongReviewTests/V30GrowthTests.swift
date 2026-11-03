@@ -27,36 +27,6 @@ final class V30GrowthTests: XCTestCase {
         let w=GrowthPeriod.day.window(containing:day,now:day.addingTimeInterval(86400),calendar:c)
         XCTAssertEqual(w.fullEnd.timeIntervalSince(w.start),23*3600)
     }
-    func testSummaryAndAllDrilldownsAgreeIncludingDeletedHistory() async throws {
-        let db=try AppDatabase(DatabaseQueue()), start=date(2026,10,1), end=date(2026,11,1)
-        let h=try db.save(Highlight(text:"摘录",createdAt:start))
-        let card=try db.save(Card(front:"卡片",createdAt:start))
-        for answer in [1,1,1,3] { db.log(.init(kind:.card,cardId:card.id,answer:answer,at:start)) }
-        db.log(.init(kind:.keep,highlightId:h.id,at:start)); db.log(.init(kind:.favorite,highlightId:h.id,at:start))
-        db.log(.init(kind:.note,highlightId:h.id,at:start.addingTimeInterval(86400)))
-        db.log(.init(kind:.card,cardId:nil,answer:1,at:start.addingTimeInterval(2*86400)))
-        db.log(.init(kind:.card,cardId:card.id,answer:1,at:end))
-        let summary=try await db.growthSummary(start:start,end:end)
-        XCTAssertEqual(summary[.highlights],1); XCTAssertEqual(summary[.cards],1); XCTAssertEqual(summary[.ratings],4)
-        XCTAssertEqual(summary[.difficult],1); XCTAssertEqual(summary[.days],1)
-        for metric in GrowthMetric.allCases {
-            let page=try await db.growthDetails(metric:metric,start:start,end:end,offset:0)
-            XCTAssertEqual(page.total,summary[metric],"\(metric)")
-        }
-        try db.deleteCards([card.id!])
-        let after=try await db.growthDetails(metric:.cards,start:start,end:end,offset:0)
-        XCTAssertEqual(after.total,1); XCTAssertNil(after.rows.first?.target)
-    }
-    func testGrowthRatingsPagination() async throws {
-        let db=try AppDatabase(DatabaseQueue()), start=date(2026,10,1), end=date(2026,11,1)
-        let card=try db.save(Card(front:"问答"))
-        for i in 0..<105 { db.log(.init(kind:.card,cardId:card.id,answer:3,at:start.addingTimeInterval(Double(i)))) }
-        let first=try await db.growthDetails(metric:.ratings,start:start,end:end,offset:0)
-        let second=try await db.growthDetails(metric:.ratings,start:start,end:end,offset:50)
-        let last=try await db.growthDetails(metric:.ratings,start:start,end:end,offset:100)
-        XCTAssertEqual(first.total,105); XCTAssertEqual(first.rows.count,50); XCTAssertEqual(last.rows.count,5)
-        XCTAssertTrue(Set(first.rows.map(\.id)).isDisjoint(with:second.rows.map(\.id)))
-    }
     func testReflectionPersistsAcrossDatabaseReopenAndPeriodsRemainIndependent() throws {
         let directory=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)

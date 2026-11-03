@@ -656,15 +656,6 @@ enum NotebookExport {
         }
     }
 
-    /// 1.4：演示稿
-    static func exportPptx(store: LibraryStore) {
-        store.flushNotebookSaves()
-        let t = title(store)
-        guard let url = savePanel(t + ".pptx", type: UTType(filenameExtension: "pptx") ?? .data) else { return }
-        let files = NotebookPptx.files(title: t, pieces: store.notebookPieces(), options: options(store))
-        writePackage(files, to: url, store: store, what: "演示稿")
-    }
-
     /// 把各部件写进临时文件夹，用系统自带的 zip 打包成 .docx / .pptx
     static func writePackage(_ files: [String: String], to url: URL, store: LibraryStore, what: String) {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("kr-ooxml-\(UUID().uuidString)")
