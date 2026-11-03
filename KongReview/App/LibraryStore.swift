@@ -574,11 +574,6 @@ final class LibraryStore {
         if let id = article.id { try? db.markArticleOpened(id: id) }
     }
 
-    func closeArticle() {
-        openArticle = nil
-        revisionBump()
-    }
-
     /// 在阅读器里划线：存为该文章出处下的一条摘录
     func addHighlight(from article: Article, text raw: String) {
         let text = ArticleText.cleanSelection(raw)
@@ -929,13 +924,6 @@ final class LibraryStore {
         }
     }
 
-    func saveCard(_ card: Card) {
-        guard !fullBackupBusy else { return }
-        do {
-            perform { _ = try db.saveInputCards([card]) }
-        } catch { report(error) }
-    }
-
     func editCard(_ card: Card) {
         guard !fullBackupBusy else { return }
         bulkOriginalEditing.clear()
@@ -1284,12 +1272,6 @@ final class LibraryStore {
         if case .saved(let cur) = selection, cur == id { selection = .all }
     }
 
-    func renameSavedSearch(_ id: String, to name: String) {
-        guard let i = savedSearches.firstIndex(where: { $0.id == id }), !name.isEmpty else { return }
-        savedSearches[i].name = name
-        SavedSearch.save(savedSearches)
-    }
-
     private var obsidianTask: Task<Void, Never>?
 
     /// 数据变化后 3 秒同步一次 Obsidian（连续修改只同步最后一次）
@@ -1305,24 +1287,6 @@ final class LibraryStore {
             await Task.detached(priority: .utility) {
                 _ = try? ObsidianSync.run(db: db, to: folder, style: style)
             }.value
-        }
-    }
-
-    /// 立即同步（设置里的按钮）
-    func syncObsidianNow() {
-        guard let folder = ObsidianSync.folder else { return }
-        let db = self.db
-        let style = CitationSettings.style
-        maintenanceProgress = "正在同步到 Obsidian…"
-        Task.detached(priority: .userInitiated) {
-            let result = Result { try ObsidianSync.run(db: db, to: folder, style: style) }
-            await MainActor.run {
-                self.maintenanceProgress = nil
-                switch result {
-                case .success(let r): self.infoMessage = "已同步到 \(folder.lastPathComponent)：写入 \(r.written) 个文件，\(r.unchanged) 个没有变化。"
-                case .failure(let e): self.report(e)
-                }
-            }
         }
     }
 
@@ -1608,13 +1572,6 @@ final class LibraryStore {
         finishHighlightEditorDraft(id: draft.id)
         editorDraft = nil
         offerCardSync(for: draft.highlight.id)
-    }
-
-    /// 1.2：回顾卡片上就地编辑后保存（与编辑面板一样，摘录已做成记忆卡时按设置同步或询问）
-    func saveEdited(_ highlight: Highlight) {
-        guard !fullBackupBusy else { return }
-        save(highlight)
-        offerCardSync(for: highlight.id)
     }
 
     /// 改的是已做成记忆卡的摘录：按设置同步，或询问

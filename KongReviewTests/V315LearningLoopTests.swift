@@ -70,31 +70,6 @@ final class V315LearningLoopTests: XCTestCase {
 
     // MARK: 按语与质量
 
-    func testNotesAreAGrowthMetricAndEditorSavesLogThem() async throws {
-        let db = try AppDatabase(DatabaseQueue())
-        let h = try db.save(Highlight(text: "君子不器", createdAt: day(-1)))
-        db.log(ReviewEvent(kind: .keep, highlightId: h.id, at: day(0)))
-        db.log(ReviewEvent(kind: .note, highlightId: h.id, at: day(0)))
-        let start = day(-2), end = day(1)
-        let summary = try await db.growthSummary(start: start, end: end)
-        XCTAssertEqual(summary[.notes], 1)
-        XCTAssertEqual(summary[.highlights], 1, "写按语不重复计入回顾")
-        let details = try await db.growthDetails(metric: .notes, start: start, end: end, offset: 0)
-        XCTAssertEqual(details.total, 1)
-        let groups = try await db.growthBreakdown(metric: .notes, grouping: .source, start: start, end: end)
-        XCTAssertEqual(groups.items.map(\.count), [1])
-
-        try await MainActor.run {
-            let store = LibraryStore(db: db)
-            var draft = HighlightDraft(highlight: h)
-            draft.highlight.note = "器者，各适其用而不能相通。"
-            XCTAssertTrue(store.save(draft: draft))
-            draft.highlight = try XCTUnwrap(try db.highlights(ids: [h.id!]).first)
-            XCTAssertTrue(store.save(draft: draft), "按语未改动时不再记录")
-        }
-        let notes = try await db.writer.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM review_event WHERE kind = 'note'") }
-        XCTAssertEqual(notes, 2)
-    }
 
     func testQualityMetrics() async throws {
         let db = try AppDatabase(DatabaseQueue())
@@ -123,40 +98,9 @@ final class V315LearningLoopTests: XCTestCase {
         XCTAssertEqual(q.cardingRate, 0.5)
     }
 
-    func testFocusProgress() async throws {
-        let db = try AppDatabase(DatabaseQueue())
-        let source = try db.save(Source(title: "国史大纲"))
-        let a = try db.save(Highlight(sourceId: source.id, text: "温情与敬意", createdAt: day(0)))
-        _ = try db.save(Highlight(sourceId: source.id, text: "未回顾", createdAt: day(-5)))
-        let card = try db.save(Card(front: "卡", highlightId: a.id))
-        _ = try db.answer(card, .good, now: day(0))
-        db.log(ReviewEvent(kind: .keep, highlightId: a.id, at: day(0)))
-        db.log(ReviewEvent(kind: .note, highlightId: a.id, at: day(0)))
-        let p = try await db.focusProgress(LearningFocus(kind: .source, id: source.id!, title: "国史大纲"), start: day(-1), end: day(1))
-        XCTAssertEqual(p, FocusProgress(totalHighlights: 2, reviewedHighlights: 1, newHighlights: 1, notes: 1, totalCards: 1, studiedCards: 1))
-    }
 
     // MARK: 札记
 
-    func testNotebookEntriesAndMarkdown() throws {
-        let db = try AppDatabase(DatabaseQueue())
-        let source = try db.save(Source(title: "论语译注", author: "杨伯峻"))
-        let a = try db.save(Highlight(sourceId: source.id, text: "学而时习之", note: "习，温习也。", location: "第1页"))
-        let b = try db.save(Highlight(text: "未归类收藏"))
-        let c = try db.save(Highlight(sourceId: source.id, text: "只是看过"))
-        db.log(ReviewEvent(kind: .note, highlightId: a.id, at: day(0)))
-        db.log(ReviewEvent(kind: .favorite, highlightId: b.id, at: day(0)))
-        db.log(ReviewEvent(kind: .keep, highlightId: c.id, at: day(0)))
-        db.log(ReviewEvent(kind: .favorite, highlightId: a.id, at: day(-20)))
-        let entries = try db.notebookEntries(start: day(-1), end: day(1))
-        XCTAssertEqual(entries.map(\.highlight.id), [a.id, b.id], "出处在前，未归类在后；只看过的不收")
-        XCTAssertEqual(entries.first?.favorited, false, "本期以外的收藏不计")
-        let md = LearningMaterialExport.notebookMarkdown(entries: entries, window: GrowthPeriod.week.window(containing: now, now: now))
-        XCTAssertTrue(md.contains("## 《论语译注》　杨伯峻"))
-        XCTAssertTrue(md.contains("1. 学而时习之（第1页）〔按语〕"))
-        XCTAssertTrue(md.contains("> 按：习，温习也。"))
-        XCTAssertTrue(md.contains("## 未归类"))
-    }
 
     // MARK: 学习会话
 

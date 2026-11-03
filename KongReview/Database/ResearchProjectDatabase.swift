@@ -80,12 +80,6 @@ struct ResearchProject: Codable, Identifiable, Hashable, Sendable, FetchableReco
 
     var isArchived: Bool { archivedAt != nil }
 
-    /// 截止前剩余天数（按自然日；已过期为负数）
-    func daysLeft(now: Date = Date(), calendar: Calendar = .current) -> Int? {
-        guard let dueDate else { return nil }
-        let a = calendar.startOfDay(for: now), b = calendar.startOfDay(for: dueDate)
-        return calendar.dateComponents([.day], from: a, to: b).day
-    }
 }
 
 /// 项目与专题笔记本、出处的关联
@@ -109,28 +103,6 @@ struct ResearchProjectLink: Codable, Hashable, Sendable, Identifiable {
     /// 笔记本：摘录块数；出处：摘录条数
     var highlightCount = 0
     var id: String { "\(kind.rawValue).\(recordId)" }
-}
-
-/// 阶段变化记录
-struct ResearchProjectStageEvent: Codable, Hashable, Sendable, Identifiable {
-    var id: Int64
-    var stage: ResearchProject.Stage
-    var at: Date
-    var note: String
-}
-
-/// 项目页一次读取的全部内容
-struct ResearchProjectOverview: Sendable {
-    var project: ResearchProject
-    var links: [ResearchProjectLink] = []
-    /// 关联材料中的摘录（去重）与由这些摘录做成的卡片
-    var highlightCount = 0
-    var cardCount = 0
-    /// 下一步：关联到本项目、尚未完成也未取消的学习计划（按日期）
-    var pendingPlans: [LearningPlan] = []
-    /// 4.1.1：归入本项目、或归入其专题的未解决问题（「常念」在前，再按最近修改）
-    var openQuestions: [QuestionRef] = []
-    var stages: [ResearchProjectStageEvent] = []
 }
 
 enum ResearchProjectError: LocalizedError {
@@ -298,42 +270,6 @@ extension AppDatabase {
             JOIN highlight h ON h.id = x.highlightId AND h.deletedAt IS NULL
             WHERE l.projectId = ?
             """, arguments: [projectId, projectId, projectId]))
-    }
-
-    func researchProjectOverview(id: Int64) async throws -> ResearchProjectOverview {
-        try await writer.read { db in
-            guard let project = try ResearchProject.fetchOne(db, key: id) else { throw ResearchProjectError.missing }
-            var o = ResearchProjectOverview(project: project)
-            o.links = try Self.researchProjectLinks(db, projectId: id)
-            let ids = try Self.researchProjectHighlightIDs(db, projectId: id)
-            o.highlightCount = ids.count
-            if !ids.isEmpty {
-                o.cardCount = try Row.fetchAll(db, sql: "SELECT highlightId FROM card WHERE deletedAt IS NULL AND highlightId IS NOT NULL")
-                    .filter { ids.contains($0["highlightId"]) }.count
-            }
-            let planRows = try Data.fetchAll(db, sql: """
-                SELECT payload FROM app_progress WHERE key LIKE 'learning-plan.%'
-                  AND json_extract(CAST(payload AS TEXT),'$.link.kind') = ?
-                  AND json_extract(CAST(payload AS TEXT),'$.link.recordID') = ?
-                  AND json_extract(CAST(payload AS TEXT),'$.completedAt') IS NULL
-                  AND json_extract(CAST(payload AS TEXT),'$.cancelledAt') IS NULL
-                ORDER BY json_extract(CAST(payload AS TEXT),'$.dueDate'), key LIMIT 50
-                """, arguments: [LearningPlanLinkKind.project.rawValue, id])
-            o.pendingPlans = planRows.compactMap { try? JSONDecoder().decode(LearningPlan.self, from: $0) }
-            o.openQuestions = try Self.openQuestions(db, projectId: id)
-            o.stages = try Row.fetchAll(db, sql: "SELECT id, stage, at, note FROM research_project_stage WHERE projectId = ? ORDER BY at DESC, id DESC", arguments: [id])
-                .compactMap { r in ResearchProject.Stage(rawValue: r["stage"]).map { ResearchProjectStageEvent(id: r["id"], stage: $0, at: r["at"], note: r["note"]) } }
-            return o
-        }
-    }
-
-    /// 一段时间内的阶段变化（学习小结表 4）
-    func researchProjectStages(projectId: Int64, start: Date, end: Date) async throws -> [ResearchProjectStageEvent] {
-        try await writer.read { db in
-            try Row.fetchAll(db, sql: "SELECT id, stage, at, note FROM research_project_stage WHERE projectId = ? AND at >= ? AND at < ? ORDER BY at, id",
-                             arguments: [projectId, start, end])
-                .compactMap { r in ResearchProject.Stage(rawValue: r["stage"]).map { ResearchProjectStageEvent(id: r["id"], stage: $0, at: r["at"], note: r["note"]) } }
-        }
     }
 
     // MARK: 写入

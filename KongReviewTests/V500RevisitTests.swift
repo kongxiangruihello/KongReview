@@ -150,20 +150,6 @@ final class V500RevisitTests: XCTestCase {
         XCTAssertEqual(try db.ideaNoteVersion(noteId: n.id!, at: d(6))?.title, "三稿", "之后没改过就是现在的样子")
     }
 
-    func testNotesRevisitedAndTodayWorkMinutes() async throws {
-        let db = try AppDatabase(DatabaseQueue())
-        let a = try db.createIdeaNote(title: "甲", now: d(-20))
-        let b = try db.createIdeaNote(title: "乙", now: d(-20))
-        try db.recordNoteRevisit(noteId: a.id!, outcome: .later, now: t0)
-        try db.recordNoteRevisit(noteId: a.id!, outcome: .agree, now: d(7))
-        try db.recordNoteRevisit(noteId: b.id!, outcome: .agree, now: d(7))
-        let count = try await db.notesRevisited(start: d(-1), end: d(10))
-        XCTAssertEqual(count, 2, "同一条只计一次")
-        let none = try await db.notesRevisited(start: d(-10), end: d(-1))
-        XCTAssertEqual(none, 0)
-        XCTAssertEqual(LibraryStore.todayWorkMinutes(reviewPending: 0, cards: .init(), revisit: 3), 3)
-        XCTAssertEqual(LibraryStore.todayWorkMinutes(reviewPending: 2, cards: .init()), 1)
-    }
 
     func testStoreTodayWorkReachesRevisitAndFreshHighlights() throws {
         try MainActor.assumeIsolated {
@@ -193,5 +179,10 @@ final class V500RevisitTests: XCTestCase {
             XCTAssertTrue(store.revisitNewHighlights(text: "士志于道", since: note.createdAt, excluding: [fresh.id!]).isEmpty, "已引用的不列")
             _ = older
         }
+    }
+
+    func testTodayWorkMinutes() {
+        XCTAssertEqual(LibraryStore.todayWorkMinutes(reviewPending: 0, cards: .init(), revisit: 3), 3)
+        XCTAssertEqual(LibraryStore.todayWorkMinutes(reviewPending: 2, cards: .init()), 1)
     }
 }

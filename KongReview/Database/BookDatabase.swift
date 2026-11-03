@@ -163,13 +163,4 @@ extension AppDatabase {
         }
     }
 
-    /// 某时以来在每日回顾里看过的摘录
-    func reviewedHighlightIds(since: Date) throws -> Set<Int64> {
-        try writer.read { db in
-            Set(try Int64.fetchAll(db, sql: """
-                SELECT DISTINCT highlightId FROM review_event
-                WHERE highlightId IS NOT NULL AND kind NOT IN ('card', 'note') AND at >= ?
-                """, arguments: [since]))
-        }
-    }
 }

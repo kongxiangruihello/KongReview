@@ -161,6 +161,38 @@ struct DeckHomeView: View {
         return decks.filter { $0.counts.total > 0 }.max { $0.counts.total < $1.counts.total }
     }
 
+    @ViewBuilder
+    private func heroPrimaryButtons(remaining: Int) -> some View {
+        if remaining == 0 && store.revisitCounts.left > 0 {
+            // 6.0.3：记忆卡学完，回到今日试卷接着答
+            PillButton(icon: "list.clipboard", title: "回到今日试卷", style: .primary) {
+                store.openExam()
+            }
+            .fixedSize()
+        }
+        if let d = suggestedDeck {
+            PillButton(icon: "play.fill", title: "开始复习：\(DeckOverview.split(d.name).leaf)", style: .primary) {
+                store.startStudy(deck: d.name)
+            }
+            .fixedSize()
+            .help("学习牌组“\(d.name)”")
+        }
+    }
+
+    @ViewBuilder
+    private var heroSecondaryButtons: some View {
+        if decks.filter({ $0.counts.total > 0 }).count > 1 {
+            PillButton(icon: "square.stack.3d.up", title: "学习全部牌组") { store.startStudyAllDecks() }
+                .fixedSize()
+                .help("各牌组混在一起学：学习中、到期复习优先，再按创建先后出新卡；各牌组上限与全库合计照常生效")
+        }
+        PillButton(icon: "slider.horizontal.3", title: "每日学习量") { store.openDailyLimits() }
+            .fixedSize()
+            .help("设置牌组默认值、全库合计和各牌组的每日上限")
+        PillButton(icon: "plus", title: "新建卡片") { store.newCard(deck: store.study.lastDeck) }
+            .fixedSize()
+    }
+
     private var hero: some View {
         let t = totals
         let remaining = t.due.total
@@ -203,26 +235,13 @@ struct DeckHomeView: View {
                             .padding(.top, 10)
                     }
                 }
-                HStack(spacing: 10) {
-                    if remaining == 0 && store.revisitCounts.left > 0 {
-                        // 6.0.3：记忆卡学完，回到今日试卷接着答
-                        PillButton(icon: "list.clipboard", title: "回到今日试卷", style: .primary) {
-                            store.openExam()
-                        }
+                // 6.1.0：按钮一律不截字；窄时“学习全部牌组 / 每日学习量 / 新建卡片”另起一行
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { heroPrimaryButtons(remaining: remaining); heroSecondaryButtons }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) { heroPrimaryButtons(remaining: remaining) }
+                        HStack(spacing: 10) { heroSecondaryButtons }
                     }
-                    if let d = suggestedDeck {
-                        PillButton(icon: "play.fill", title: "开始复习：\(DeckOverview.split(d.name).leaf)", style: .primary) {
-                            store.startStudy(deck: d.name)
-                        }
-                        .help("学习牌组“\(d.name)”")
-                    }
-                    if decks.filter({ $0.counts.total > 0 }).count > 1 {
-                        PillButton(icon: "square.stack.3d.up", title: "学习全部牌组") { store.startStudyAllDecks() }
-                            .help("各牌组混在一起学：学习中、到期复习优先，再按创建先后出新卡；各牌组上限与全库合计照常生效")
-                    }
-                    PillButton(icon: "slider.horizontal.3", title: "每日学习量") { store.openDailyLimits() }
-                        .help("设置牌组默认值、全库合计和各牌组的每日上限")
-                    PillButton(icon: "plus", title: "新建卡片") { store.newCard(deck: store.study.lastDeck) }
                 }
                 .padding(.top, 20)
                 Text("学而时习之，不亦说乎？——《论语·学而》")

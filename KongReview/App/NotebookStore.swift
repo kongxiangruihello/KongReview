@@ -408,20 +408,4 @@ extension LibraryStore {
         UserDefaults.standard.object(forKey: Self.digestEnabledKey) as? Bool ?? true
     }
 
-    /// 上周小结（本周还没点“知道了”时；上周没有任何回顾、录入时为 nil）
-    func currentWeeklyDigest(now: Date = Date()) -> WeeklyDigest? {
-        guard weeklyDigestEnabled else { return nil }
-        let key = WeeklyDigest.dayKey(WeeklyDigest.previousWeek(of: now).start)
-        guard UserDefaults.standard.string(forKey: Self.digestDismissedKey) != key else { return nil }
-        if weeklyDigestCache?.key != key {
-            weeklyDigestCache = try? db.weeklyDigest(now: now)
-        }
-        guard let d = weeklyDigestCache, !d.isEmpty else { return nil }
-        return d
-    }
-
-    func dismissWeeklyDigest() {
-        if let d = weeklyDigestCache { UserDefaults.standard.set(d.key, forKey: Self.digestDismissedKey) }
-        revisionBump()
-    }
 }

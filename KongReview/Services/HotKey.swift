@@ -73,10 +73,6 @@ final class HotKeyCenter {
         lastRegistrationFailed = !register(preset, id: 1)
     }
 
-    func applyLookup(_ preset: HotKeyPreset) {
-        lookupRegistrationFailed = !register(preset, id: 2)
-    }
-
     func unregister() {
         for (_, r) in refs { UnregisterEventHotKey(r) }
         refs.removeAll()

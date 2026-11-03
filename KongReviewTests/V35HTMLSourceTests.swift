@@ -85,13 +85,4 @@ final class V35HTMLSourceTests: XCTestCase {
         query.text = "uniqueattribute"
         XCTAssertTrue(try db.highlights(query).isEmpty)
     }
-    func testHTMLPlanSplittingAndStoredSourceRoundTrip() throws {
-        XCTAssertEqual(LearningPlanDraft.lines("<p>第一项</p><p><strong>第二项</strong></p>"),["第一项","第二项"])
-        let db = try AppDatabase(DatabaseQueue())
-        let html = "<p data-note=\"保留\">整理<strong>史料</strong></p>"
-        let plan = LearningPlan(title:html)
-        try db.commitPlanDraft(.init(plan:plan))
-        XCTAssertEqual(try db.progressValue(LearningPlan.self,key:plan.key)?.title,html)
-        XCTAssertThrowsError(try db.commitPlanDraft(.init(plan:.init(title:"<p><br></p>"))))
-    }
 }

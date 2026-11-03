@@ -154,8 +154,6 @@ final class V605GradebookTests: XCTestCase {
             XCTAssertEqual(store.reflectionPeriod, .month)
             store.openGradebook(period: .day)
             XCTAssertEqual(store.reflectionPeriod, .month, "没有日报")
-            store.openReflection(period: .week)
-            XCTAssertEqual(store.selection, .gradebook, "复盘并入成绩册")
             store.openWeakItem(WeakItem(kind: .note, recordId: note.id!, title: note.title, detail: "札记",
                                         misses: 2, attempts: 2, lastAt: Date(), lastMissed: true))
             XCTAssertEqual(store.selection, .ideaNote(note.id!))

@@ -306,10 +306,4 @@ extension AppDatabase {
         }
     }
 
-    /// 本期新写的札记（学习小结）
-    func ideaNotesCreated(start: Date, end: Date) async throws -> Int {
-        try await writer.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM idea_note WHERE deletedAt IS NULL AND createdAt >= ? AND createdAt < ?", arguments: [start, end]) ?? 0
-        }
-    }
 }

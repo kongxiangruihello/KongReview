@@ -300,21 +300,6 @@ extension AppDatabase {
         return x ^ (x >> 31)
     }
 
-    /// 本周自测的结果（按题）
-    func selfTestResults(week: GrowthWindow) throws -> [SelfTestItem: SelfTestResult] {
-        try writer.read { db in
-            var out: [SelfTestItem: SelfTestResult] = [:]
-            for row in try Row.fetchAll(db, sql: "SELECT kind, recordId, result FROM self_test_log WHERE setKey = ? ORDER BY at", arguments: [SelfTestSet.key(week)]) {
-                let kind: String = row["kind"]
-                let recordId: Int64 = row["recordId"]
-                guard let r = SelfTestResult(rawValue: row["result"]) else { continue }
-                // 自测记录按记录种类（摘录、札记）存；回到题目时按本周题单匹配
-                for k in SelfTestKind.allCases where k.recordKind == kind { out[SelfTestItem(kind: k, recordId: recordId)] = r }
-            }
-            return out
-        }
-    }
-
     /// 记一道题的自评；上一次是“忘了”、这次“记得”时记一件小胜
     func recordSelfTest(_ item: SelfTestItem, result: SelfTestResult, week: GrowthWindow, now: Date = Date()) throws {
         try writer.write { db in
@@ -431,28 +416,4 @@ extension AppDatabase {
 
     // MARK: 年度：这一年的学问
 
-    func yearMarkdown(_ window: GrowthWindow) async throws -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "M月d日"
-        let year = Calendar.current.component(.year, from: window.start)
-        var lines = ["# \(year) 年的学问", ""]
-        lines += ["## 数字", ""]
-        for r in try await reflectionNumbers(window) { lines.append("- \(r.title)：\(r.now)（上年 \(r.before)）") }
-        let events = try progressEvents(start: window.start, end: window.end, limit: 1_000).reversed()
-        lines += ["", "## 进展（\(events.count)）", ""]
-        lines += events.map { "- \(f.string(from: $0.at))　\($0.text)" }
-        let books = try finishedBooks(start: window.start, end: window.end)
-        lines += ["", "## 读完的书（\(books.count)）", ""]
-        lines += books.map { "- 《\($0.title)》" + ($0.author.isEmpty ? "" : "　\($0.author)") + ($0.oneLine.isEmpty ? "" : "：\($0.oneLine)") }
-        let changes = try viewChanges(start: window.start, end: window.end)
-        lines += ["", "## 观点的变化（\(changes.count)）", ""]
-        for c in changes {
-            lines.append("### \(c.nowTitle)")
-            if c.beforeTitle != c.nowTitle { lines.append("年初题目：\(c.beforeTitle)") }
-            lines += ["", "年初：" + Markdown.plainText(fromHTML: WikiLinks.plain(c.beforeBody)).trimmingCharacters(in: .whitespacesAndNewlines),
-                      "", "现在：" + Markdown.plainText(fromHTML: WikiLinks.plain(c.nowBody)).trimmingCharacters(in: .whitespacesAndNewlines), ""]
-        }
-        let questions = try questionsYearMarkdown(window).split(separator: "\n", omittingEmptySubsequences: false).dropFirst(3)
-        lines += ["", "## 问题"] + questions.map { $0.hasPrefix("## ") ? "#" + $0 : String($0) }
-        return lines.joined(separator: "\n") + "\n"
-    }
 }

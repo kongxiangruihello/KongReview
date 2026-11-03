@@ -20,40 +20,6 @@ enum ExportService {
         }
     }
 
-    /// 选择 Readwise 导出的 CSV，解析后交给预览面板确认
-    static func importReadwiseCSV(store: LibraryStore) {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.commaSeparatedText, .plainText]
-        panel.allowsMultipleSelection = false
-        panel.prompt = "导入"
-        panel.message = "选择从 readwise.io/export 下载的 CSV 文件"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        store.importProgress = "正在读取 \(url.lastPathComponent)…"
-        Task.detached(priority: .userInitiated) {
-            let outcome: Swift.Result<ReadwiseCSVImporter.Result, Error>
-            do {
-                let data = try Data(contentsOf: url)
-                guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) else {
-                    throw ImportFileError("无法读取文件编码（应为 UTF-8）。")
-                }
-                let result = try ReadwiseCSVImporter.parse(text)
-                guard result.highlightCount > 0 else { throw ImportFileError("文件里没有可导入的摘录。") }
-                outcome = .success(result)
-            } catch {
-                outcome = .failure(error)
-            }
-            await MainActor.run {
-                store.importProgress = nil
-                switch outcome {
-                case .success(let result):
-                    store.pendingImport = ImportPreview(fileName: url.lastPathComponent, result: result)
-                case .failure(let error):
-                    store.report(error)
-                }
-            }
-        }
-    }
-
     // MARK: LiquidText
 
     /// 选择 LiquidText 导出的 Word 笔记（.docx）或纯文本，解析后交给同一个导入预览
@@ -114,7 +80,6 @@ enum ExportService {
     nonisolated static func readLiquidText(_ url: URL) throws -> ImportPreview {
         try LiquidTextReader.read(url)
     }
-
 
     static func backupNow(store: LibraryStore) {
         do {

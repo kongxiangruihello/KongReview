@@ -37,15 +37,6 @@ struct RevisitBookItem: Identifiable, Equatable, Sendable {
     var highlightCount: Int
 }
 
-/// 某一期读完的书（复盘、年度导出）
-struct FinishedBook: Identifiable, Equatable, Sendable {
-    var id: Int64
-    var title: String
-    var author: String
-    var oneLine: String
-    var finishedAt: Date
-}
-
 extension AppDatabase {
     /// 读完后第几天重温：1 个月、半年、一年
     static let bookRevisitDays = [30, 182, 365]
@@ -69,12 +60,6 @@ extension AppDatabase {
     }
 
     // MARK: 读写
-
-    func bookSummary(sourceId: Int64) throws -> BookSummary? {
-        try writer.read { db in
-            try Row.fetchOne(db, sql: "SELECT * FROM book_summary WHERE sourceId = ?", arguments: [sourceId]).map(Self.summary)
-        }
-    }
 
     private static func summary(_ row: Row) -> BookSummary {
         BookSummary(sourceId: row["sourceId"], oneLine: row["oneLine"], body: row["body"], finishedAt: row["finishedAt"],
@@ -126,35 +111,4 @@ extension AppDatabase {
             }
     }
 
-    /// 记一次书的重温：仍然成立、要修订都算这一次重温过（排下一次，三次后不再来）；以后再说→一周后再来
-    func recordBookRevisit(sourceId: Int64, outcome: RevisitOutcome, now: Date = Date()) throws {
-        try writer.write { db in
-            guard let b = try Row.fetchOne(db, sql: "SELECT * FROM book_summary WHERE sourceId = ?", arguments: [sourceId]).map(Self.summary),
-                  let finished = b.finishedAt else { return }
-            if outcome == .later {
-                try db.execute(sql: "UPDATE book_summary SET dueDay = ?, lastReviewedAt = ? WHERE sourceId = ?",
-                               arguments: [Self.revisitDay(now, plus: 7), now, sourceId])
-            } else {
-                let next = b.stage + 1
-                let due: String? = next < Self.bookRevisitDays.count
-                    ? max(Self.revisitDay(finished, plus: Self.bookRevisitDays[next]), Self.revisitDay(now, plus: 1)) : nil
-                try db.execute(sql: "UPDATE book_summary SET stage = ?, dueDay = ?, lastReviewedAt = ? WHERE sourceId = ?",
-                               arguments: [next, due, now, sourceId])
-            }
-            try db.execute(sql: "INSERT INTO revisit_log(kind, recordId, outcome, at) VALUES ('book', ?, ?, ?)", arguments: [sourceId, outcome.rawValue, now])
-        }
-    }
-
-    /// 某一期读完的书（读完日期在期内）
-    func finishedBooks(start: Date, end: Date) throws -> [FinishedBook] {
-        try writer.read { db in
-            guard try db.tableExists("book_summary") else { return [] }
-            return try Row.fetchAll(db, sql: """
-                SELECT b.sourceId, b.oneLine, b.finishedAt, s.title, s.author FROM book_summary b JOIN source s ON s.id = b.sourceId
-                WHERE b.finishedAt >= ? AND b.finishedAt < ? ORDER BY b.finishedAt
-                """, arguments: [start, end]).map {
-                    FinishedBook(id: $0["sourceId"], title: $0["title"], author: $0["author"] ?? "", oneLine: $0["oneLine"], finishedAt: $0["finishedAt"])
-                }
-        }
-    }
 }
