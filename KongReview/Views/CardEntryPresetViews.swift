@@ -233,7 +233,7 @@ private struct CardEntryPresetEditorView: View {
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("保存") { save() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
             }
-        }.padding(24).frame(width: 720, height: 720).disabled(store.fullBackupBusy)
+        }.padding(24).frame(width: 700, height: 620).disabled(store.fullBackupBusy)
             .task {
                 tagsText = TagParser.format(preset.tags)
                 do { templates = try store.db.noteTemplates() }
