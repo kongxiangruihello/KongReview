@@ -31,7 +31,9 @@ import KongReviewCore
         let copy = root.appendingPathComponent("library.sqlite")
         try fm.copyItem(at: FullBackupService.databaseFile(of: prepared), to: copy)
         let db = try AppDatabase(DatabaseQueue(path: copy.path))
-        // 设置照备份里的（卷面题数等），先清掉上次预览留下的
+        // 设置照备份里的（卷面题数等）。先清掉上次预览留下的一切——包括当天的卷尾再考、新录轮次等，
+        // 它们记的是示例库的编号，留着会指到副本里别的摘录
+        if isEnabled, let domain = Bundle.main.bundleIdentifier { defaults.removePersistentDomain(forName: domain) }
         for key in FullBackupService.preferenceKeys { defaults.removeObject(forKey: key) }
         for (key, value) in try FullBackupService.settings(of: prepared) { defaults.set(value, forKey: key) }
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "M月d日 HH:mm"
@@ -41,6 +43,13 @@ import KongReviewCore
 
     static func makeSampleStore() -> LibraryStore {
         backupLabel = nil
+        // 6.1.1：上次预览（可能载入过备份）留下的当天卷面状态记的是别的库的编号，清掉
+        if isEnabled {
+            for key in [LibraryStore.examRelearnKey, ExamFresh.sessionKey] { UserDefaults.standard.removeObject(forKey: key) }
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix("review.session.") {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
         do {
             let db = try AppDatabase(DatabaseQueue())
             let now = Date()
