@@ -76,12 +76,12 @@ final class V500RevisitTests: XCTestCase {
         let h = try db.save(Highlight(text: "士不可以不弘毅"))
         let p = try db.createQuestion(title: "“士志于道”与“士不可以不弘毅”能否互证？", now: t0)
         try db.setQuestionPinned(id: p.id!, true)
-        _ = try db.createQuestion(title: "没有标常念的问题", now: t0)
+        // 6.0.9 起没标常念的未解决问题也出（另见 V609QuestionExamTests）
         let shelved = try db.createQuestion(title: "搁置的常念问题", now: t0)
         try db.setQuestionPinned(id: shelved.id!, true)
         try db.setQuestionStatus(id: shelved.id!, .shelved, now: t0)
         XCTAssertTrue(try db.revisitQueue(limits: two, now: t0).questions.isEmpty, "标常念当天不来")
-        XCTAssertEqual(try db.revisitQueue(limits: two, now: d(7)).questions.map(\.id), [p.id!], "只有常念且未解决的来")
+        XCTAssertEqual(try db.revisitQueue(limits: two, now: d(7)).questions.map(\.id), [p.id!], "搁置的不来")
         try db.recordQuestionRevisit(questionId: p.id!, outcome: .lead, highlightIDs: [h.id!], remark: "曾子一章可作旁证", now: d(7))
         let q = try XCTUnwrap(try db.question(id: p.id!))
         XCTAssertEqual(q.status, .lead, "待研究的改为有线索")
@@ -94,7 +94,7 @@ final class V500RevisitTests: XCTestCase {
         _ = try db.revisitQueue(limits: two, now: d(9))
         XCTAssertEqual(try db.revisitQueue(limits: two, now: d(20)).questions.map(\.id), [p2.id!], "到期早的先来")
         try db.setQuestionPinned(id: p2.id!, false)
-        XCTAssertEqual(try db.revisitQueue(limits: two, now: d(20)).questions.map(\.id), [p.id!], "取消常念后不再来")
+        XCTAssertEqual(try db.revisitQueue(limits: two, now: d(20)).questions.map(\.id), [p.id!], "6.0.9：取消常念后照样出，但常念的排在前面")
         try db.recordQuestionRevisit(questionId: p.id!, outcome: .notyet, now: d(20))
         XCTAssertTrue(try db.revisitQueue(limits: two, now: d(20)).questions.isEmpty)
     }

@@ -476,6 +476,10 @@ final class AppDatabase {
         m.registerMigration("v27-kongfolio") { db in
             try AppDatabase.installKongFolio(in: db)
         }
+        // 6.0.9：问题簿全部进考场——进展题的间隔、解答题的排程
+        m.registerMigration("v28-question-exam") { db in
+            try AppDatabase.installQuestionExam(in: db)
+        }
         return m
     }
 }

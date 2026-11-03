@@ -25,18 +25,24 @@ struct RevisitLimits: Equatable, Sendable {
     static let questionsKey = "revisit.questionsPerDay"
     static let booksKey = "revisit.booksPerDay"
     static let blocksKey = "revisit.blocksPerDay"
+    /// 6.0.9：解答题（已解决的问题）
+    static let answersKey = "revisit.answersPerDay"
     var notes = 2
     var questions = 1
     /// 5.1：读完的书（提要）——6.0.1 起舍弃，默认 0、设置里不再提供
     var books = 0
     /// 5.2.0：专题笔记本里的段落
     var blocks = 2
+    /// 6.0.9：已解决的问题出解答题
+    var answers = 0
 
+    /// 6.0.9：进展题默认每天 2 道（未解决的问题都出，不只常念的），解答题默认 2 道
     static func saved(_ defaults: UserDefaults = .standard) -> RevisitLimits {
         RevisitLimits(notes: max(0, min(10, defaults.object(forKey: notesKey) as? Int ?? 2)),
-                      questions: max(0, min(5, defaults.object(forKey: questionsKey) as? Int ?? 1)),
+                      questions: max(0, min(10, defaults.object(forKey: questionsKey) as? Int ?? 2)),
                       books: SlimSwitch.featuresOff ? 0 : max(0, min(3, defaults.object(forKey: booksKey) as? Int ?? 1)),
-                      blocks: max(0, min(10, defaults.object(forKey: blocksKey) as? Int ?? 2)))
+                      blocks: max(0, min(10, defaults.object(forKey: blocksKey) as? Int ?? 2)),
+                      answers: max(0, min(10, defaults.object(forKey: answersKey) as? Int ?? 2)))
     }
 }
 
@@ -66,6 +72,24 @@ struct RevisitQuestionItem: Identifiable, Equatable, Sendable {
     var lastReviewedAt: Date?
     var createdAt: Date
     var since: Date { lastReviewedAt ?? createdAt }
+    /// 6.0.9：常念的约每周一次；其余按间隔回来
+    var pinned = false
+}
+
+/// 6.0.9：今天的一道解答题（已解决的问题：给问题，想答案）
+struct RevisitAnswerItem: Identifiable, Equatable, Sendable {
+    var id: Int64
+    var title: String
+    var detail: String
+    /// 写下的解答（富文本）
+    var answer: String
+    /// 解答指向的札记
+    var noteTitle: String?
+    var noteBody: String?
+    var intervalDays: Int
+    var reviewCount: Int
+    var lastReviewedAt: Date?
+    var solvedAt: Date?
 }
 
 /// 今天的重温：剩下的札记与问题，以及今天已处理的条数
@@ -80,8 +104,11 @@ struct RevisitQueue: Equatable, Sendable {
     /// 5.2.0：笔记段落
     var blocks: [RevisitBlockItem] = []
     var blocksDone = 0
-    var total: Int { notes.count + questions.count + books.count + blocks.count }
-    var done: Int { notesDone + questionsDone + booksDone + blocksDone }
+    /// 6.0.9：解答题
+    var answers: [RevisitAnswerItem] = []
+    var answersDone = 0
+    var total: Int { notes.count + questions.count + books.count + blocks.count + answers.count }
+    var done: Int { notesDone + questionsDone + booksDone + blocksDone + answersDone }
     var isEmpty: Bool { total == 0 }
     static let empty = RevisitQueue()
 }
@@ -194,6 +221,47 @@ extension AppDatabase {
         for (id, offset) in zip(questions, spreadOffsets(questions.count, span: questionRevisitInterval)) {
             try db.execute(sql: "INSERT INTO question_review(questionId, dueDay) VALUES (?, ?)", arguments: [id, revisitDay(now, plus: offset)])
         }
+        // 6.0.9：没标常念、还没解决的问题也出进展题，分散在之后两周内；已解决（写了解答）的出解答题
+        if try db.tableExists("question_answer_review") {
+            let others = try Int64.fetchAll(db, sql: """
+                SELECT id FROM question WHERE pinned = 0 AND status IN ('open', 'lead')
+                  AND id NOT IN (SELECT questionId FROM question_review) ORDER BY updatedAt DESC, id
+                """)
+            for (id, offset) in zip(others, spreadOffsets(others.count, span: 14)) {
+                try db.execute(sql: "INSERT INTO question_review(questionId, dueDay) VALUES (?, ?)", arguments: [id, revisitDay(now, plus: offset)])
+            }
+            let solved = try Row.fetchAll(db, sql: """
+                SELECT id, solvedAt, updatedAt FROM question
+                WHERE status = 'solved' AND (trim(answer) != '' OR answerNoteId IS NOT NULL)
+                  AND id NOT IN (SELECT questionId FROM question_answer_review) ORDER BY COALESCE(solvedAt, updatedAt), id
+                """)
+            var older: [Int64] = []
+            for row in solved {
+                let at: Date = (row["solvedAt"] as Date?) ?? row["updatedAt"]
+                let first = revisitDay(at, plus: 7)
+                if first > today {
+                    try db.execute(sql: "INSERT INTO question_answer_review(questionId, dueDay) VALUES (?, ?)", arguments: [row["id"] as Int64, first])
+                } else { older.append(row["id"]) }
+            }
+            for (id, offset) in zip(older, spreadOffsets(older.count, span: 30)) {
+                try db.execute(sql: "INSERT INTO question_answer_review(questionId, dueDay) VALUES (?, ?)", arguments: [id, revisitDay(now, plus: offset)])
+            }
+        }
+    }
+
+    /// 6.0.9：迁移 v28——进展题的间隔、解答题的排程
+    static func installQuestionExam(in db: Database) throws {
+        if try db.tableExists("question_review"),
+           !(try db.columns(in: "question_review").contains { $0.name == "intervalDays" }) {
+            try db.alter(table: "question_review") { t in t.add(column: "intervalDays", .integer).notNull().defaults(to: 7) }
+        }
+        try db.create(table: "question_answer_review", ifNotExists: true) { t in
+            t.primaryKey("questionId", .integer).references("question", onDelete: .cascade)
+            t.column("dueDay", .text).notNull()
+            t.column("intervalDays", .integer).notNull().defaults(to: 7)
+            t.column("lastReviewedAt", .datetime)
+            t.column("reviewCount", .integer).notNull().defaults(to: 0)
+        }
     }
 
     private static func scheduleNote(_ db: Database, id: Int64, day: String, interval: Int = 7) throws {
@@ -261,10 +329,11 @@ extension AppDatabase {
                                        intervalDays: row["intervalDays"], reviewCount: row["reviewCount"],
                                        lastReviewedAt: row["lastReviewedAt"], createdAt: row["createdAt"], updatedAt: row["updatedAt"])
             }
+            // 6.0.9：未解决的问题都出（常念的在前）；已解决、搁置的不出进展题
             let questionRows = try Row.fetchAll(db, sql: """
-                SELECT q.id, q.title, q.detail, q.status, q.createdAt, r.lastReviewedAt
+                SELECT q.id, q.title, q.detail, q.status, q.pinned, q.createdAt, r.lastReviewedAt
                 FROM question_review r JOIN question q ON q.id = r.questionId
-                WHERE q.pinned = 1 AND q.status IN ('open', 'lead') AND r.dueDay <= ? ORDER BY r.dueDay, q.id LIMIT ?
+                WHERE q.status IN ('open', 'lead') AND r.dueDay <= ? ORDER BY q.pinned DESC, r.dueDay, q.id LIMIT ?
                 """, arguments: [today, max(0, limits.questions - q.questionsDone)])
             q.questions = try questionRows.map { row in
                 let id: Int64 = row["id"]
@@ -272,7 +341,17 @@ extension AppDatabase {
                 let hids = try Int64.fetchAll(db, sql: "SELECT recordId FROM question_material WHERE questionId = ? AND kind = 'highlight'", arguments: [id])
                 return RevisitQuestionItem(id: id, title: row["title"], detail: row["detail"],
                                            status: Question.Status(rawValue: row["status"]) ?? .open, materialCount: count,
-                                           highlightIDs: Set(hids), lastReviewedAt: row["lastReviewedAt"], createdAt: row["createdAt"])
+                                           highlightIDs: Set(hids), lastReviewedAt: row["lastReviewedAt"], createdAt: row["createdAt"],
+                                           pinned: row["pinned"])
+            }
+            if try db.tableExists("question_answer_review") {
+                q.answersDone = try done("answer")
+                let ids = try Int64.fetchAll(db, sql: """
+                    SELECT r.questionId FROM question_answer_review r JOIN question q ON q.id = r.questionId
+                    WHERE q.status = 'solved' AND (trim(q.answer) != '' OR q.answerNoteId IS NOT NULL) AND r.dueDay <= ?
+                    ORDER BY r.dueDay, q.id LIMIT ?
+                    """, arguments: [today, max(0, limits.answers - q.answersDone)])
+                q.answers = try ids.compactMap { try Self.answerItem(db, id: $0) }
             }
             return q
         }
@@ -280,7 +359,7 @@ extension AppDatabase {
 
     func revisitCounts(limits: RevisitLimits = .saved(), now: Date = Date()) throws -> RevisitCounts {
         let q = try revisitQueue(limits: limits, now: now)
-        return RevisitCounts(notesLeft: q.notes.count, questionsLeft: q.questions.count, done: q.done, booksLeft: q.books.count,
+        return RevisitCounts(notesLeft: q.notes.count, questionsLeft: q.questions.count + q.answers.count, done: q.done, booksLeft: q.books.count,
                              blocksLeft: q.blocks.count)
     }
 
@@ -324,11 +403,71 @@ extension AppDatabase {
                 if db.changesCount > 0 { try Self.recordQuestionStatus(db, questionId: questionId, from: .open, to: .lead, now: now) }
                 try db.execute(sql: "UPDATE question SET updatedAt = ? WHERE id = ?", arguments: [now, questionId])
             }
+            // 6.0.9：常念的一周后再来；其余有新线索的一周后，“还没有”的间隔加长（7、21、60、180、365 天）
+            let pinned = try Bool.fetchOne(db, sql: "SELECT pinned FROM question WHERE id = ?", arguments: [questionId]) ?? false
+            let current = try Int.fetchOne(db, sql: "SELECT intervalDays FROM question_review WHERE questionId = ?", arguments: [questionId]) ?? Self.questionRevisitInterval
+            let interval = pinned || outcome != .notyet ? Self.questionRevisitInterval : Self.nextNoteInterval(after: current)
             try db.execute(sql: """
-                INSERT INTO question_review(questionId, dueDay, lastReviewedAt, reviewCount) VALUES (?, ?, ?, 1)
-                ON CONFLICT(questionId) DO UPDATE SET dueDay = excluded.dueDay, lastReviewedAt = excluded.lastReviewedAt, reviewCount = reviewCount + 1
-                """, arguments: [questionId, Self.revisitDay(now, plus: Self.questionRevisitInterval), now])
+                INSERT INTO question_review(questionId, dueDay, lastReviewedAt, reviewCount, intervalDays) VALUES (?, ?, ?, 1, ?)
+                ON CONFLICT(questionId) DO UPDATE SET dueDay = excluded.dueDay, lastReviewedAt = excluded.lastReviewedAt,
+                    reviewCount = reviewCount + 1, intervalDays = excluded.intervalDays
+                """, arguments: [questionId, Self.revisitDay(now, plus: interval), now, interval])
             try db.execute(sql: "INSERT INTO revisit_log(kind, recordId, outcome, at) VALUES ('question', ?, ?, ?)", arguments: [questionId, outcome.rawValue, now])
+        }
+    }
+
+    // MARK: 6.0.9：解答题
+
+    /// 一道解答题（不看到期日；不是已解决或没有解答的为 nil）
+    static func answerItem(_ db: Database, id: Int64) throws -> RevisitAnswerItem? {
+        guard let row = try Row.fetchOne(db, sql: """
+            SELECT q.id, q.title, q.detail, q.answer, q.answerNoteId, q.solvedAt,
+                   COALESCE(r.intervalDays, 7) AS intervalDays, COALESCE(r.reviewCount, 0) AS reviewCount, r.lastReviewedAt
+            FROM question q LEFT JOIN question_answer_review r ON r.questionId = q.id
+            WHERE q.id = ? AND q.status = 'solved'
+            """, arguments: [id]) else { return nil }
+        var item = RevisitAnswerItem(id: id, title: row["title"], detail: row["detail"], answer: row["answer"],
+                                     intervalDays: row["intervalDays"], reviewCount: row["reviewCount"],
+                                     lastReviewedAt: row["lastReviewedAt"], solvedAt: row["solvedAt"])
+        if let nid: Int64 = row["answerNoteId"],
+           let n = try Row.fetchOne(db, sql: "SELECT title, body FROM idea_note WHERE id = ? AND deletedAt IS NULL", arguments: [nid]) {
+            item.noteTitle = n["title"]; item.noteBody = n["body"]
+        }
+        let hasAnswer = !Markdown.plainText(fromHTML: Markdown.richHTML(item.answer)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasAnswer || item.noteTitle != nil else { return nil }
+        return item
+    }
+
+    func answerItem(id: Int64) throws -> RevisitAnswerItem? {
+        try writer.read { db in try Self.answerItem(db, id: id) }
+    }
+
+    /// 记一道解答题：记在 self_test_log（kind = 'question'，计入掌握度；同一天再答以最后一次为准）与 revisit_log；
+    /// 记得→间隔加长（7、21、60、180、365 天），大致→间隔不变，忘了→从 7 天算起、两天后再来
+    func recordAnswerReview(questionId: Int64, result: SelfTestResult, now: Date = Date()) throws {
+        let (start, end) = Self.dayBounds(now)
+        try writer.write { db in
+            try Self.ensureRevisitSchedules(db, now: now)
+            if try db.tableExists("self_test_log") {
+                try db.execute(sql: "DELETE FROM self_test_log WHERE setKey = ? AND kind = 'question' AND recordId = ? AND at >= ? AND at < ?",
+                               arguments: [Self.examSetKey, questionId, start, end])
+                try db.execute(sql: "INSERT INTO self_test_log(setKey, kind, recordId, result, at) VALUES (?, 'question', ?, ?, ?)",
+                               arguments: [Self.examSetKey, questionId, result.rawValue, now])
+            }
+            let current = try Int.fetchOne(db, sql: "SELECT intervalDays FROM question_answer_review WHERE questionId = ?", arguments: [questionId]) ?? 7
+            let interval: Int, wait: Int
+            switch result {
+            case .remembered: interval = Self.nextNoteInterval(after: current); wait = interval
+            case .partly: interval = current; wait = current
+            case .forgot: interval = 7; wait = 2
+            }
+            try db.execute(sql: """
+                INSERT INTO question_answer_review(questionId, dueDay, intervalDays, lastReviewedAt, reviewCount) VALUES (?, ?, ?, ?, 1)
+                ON CONFLICT(questionId) DO UPDATE SET dueDay = excluded.dueDay, intervalDays = excluded.intervalDays,
+                    lastReviewedAt = excluded.lastReviewedAt, reviewCount = reviewCount + 1
+                """, arguments: [questionId, Self.revisitDay(now, plus: wait), interval, now])
+            let outcome = result == .remembered ? "remembered" : result == .partly ? "partly" : "forgot"
+            try db.execute(sql: "INSERT INTO revisit_log(kind, recordId, outcome, at) VALUES ('answer', ?, ?, ?)", arguments: [questionId, outcome, now])
         }
     }
 

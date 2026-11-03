@@ -111,7 +111,7 @@ import KongReviewCore
             try db.addQuestionMaterial(questionId: pinned.id!, kind: .highlight, recordId: highlights[12].id!, reason: "“任重道远”正是“志于道”的担当", now: day(-8))
             try db.addQuestionMaterial(questionId: pinned.id!, kind: .highlight, recordId: highlights[5].id!, now: day(-4))
             try db.addQuestionMaterial(questionId: pinned.id!, kind: .note, recordId: selfReliance.id!, now: day(-3))
-            _ = try db.createQuestion(title: "梁启超论清代学术的“经世”一义出处待核", scopes: [(.notebook, notebook.id!)], now: day(-7))
+            let unpinned = try db.createQuestion(title: "梁启超论清代学术的“经世”一义出处待核", scopes: [(.notebook, notebook.id!)], now: day(-7))
             let status = try db.createQuestion(title: "孔门之“士”是否已脱离封建等级的含义？", scopes: [(.project, project.id!)], now: day(-12))
             try db.addQuestionMaterial(questionId: status.id!, kind: .highlight, recordId: highlights[0].id!, now: day(-10))
             if let target = try db.resolveIdeaNoteID(title: "士由身份转为德行") {
@@ -124,6 +124,9 @@ import KongReviewCore
             try db.writer.write { d in
                 try d.execute(sql: "UPDATE idea_note_review SET dueDay = ? WHERE noteId = ?", arguments: [AppDatabase.revisitDay(now), identity.id!])
                 try d.execute(sql: "INSERT OR REPLACE INTO question_review(questionId, dueDay) VALUES (?, ?)", arguments: [pinned.id!, AppDatabase.revisitDay(now)])
+                // 6.0.9：没标常念的进展题、已解决的解答题今天也到期
+                try d.execute(sql: "INSERT OR REPLACE INTO question_review(questionId, dueDay) VALUES (?, ?)", arguments: [unpinned.id!, AppDatabase.revisitDay(now)])
+                try d.execute(sql: "INSERT OR REPLACE INTO question_answer_review(questionId, dueDay) VALUES (?, ?)", arguments: [status.id!, AppDatabase.revisitDay(now)])
             }
             try db.recordExternalWritingTotal(projectId: project.id!, total: 3_200, day: day(-20), now: day(-20))
             try db.recordExternalWritingTotal(projectId: project.id!, total: 4_650, day: day(-2), note: "第二节初稿（Word）", now: day(-2))

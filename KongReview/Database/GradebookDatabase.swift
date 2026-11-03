@@ -13,7 +13,8 @@ import KongReviewCore
 
 /// 成绩册里的材料
 enum GradeKind: String, CaseIterable, Identifiable, Sendable {
-    case card, highlight, note, block
+    /// 6.0.9：question——问题簿的解答题
+    case card, highlight, note, block, question
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -21,6 +22,7 @@ enum GradeKind: String, CaseIterable, Identifiable, Sendable {
         case .highlight: "摘录"
         case .note: "札记"
         case .block: "笔记"
+        case .question: "问题"
         }
     }
 }
@@ -193,7 +195,7 @@ extension AppDatabase {
         }
         out[.card] = cards
         if try db.tableExists("self_test_log") {
-            for (kind, recordKind) in [(GradeKind.highlight, "highlight"), (.note, "note")] {
+            for (kind, recordKind) in [(GradeKind.highlight, "highlight"), (.note, "note"), (.question, "question")] {
                 var t = MasteryTally()
                 for r in try Int.fetchAll(db, sql: "SELECT result FROM self_test_log WHERE kind = ? AND at >= ? AND at < ?",
                                           arguments: [recordKind, start, end]) {
@@ -242,7 +244,7 @@ extension AppDatabase {
                 Array(items.sorted { ($0.misses, $0.lastAt) > ($1.misses, $1.lastAt) }.prefix(limit))
             }
             if try db.tableExists("self_test_log") {
-                for (kind, recordKind) in [(GradeKind.highlight, "highlight"), (.note, "note")] {
+                for (kind, recordKind) in [(GradeKind.highlight, "highlight"), (.note, "note"), (.question, "question")] {
                     var items: [WeakItem] = []
                     for row in try Row.fetchAll(db, sql: """
                         SELECT recordId, SUM(result = 3) AS misses, COUNT(*) AS attempts, MAX(at) AS lastAt,
@@ -260,6 +262,10 @@ extension AppDatabase {
                                 """, arguments: [id]) else { continue }
                             title = Self.gradebookOpening(h["text"])
                             detail = [(h["title"] as String?).map { "《\($0)》" }, h["location"] as String?].compactMap { $0 }.joined(separator: " ")
+                        } else if kind == .question {
+                            guard let n = try Row.fetchOne(db, sql: "SELECT title FROM question WHERE id = ? AND status = 'solved'", arguments: [id]) else { continue }
+                            title = n["title"]
+                            detail = "问题簿 · 解答题"
                         } else {
                             guard let n = try Row.fetchOne(db, sql: "SELECT title FROM idea_note WHERE id = ? AND deletedAt IS NULL", arguments: [id]) else { continue }
                             title = n["title"]
