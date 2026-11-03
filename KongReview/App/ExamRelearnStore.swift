@@ -156,6 +156,8 @@ extension LibraryStore {
         guard minutes > 0 else { return nil }
         let day = AppDatabase.revisitDay(now)
         if let saved = try? db.progressValue(ExamBudget.self, key: Self.examBudgetKey(day)), saved.minutes >= minutes { return saved }
+        // 今天的学习统计（到期的记忆卡等）还没算出来时先不分配，免得按 0 张卡定下题数
+        guard derivedDayKey == ReminderPlan.dayKey(now), !derivedIsLoading else { return nil }
         let plan = ExamBudget.plan(minutes: minutes, totals: examTotals(now: now), retests: examRetestsToday(now: now), day: day)
         try? db.saveProgress(plan, key: Self.examBudgetKey(day))
         return plan
