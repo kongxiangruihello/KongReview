@@ -139,7 +139,8 @@ import KongReviewCore
             try db.recordExamResult(kind: .gist, recordId: second.id!, result: .partly, now: day(-3, hour: 20))
             let fresh = try db.examFreshCandidates(now: now, limit: ExamFresh.defaultPerDay)
             ExamFresh.Session(day: ReviewSessionRecord.dayString(now), rounds: Dictionary(fresh.map { ($0.id, $0.round) }, uniquingKeysWith: { a, _ in a })).save()
-            let ordered = Array(ids.prefix(4)) + fresh.map(\.id) + Array(ids.dropFirst(4))
+            // 一组仍是 10 条：新录占名额
+            let ordered = Array((Array(ids.prefix(4)) + fresh.map(\.id) + Array(ids.dropFirst(4))).prefix(ids.count))
             let record = ReviewSessionRecord(day: ReviewSessionRecord.dayString(now), regularIds: ordered, masteryIds: [], position: 4)
             UserDefaults.standard.set(try JSONEncoder().encode(record), forKey: ReviewSessionRecord.key(theme: nil))
             // 本周复盘与计划
