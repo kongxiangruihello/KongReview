@@ -448,7 +448,10 @@ struct TodayWorkBar: View {
     /// 5.0.2：今日收获（功课做完时显示）
     var gains: [String] = []
     let focus: LearningFocus?
+    /// 5.2.0：今日检查的合计（已做 / 应做），点开今日检查页
+    var check = DailyCheckState.empty
     let onStart: () -> Void
+    var onCheck: () -> Void = {}
     let onFocus: () -> Void
 
     private var cards: StudyQueue.Counts {
@@ -465,6 +468,12 @@ struct TodayWorkBar: View {
                 Text("今日功课").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 if !allDone { Text("约 \(minutes) 分钟").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).monospacedDigit() }
                 Spacer(minLength: 8)
+                Button(action: onCheck) {
+                    Label(check.due > 0 ? "今日检查 \(check.done)/\(check.due)" : "今日检查", systemImage: "checklist.checked").lineLimit(1)
+                }
+                .buttonStyle(.plain).font(.system(size: 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(check.due > 0 && check.left == 0 ? ReviewPalette.done : ReviewPalette.accent)
+                .help("一页看全今天的回顾、记忆卡、重温与自测：各组已做 / 应做").handCursor()
                 if let focus {
                     Button(action: onFocus) {
                         Label(focus.kind == .project ? "当前\(focus.label)" : "本期焦点：\(focus.label)", systemImage: "scope").lineLimit(1)

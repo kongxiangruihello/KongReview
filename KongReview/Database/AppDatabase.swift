@@ -456,6 +456,10 @@ final class AppDatabase {
         m.registerMigration("v22-book-summary") { db in
             try AppDatabase.installBookSummary(in: db)
         }
+        // 5.2.0：笔记重温、今日检查（日评与打卡字段随表建好，5.2.1、5.2.2 使用）
+        m.registerMigration("v23-daily-check") { db in
+            try AppDatabase.installDailyCheck(in: db)
+        }
         return m
     }
 }

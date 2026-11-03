@@ -112,6 +112,8 @@ private struct ReviewSettings: View {
     @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
     @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
     @AppStorage(RevisitLimits.booksKey) private var revisitBooks = 1
+    @AppStorage(RevisitLimits.blocksKey) private var revisitBlocks = 2
+    @AppStorage(DailyCheckSettings.selfTestPerDayKey) private var dailySelfTest = 2
     @AppStorage(ReflectionReminderPlan.enabledKey) private var reflectionReminder = false
     @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
     @AppStorage(ReflectionReminderPlan.weekdayKey) private var reflectionWeekday = 1
@@ -138,11 +140,18 @@ private struct ReviewSettings: View {
                 Stepper("每天至多重温札记：\(revisitNotes) 条", value: $revisitNotes, in: 0...10)
                 Stepper("每天至多重温「常念」的问题：\(revisitQuestions) 个", value: $revisitQuestions, in: 0...5)
                 Stepper("每天至多重温读完的书：\(revisitBooks) 本", value: $revisitBooks, in: 0...3)
-                Text("札记按 7、21、60、180、365 天的间隔回来，改过的从头算；「常念」且未解决的问题约每周回来一次。设为 0 即不重温这一类。")
+                Stepper("每天至多重温笔记：\(revisitBlocks) 段", value: $revisitBlocks, in: 0...10)
+                Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。「常念」且未解决的问题约每周回来一次。设为 0 即不重温这一类。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("今日检查") {
+                Stepper("每天从本周自测中带：\(dailySelfTest) 题", value: $dailySelfTest, in: 0...5)
+                Text("今日检查把回顾、记忆卡、重温与自测放在一页；自测每周 10 题，每天带几题就把几题算进今天的应做。设为 0 即今日检查不含自测，每周自测照常。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Section("提醒") {
                 Toggle("每周一显示上周小结（回顾页顶部；已允许通知时另推送一条）", isOn: Binding(
@@ -169,6 +178,8 @@ private struct ReviewSettings: View {
         .onChange(of: revisitNotes) { store.refreshRevisit() }
         .onChange(of: revisitQuestions) { store.refreshRevisit() }
         .onChange(of: revisitBooks) { store.refreshRevisit() }
+        .onChange(of: revisitBlocks) { store.refreshRevisit() }
+        .onChange(of: dailySelfTest) { store.refreshDailyCheck() }
         .onChange(of: reflectionReminder) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: reflectionWeekday) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: reflectionHour) { ReminderScheduler.shared.applySavedSettings() }

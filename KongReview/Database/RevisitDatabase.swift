@@ -15,6 +15,8 @@ enum RevisitOutcome: String, Codable, Sendable {
     case agree, revise, later
     /// 问题：有新线索、写解答、还没有（都是一周后再来）
     case lead, answer, notyet
+    /// 5.2.0 笔记：已吸收（间隔加长）、需重读（从头算，3 天后再来）、待整理（一周后再来，列入待整理）
+    case absorbed, reread, organize
 }
 
 /// 每天重温的上限
@@ -22,15 +24,19 @@ struct RevisitLimits: Equatable, Sendable {
     static let notesKey = "revisit.notesPerDay"
     static let questionsKey = "revisit.questionsPerDay"
     static let booksKey = "revisit.booksPerDay"
+    static let blocksKey = "revisit.blocksPerDay"
     var notes = 2
     var questions = 1
     /// 5.1：读完的书（提要）
     var books = 1
+    /// 5.2.0：专题笔记本里的段落
+    var blocks = 2
 
     static func saved(_ defaults: UserDefaults = .standard) -> RevisitLimits {
         RevisitLimits(notes: max(0, min(10, defaults.object(forKey: notesKey) as? Int ?? 2)),
                       questions: max(0, min(5, defaults.object(forKey: questionsKey) as? Int ?? 1)),
-                      books: max(0, min(3, defaults.object(forKey: booksKey) as? Int ?? 1)))
+                      books: max(0, min(3, defaults.object(forKey: booksKey) as? Int ?? 1)),
+                      blocks: max(0, min(10, defaults.object(forKey: blocksKey) as? Int ?? 2)))
     }
 }
 
@@ -71,8 +77,11 @@ struct RevisitQueue: Equatable, Sendable {
     /// 5.1：读完的书
     var books: [RevisitBookItem] = []
     var booksDone = 0
-    var total: Int { notes.count + questions.count + books.count }
-    var done: Int { notesDone + questionsDone + booksDone }
+    /// 5.2.0：笔记段落
+    var blocks: [RevisitBlockItem] = []
+    var blocksDone = 0
+    var total: Int { notes.count + questions.count + books.count + blocks.count }
+    var done: Int { notesDone + questionsDone + booksDone + blocksDone }
     var isEmpty: Bool { total == 0 }
     static let empty = RevisitQueue()
 }
@@ -83,7 +92,9 @@ struct RevisitCounts: Equatable, Sendable {
     var questionsLeft = 0
     var done = 0
     var booksLeft = 0
-    var left: Int { notesLeft + questionsLeft + booksLeft }
+    /// 5.2.0：笔记段落
+    var blocksLeft = 0
+    var left: Int { notesLeft + questionsLeft + booksLeft + blocksLeft }
 }
 
 /// 札记的一次修订（保存时记下改动前的一版）
@@ -230,6 +241,11 @@ extension AppDatabase {
                 q.booksDone = try done("book")
                 q.books = try Self.dueBooks(db, today: today, limit: max(0, limits.books - q.booksDone))
             }
+            if try db.tableExists("notebook_block_review") {
+                try Self.ensureBlockSchedules(db, now: now)
+                q.blocksDone = try done("block")
+                q.blocks = try Self.dueBlocks(db, today: today, limit: max(0, limits.blocks - q.blocksDone))
+            }
             let noteRows = try Row.fetchAll(db, sql: """
                 SELECT n.id, n.title, n.body, n.createdAt, n.updatedAt, r.intervalDays, r.reviewCount, r.lastReviewedAt
                 FROM idea_note_review r JOIN idea_note n ON n.id = r.noteId AND n.deletedAt IS NULL
@@ -264,7 +280,8 @@ extension AppDatabase {
 
     func revisitCounts(limits: RevisitLimits = .saved(), now: Date = Date()) throws -> RevisitCounts {
         let q = try revisitQueue(limits: limits, now: now)
-        return RevisitCounts(notesLeft: q.notes.count, questionsLeft: q.questions.count, done: q.done, booksLeft: q.books.count)
+        return RevisitCounts(notesLeft: q.notes.count, questionsLeft: q.questions.count, done: q.done, booksLeft: q.books.count,
+                             blocksLeft: q.blocks.count)
     }
 
     /// 记一次札记重温：仍然这么看→间隔加长；要修订→从头算；以后再说→一周后再来

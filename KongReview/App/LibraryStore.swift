@@ -34,6 +34,8 @@ enum SidebarItem: Hashable {
     case reflection
     /// 5.0.2：每周自测
     case selfTest
+    /// 5.2.0：今日检查
+    case dailyCheck
     case tag(String)
 }
 
@@ -48,6 +50,8 @@ final class LibraryStore {
     @ObservationIgnored var derivedPendingKey: String?
     @ObservationIgnored var derivedSnapshotLoader: (@Sendable (DerivedLibraryRequest) async throws -> DerivedLibrarySnapshot)?
     var derivedIsLoading = false
+    /// 5.2.0：最近一次算出学习统计是哪一天（今日检查只用当天算出的统计定应做数，跨日后旧统计不算）
+    var derivedDayKey: String?
     var derivedStatisticsError: String?
     var cardLearningSummaryScope: CardLearningScope = .all
     let globalSearch = GlobalSearchState()
@@ -105,6 +109,9 @@ final class LibraryStore {
     /// 5.0.2：今日收获（今天记下的小胜）与进展改动计数
     var todayGains: [String] = []
     var progressRevision = 0
+    /// 5.2.0：今日检查（各组已做 / 应做）
+    var dailyCheck = DailyCheckState.empty
+    var dailyCheckRevision = 0
     /// 5.1：提要面板与改动计数
     var bookSummaryEditor: BookSummaryEditorRequest?
     var bookSummaryRevision = 0
