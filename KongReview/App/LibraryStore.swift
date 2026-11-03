@@ -170,6 +170,9 @@ final class LibraryStore {
     var importSkipShort = false
     /// 1.2：LiquidText 文件夹正在后台检查
     @ObservationIgnored var liquidTextChecking = false
+    /// 6.0.6：正在读 KongFolio 的阅读记录；最近一次导入的结果（设置里显示）
+    @ObservationIgnored var kongFolioChecking = false
+    var kongFolioLast = ""
     /// 操作完成后的提示
     var infoMessage: String?
     /// 后台导入进行中时的状态文字（非空表示正忙）
@@ -1354,6 +1357,8 @@ final class LibraryStore {
     func checkInbox(quiet: Bool = true) {
         guard !fullBackupBusy else { return }
         checkLiquidTextFolder(quiet: true)
+        // 6.0.6：KongFolio 的阅读记录改过就导入
+        checkKongFolio(quiet: true)
         let r = InboxService.process(db: db)
         guard r.files > 0 else {
             if !quiet { infoMessage = "收件箱里没有新文件。" }

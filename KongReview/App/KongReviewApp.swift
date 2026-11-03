@@ -93,6 +93,9 @@ struct KongReviewApp: App {
                 Group {
                 Button("查找重复摘录…") { WindowOpener.showMain(); store.findDuplicates() }
                 Divider()
+                Button("从 KongFolio 导入") { WindowOpener.showMain(); store.checkKongFolio(quiet: false, force: true) }
+                Button("从 KongFolio 文件导入…") { WindowOpener.showMain(); store.chooseKongFolioFile() }
+                Divider()
                 Button("导出全部为 Markdown…") { ExportService.exportAll(store: store) }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("立即备份") { ExportService.backupNow(store: store) }
