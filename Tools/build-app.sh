@@ -31,7 +31,7 @@ version="$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1
 build_number="$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)"
 
 echo "== KongReview build $(date '+%Y-%m-%d %H:%M:%S') =="
-echo "版本 $version（构建 $build_number）"
+echo "版本 ${version}（构建 ${build_number}）"
 sw_vers -productVersion | sed 's/^/macOS /'
 if ! xcrun --find swift >/dev/null 2>&1; then
   echo "未找到 Swift 命令行工具。请先执行：xcode-select --install，装好后再试。"
@@ -120,7 +120,7 @@ if [[ -n "$commit" ]]; then
   plutil -insert KRSourceCommit -string "$commit" "$app/Contents/Info.plist"
   echo "源码：$root @ ${commit:0:7}"
 else
-  echo "源码：$root（有本地改动，未记提交号）"
+  echo "源码：${root}（有本地改动，未记提交号）"
 fi
 
 xattr -cr "$app"

@@ -17,17 +17,17 @@ import KongReviewCore
 final class AppUpdater {
     static let shared = AppUpdater()
 
-    static let repoURL = "https://github.com/kongxiangruihello/KongReview.git"
-    static let repoPage = URL(string: "https://github.com/kongxiangruihello/KongReview")!
-    static let bundleID = "com.kongxiangrui.KongReview"
+    nonisolated static let repoURL = "https://github.com/kongxiangruihello/KongReview.git"
+    nonisolated static let repoPage = URL(string: "https://github.com/kongxiangruihello/KongReview")!
+    nonisolated static let bundleID = "com.kongxiangrui.KongReview"
 
-    static let autoCheckKey = "update.autoCheck"
-    static let lastCheckKey = "update.lastCheck"
-    static let proxyKey = "update.proxy"
-    static let updatedFromKey = "update.updatedFrom"
-    static let lastTestCountKey = "update.lastTestCount"
+    nonisolated static let autoCheckKey = "update.autoCheck"
+    nonisolated static let lastCheckKey = "update.lastCheck"
+    nonisolated static let proxyKey = "update.proxy"
+    nonisolated static let updatedFromKey = "update.updatedFrom"
+    nonisolated static let lastTestCountKey = "update.lastTestCount"
     /// 自动检查的间隔
-    static let autoInterval: TimeInterval = 6 * 3600
+    nonisolated static let autoInterval: TimeInterval = 6 * 3600
 
     /// 更新的各步，进度里逐项打勾
     enum Step: Int, CaseIterable, Equatable, Sendable {

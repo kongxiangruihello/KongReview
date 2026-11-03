@@ -17,7 +17,7 @@ if [ "$PROXY_ON" = "1" ] && [ -n "$PROXY_HOST" ] && [ -n "$PROXY_PORT" ]; then
   GITOPTS+=(-c "http.proxy=http://$PROXY_HOST:$PROXY_PORT")
 fi
 
-echo "→ 第 1 步：准备源码（$src，分支 $branch）"
+echo "→ 第 1 步：准备源码（${src}，分支 ${branch}）"
 if [ -d "$src/.git" ]; then
   cd "$src" || finish 1
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
