@@ -172,7 +172,7 @@ struct ExamView: View {
             ReviewCardContainer(padding: 24) {
                 badge(.card, "作答题", "牌组 " + c.deck)
                 CardWebView(front: f.front, back: revealed ? f.back : nil, store: store, css: store.cardCSS(for: c))
-                    .frame(height: revealed ? 360 : 240)
+                    .frame(height: revealed ? 260 : 190)
                     .padding(.top, 10)
                 if !revealed {
                     TextField("我的回答（可不写）", text: $myAnswer, axis: .vertical)

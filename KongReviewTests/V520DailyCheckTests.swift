@@ -170,7 +170,7 @@ final class V520DailyCheckTests: XCTestCase {
             let store = LibraryStore(db: db)
             store.refreshRevisit()
             XCTAssertEqual(store.revisitCounts.blocksLeft, 1)
-            XCTAssertEqual(store.dailyCheck.rows.map(\.group), DailyCheckGroup.allCases)
+            XCTAssertEqual(store.dailyCheck.rows.map(\.group), DailyCheckGroup.exam, "6.0.3：自测并入卷子")
             XCTAssertEqual(store.dailyCheck.rows.first { $0.group == .revisit }?.due, 1)
             store.revisitBlock(block.id!, .organize)
             XCTAssertEqual(store.revisitCounts.blocksLeft, 0)
