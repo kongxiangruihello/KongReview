@@ -20,7 +20,15 @@ extension LibraryStore {
     func refreshDailyCheck() {
         let snapshot = derivedDayKey == ReminderPlan.dayKey(Date()) && !derivedIsLoading
         dailyCheck = (try? db.dailyCheck(current: dailyCheckCounts(), snapshot: snapshot)) ?? .empty
+        refreshCheckin()
         dailyCheckRevision += 1
+    }
+
+    /// 5.2.2：重算打卡天数；今天的打卡状态变了就通知提醒模块
+    func refreshCheckin() {
+        let before = checkin.todayChecked
+        checkin = (try? db.checkinSummary()) ?? .empty
+        if checkin.todayChecked != before { onCheckinChanged?() }
     }
 
     func openDailyCheck() {
@@ -60,7 +68,48 @@ extension LibraryStore {
         guard !fullBackupBusy else { return }
         do {
             try db.saveSelfScore(score, note: note)
+            refreshCheckin()
             dailyCheckRevision += 1
+        } catch { report(error) }
+    }
+}
+
+// MARK: - 5.2.2：打卡
+
+extension LibraryStore {
+    /// 自今天起设定每周的休息日（nil 为不设）
+    func setRestWeekday(_ weekday: Int?) {
+        guard !fullBackupBusy else { return }
+        do {
+            try db.setRestWeekday(weekday)
+            refreshCheckin()
+            dailyCheckRevision += 1
+        } catch { report(error) }
+    }
+
+    /// 补签某一天；不成时返回原因
+    @discardableResult
+    func makeUpCheckin(day: String, score: SelfScore, note: String) -> String? {
+        guard !fullBackupBusy else { return "正在处理完整备份，请稍后再试。" }
+        do {
+            try db.makeUpCheckin(day: day, score: score, note: note)
+            refreshCheckin()
+            dailyCheckRevision += 1
+            return nil
+        } catch let e as CheckinMakeupError {
+            return e.message
+        } catch {
+            report(error)
+            return error.localizedDescription
+        }
+    }
+
+    /// 记下连续中断的原因
+    func recordStreakBreak(_ reason: StreakBreakReason) {
+        guard !fullBackupBusy, let day = checkin.brokenOn else { return }
+        do {
+            try db.recordStreakBreak(day: day, reason: reason)
+            refreshCheckin()
         } catch { report(error) }
     }
 }

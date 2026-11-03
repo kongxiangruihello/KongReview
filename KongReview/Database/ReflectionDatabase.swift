@@ -122,7 +122,11 @@ extension AppDatabase {
         let solvedBefore = try await questionsSolved(start: window.previousStart, end: window.previousEnd)
         let writingNow = try await writingSummary(start: window.start, end: window.end)
         let writingBefore = try await writingSummary(start: window.previousStart, end: window.previousEnd)
+        // 5.2.2：打卡天数
+        let checkinNow = try checkinDays(start: window.start, end: window.end)
+        let checkinBefore = try checkinDays(start: window.previousStart, end: window.previousEnd)
         return [
+            ReflectionNumber(title: "打卡（天）", now: checkinNow, before: checkinBefore),
             ReflectionNumber(title: "回顾摘录（条）", now: now[.highlights], before: before[.highlights]),
             ReflectionNumber(title: "学习记忆卡（张）", now: now[.cards], before: before[.cards]),
             ReflectionNumber(title: "新录摘录（条）", now: now[.newHighlights], before: before[.newHighlights]),

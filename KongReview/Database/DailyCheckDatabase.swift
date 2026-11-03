@@ -54,6 +54,8 @@ struct DailyCheckCount: Codable, Equatable, Sendable {
 struct DailyCheckPlan: Codable, Equatable, Sendable {
     var due: [String: Int] = [:]
     var skipped: [String] = []
+    /// 5.2.2：今天已有一组做完（应做为 0 的组做了任意 1 条也算）；一旦做到就不再撤销
+    var groupDone: Bool?
 }
 
 /// 今日检查页的一行
@@ -65,6 +67,8 @@ struct DailyCheckRow: Identifiable, Equatable, Sendable {
     var id: String { group.rawValue }
     var left: Int { max(0, due - done) }
     var isComplete: Bool { due > 0 && done >= due }
+    /// 5.2.2：打卡条件里的“做完一组”：应做都做了；应做为 0 时做了任意 1 条也算。跳过的组不算。
+    var countsForCheckin: Bool { !skipped && (isComplete || (due == 0 && done > 0)) }
 }
 
 /// 今天的检查
@@ -336,12 +340,15 @@ extension AppDatabase {
                 rows.append(DailyCheckRow(group: g, done: c.done, due: due, skipped: plan.skipped.contains(g.rawValue)))
             }
             let state = DailyCheckState(day: day, rows: rows)
-            if snapshot && (stored != plan || stored == nil) {
+            if rows.contains(where: \.countsForCheckin) { plan.groupDone = true }
+            if stored != plan && (snapshot || stored != nil || plan.groupDone == true) {
                 try Self.saveDailyPlan(db, day: day, plan: plan, done: state.done, due: state.due, now: now)
             } else if stored != nil {
                 try db.execute(sql: "UPDATE daily_checkin SET doneCount = ?, dueCount = ?, updatedAt = ? WHERE day = ? AND (doneCount != ? OR dueCount != ?)",
                                arguments: [state.done, state.due, now, day, state.done, state.due])
             }
+            // 5.2.2：做完一组且写了日评即打卡
+            try Self.evaluateCheckin(db, day: day, now: now)
             return state
         }
     }

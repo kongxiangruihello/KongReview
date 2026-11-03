@@ -116,6 +116,9 @@ private struct ReviewSettings: View {
     @AppStorage(RevisitLimits.booksKey) private var revisitBooks = 1
     @AppStorage(RevisitLimits.blocksKey) private var revisitBlocks = 2
     @AppStorage(DailyCheckSettings.selfTestPerDayKey) private var dailySelfTest = 2
+    @AppStorage(CheckinReminderPlan.enabledKey) private var checkinReminder = true
+    @AppStorage(CheckinReminderPlan.hourKey) private var checkinHour = CheckinReminderPlan.defaultHour
+    @AppStorage(CheckinReminderPlan.minuteKey) private var checkinMinute = 0
     @AppStorage(ReflectionReminderPlan.enabledKey) private var reflectionReminder = false
     @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
     @AppStorage(ReflectionReminderPlan.weekdayKey) private var reflectionWeekday = 1
@@ -153,6 +156,16 @@ private struct ReviewSettings: View {
                 Text("今日检查把回顾、记忆卡、重温与自测放在一页；自测每周 10 题，每天带几题就把几题算进今天的应做。设为 0 即今日检查不含自测，每周自测照常。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // 5.2.2：晚间打卡提醒
+                Toggle("还没打卡时提醒", isOn: $checkinReminder)
+                DatePicker("打卡提醒时间", selection: Binding(
+                    get: { Calendar.current.date(bySettingHour: checkinHour, minute: checkinMinute, second: 0, of: Date()) ?? Date() },
+                    set: { let c = Calendar.current.dateComponents([.hour, .minute], from: $0); checkinHour = c.hour ?? 21; checkinMinute = c.minute ?? 0 }
+                ), displayedComponents: .hourAndMinute)
+                .disabled(!checkinReminder)
+                Text("做完一组并写下日评即打卡；到点还没打卡就提醒一次，打了就不提醒。休息日与补签在今日检查页下方设置。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("提醒") {
@@ -182,6 +195,9 @@ private struct ReviewSettings: View {
         .onChange(of: revisitBooks) { store.refreshRevisit() }
         .onChange(of: revisitBlocks) { store.refreshRevisit() }
         .onChange(of: dailySelfTest) { store.refreshDailyCheck() }
+        .onChange(of: checkinReminder) { ReminderScheduler.shared.applyCheckinReminder() }
+        .onChange(of: checkinHour) { ReminderScheduler.shared.applyCheckinReminder() }
+        .onChange(of: checkinMinute) { ReminderScheduler.shared.applyCheckinReminder() }
         .onChange(of: reflectionReminder) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: reflectionWeekday) { ReminderScheduler.shared.applySavedSettings() }
         .onChange(of: reflectionHour) { ReminderScheduler.shared.applySavedSettings() }
@@ -218,10 +234,18 @@ private struct ReviewSettings: View {
 
 private struct CaptureSettings: View {
     @Environment(LibraryStore.self) private var store
+    @AppStorage(EditorPasteStyle.askKey) private var askPasteStyle = false
 
     var body: some View {
         let _ = store.revision
         Form {
+            // 5.2.2：粘贴不再弹出选择界面
+            Section("粘贴") {
+                Toggle("粘贴带格式的内容时先选择方式（保留格式、清理格式、纯文字）", isOn: $askPasteStyle)
+                Text("关闭时（默认）从网页、Word 等复制的内容直接按原格式粘贴，标题、粗体、列表、链接、图片都保留，粘贴后可撤销。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section("浏览器书签小程序") {
                 Text("在浏览器中新建一个书签，把下面的代码粘贴到“网址”栏。阅读网页时选中文字、点这个书签，就会弹出快速录入浮窗，正文、标题与网址已自动填好。")
                     .font(.callout)

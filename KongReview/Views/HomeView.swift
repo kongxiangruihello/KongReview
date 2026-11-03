@@ -31,12 +31,15 @@ struct HomeView: View {
                 UpdateHomeBanner()
 
                 TodayWorkBar(summary: store.homeLearningSummary, revisit: store.revisitCounts, gains: store.todayGains, focus: nil,
-                             check: store.dailyCheck,
+                             check: store.dailyCheck, checkedIn: store.checkin.todayChecked,
                              onStart: { store.startTodayWork() },
                              onCheck: { store.openDailyCheck() },
                              onFocus: { store.selection = store.currentProjectID.map(SidebarItem.project) ?? .projects })
 
                 // 5.0.1：本周复盘——未做时“去复盘”，做过显示写下的三句话
+                // 5.2.2：连续打卡中断时记一句原因
+                StreakBreakPrompt()
+
                 ReflectionHomeCard()
 
                 // 5.0.2：本周进展——记下的小胜与本周自测

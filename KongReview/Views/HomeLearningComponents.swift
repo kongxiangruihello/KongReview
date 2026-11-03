@@ -326,9 +326,10 @@ private struct HomeLearningHistory: View {
 
     private var streaks: some View {
         HStack(spacing: 24) {
-            if summary.learningStreak > 0 { streak(summary.learningStreak, label: "连续学习") }
-            else { streak(monthDays, label: "本月学了") }
-            streak(summary.longestLearningStreak, label: "最长连续")
+            // 5.2.2：天数改为打卡天数；中断时显示本月打卡几天
+            if store.checkin.current > 0 { streak(store.checkin.current, label: store.checkin.todayChecked ? "连续打卡 · 今天已打" : "连续打卡") }
+            else { streak(store.checkin.month, label: "本月打卡") }
+            streak(store.checkin.longest, label: "最长连续")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -450,6 +451,8 @@ struct TodayWorkBar: View {
     let focus: LearningFocus?
     /// 5.2.0：今日检查的合计（已做 / 应做），点开今日检查页
     var check = DailyCheckState.empty
+    /// 5.2.2：今天已打卡
+    var checkedIn = false
     let onStart: () -> Void
     var onCheck: () -> Void = {}
     let onFocus: () -> Void
@@ -469,10 +472,11 @@ struct TodayWorkBar: View {
                 if !allDone { Text("约 \(minutes) 分钟").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).monospacedDigit() }
                 Spacer(minLength: 8)
                 Button(action: onCheck) {
-                    Label(check.due > 0 ? "今日检查 \(check.done)/\(check.due)" : "今日检查", systemImage: "checklist.checked").lineLimit(1)
+                    Label(checkedIn ? "今日已打卡" : check.due > 0 ? "今日检查 \(check.done)/\(check.due)" : "今日检查",
+                          systemImage: checkedIn ? "checkmark.seal.fill" : "checklist.checked").lineLimit(1)
                 }
                 .buttonStyle(.plain).font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(check.due > 0 && check.left == 0 ? ReviewPalette.done : ReviewPalette.accent)
+                .foregroundStyle(checkedIn || (check.due > 0 && check.left == 0) ? ReviewPalette.done : ReviewPalette.accent)
                 .help("一页看全今天的回顾、记忆卡、重温与自测：各组已做 / 应做").handCursor()
                 if let focus {
                     Button(action: onFocus) {

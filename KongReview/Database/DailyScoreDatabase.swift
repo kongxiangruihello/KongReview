@@ -178,6 +178,8 @@ extension AppDatabase {
                     masteryGood = excluded.masteryGood, masteryMid = excluded.masteryMid, masteryBad = excluded.masteryBad,
                     updatedAt = excluded.updatedAt
                 """, arguments: [day, score?.rawValue, text, m.good, m.mid, m.bad, now, now])
+            // 5.2.2：做完一组且写了日评即打卡
+            try Self.evaluateCheckin(db, day: day, now: now)
         }
     }
 

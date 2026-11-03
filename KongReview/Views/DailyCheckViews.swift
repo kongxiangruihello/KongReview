@@ -17,6 +17,9 @@ struct DailyCheckView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header(state)
+                // 5.2.2：今天是否已打卡与天数；连续中断时记一句原因
+                CheckinStatusStrip()
+                StreakBreakPrompt()
                 ReviewCardContainer(padding: 0) {
                     ForEach(Array(state.rows.enumerated()), id: \.element.id) { i, row in
                         if i > 0 { Divider().padding(.leading, 64) }
@@ -24,6 +27,7 @@ struct DailyCheckView: View {
                     }
                 }
                 DailyScoreSection()
+                CheckinSection()
                 if !organize.isEmpty { organizeSection }
                 Text("“应做”是今天第一次统计时各组的待办，之后新到期的不追加；做得比应做多时按已做计。跳过的组今天不计入合计，明天照常。每天从本周自测中带几题、每天重温几段笔记，可在设置的“回顾”页修改。")
                     .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
@@ -224,8 +228,10 @@ struct DailyScoreSection: View {
     // MARK: 四格
 
     @ViewBuilder private var tiles: some View {
-        tile("推进", score.progress.total > 0 ? "\(score.progress.total) 项" : "—",
-             detail: progressDetail, color: score.progress.total > 0 ? ReviewPalette.done : ReviewPalette.sub)
+        // 5.2.2：小胜也计入推进的条数
+        let moved = score.progress.total + store.todayGains.count
+        tile("推进", moved > 0 ? "\(moved) 项" : "—",
+             detail: progressDetail, color: moved > 0 ? ReviewPalette.done : ReviewPalette.sub)
         tile("完成度", score.completion.map { Self.percent($0) } ?? "—",
              detail: score.completion == nil ? "今天没有应做" : "已做 \(store.dailyCheck.done) / 应做 \(store.dailyCheck.due)",
              color: ReviewPalette.ink)

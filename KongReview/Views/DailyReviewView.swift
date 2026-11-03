@@ -243,7 +243,9 @@ struct DailyReviewView: View {
     }
 
     private var streakChip: some View {
-        StatChip(icon: "flame.fill", iconColor: ReviewPalette.hard, label: "连续", value: "\(store.stats.currentStreak) 天")
+        // 5.2.2：连续打卡（中断时显示本月打卡天数）
+        StatChip(icon: "flame.fill", iconColor: ReviewPalette.hard, label: store.checkin.current > 0 ? "连续打卡" : "本月打卡",
+                 value: "\(store.checkin.current > 0 ? store.checkin.current : store.checkin.month) 天")
             .fixedSize()
     }
 

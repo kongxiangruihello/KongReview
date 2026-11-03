@@ -460,6 +460,10 @@ final class AppDatabase {
         m.registerMigration("v23-daily-check") { db in
             try AppDatabase.installDailyCheck(in: db)
         }
+        // 5.2.2：之前有学习记录的日子记为“旧记录”打卡，连续天数不因升级归零
+        m.registerMigration("v24-checkin-legacy") { db in
+            try AppDatabase.installCheckinLegacy(in: db)
+        }
         return m
     }
 }
