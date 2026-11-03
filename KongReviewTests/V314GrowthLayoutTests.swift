@@ -20,7 +20,7 @@ final class V314GrowthLayoutTests: XCTestCase {
 
     func testPreviewLibraryIsInMemoryAndShowsBothDoneAndPending() throws {
         try MainActor.assumeIsolated {
-            let keys = [ReviewSessionRecord.key(theme: nil), SettingsKeys.dailyCount]
+            let keys = [ReviewSessionRecord.key(theme: nil), SettingsKeys.dailyCount, AnnotateSettings.perDayKey]
             let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
             defer {
                 for (key, value) in zip(keys, saved) {
@@ -38,6 +38,10 @@ final class V314GrowthLayoutTests: XCTestCase {
             XCTAssertGreaterThan(home.cardsDueCount, 0)
             let week = GrowthPeriod.week.window(containing: Date())
             XCTAssertEqual(try store.db.progressValue(GrowthReflection.self, key: week.key)?.goalCards, 40)
+            // 6.0.4：今日标注三篇；以前在别处划过的两篇不抽
+            store.refreshAnnotate()
+            XCTAssertEqual(store.annotate.items.count, 3)
+            XCTAssertFalse(store.annotate.items.contains { $0.title.hasPrefix("已在别处划过") || $0.title.hasPrefix("论语学而章疏") })
         }
     }
 }

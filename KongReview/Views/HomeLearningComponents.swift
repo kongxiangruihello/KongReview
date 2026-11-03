@@ -446,6 +446,8 @@ private enum HomeLearningDate {
 struct TodayWorkBar: View {
     let summary: HomeLearningSummary
     var revisit = RevisitCounts()
+    /// 6.0.4：今天要标注的文章（篇）
+    var annotate = DailyCheckCount()
     /// 5.0.2：今日收获（功课做完时显示）
     var gains: [String] = []
     let focus: LearningFocus?
@@ -464,8 +466,9 @@ struct TodayWorkBar: View {
     var body: some View {
         let reviewLeft = summary.reviewPendingCount
         let cardsLeft = cards.total
-        let minutes = LibraryStore.todayWorkMinutes(reviewPending: reviewLeft, cards: cards, revisit: revisit.left)
-        let allDone = reviewLeft == 0 && cardsLeft == 0 && revisit.left == 0
+        // 6.0.4：标注一篇按约 8 分钟计
+        let minutes = LibraryStore.todayWorkMinutes(reviewPending: reviewLeft, cards: cards, revisit: revisit.left) + annotate.left * 8
+        let allDone = reviewLeft == 0 && cardsLeft == 0 && revisit.left == 0 && annotate.left == 0
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("今日试卷").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
@@ -509,6 +512,9 @@ struct TodayWorkBar: View {
             if revisit.left > 0 || revisit.done > 0 {
                 step(3, "札记·笔记·问题", revisit.left, unit: "题", done: revisit.done)
             }
+            if annotate.total > 0 {
+                step(revisit.left > 0 || revisit.done > 0 ? 4 : 3, "标注文章", annotate.left, unit: "篇", done: annotate.done)
+            }
         }
     }
 
@@ -530,7 +536,7 @@ struct TodayWorkBar: View {
     private func startButton(allDone: Bool) -> some View {
         Button(action: onStart) {
             HStack(spacing: 6) {
-                Text(allDone ? "今日试卷已答完 · 看成绩单" : (summary.reviewCompletedCount + summary.cardsStudiedCount + revisit.done > 0 ? "接着答卷" : "开始答卷")).font(.system(size: 13, weight: .semibold))
+                Text(allDone ? "今日试卷已答完 · 看成绩单" : (summary.reviewCompletedCount + summary.cardsStudiedCount + revisit.done + annotate.done > 0 ? "接着答卷" : "开始答卷")).font(.system(size: 13, weight: .semibold))
                 Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(allDone ? ReviewPalette.ink : Color.white)

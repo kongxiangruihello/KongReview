@@ -12,13 +12,20 @@ extension LibraryStore {
             .review: DailyCheckCount(done: h.reviewCompletedCount, left: h.reviewPendingCount),
             .cards: DailyCheckCount(done: h.cardsStudiedCount, left: h.cardsDueCount),
             .revisit: DailyCheckCount(done: revisitCounts.done, left: revisitCounts.left),
+            .annotate: DailyCheckCount(done: annotate.done, left: annotate.left),
         ]
+    }
+
+    /// 6.0.4：卷子上的几组；每天标注设为 0 篇时不列“标注文章”
+    var examGroups: [DailyCheckGroup] {
+        AnnotateSettings.perDay() > 0 ? DailyCheckGroup.exam : DailyCheckGroup.exam.filter { $0 != .annotate }
     }
 
     /// 重算今日检查。今天的学习统计还没算出来（或正在重算、或还是昨天的）时只显示、不定应做数，免得把 0 或昨天的数当成今天的应做。
     func refreshDailyCheck() {
         let snapshot = derivedDayKey == ReminderPlan.dayKey(Date()) && !derivedIsLoading
-        dailyCheck = (try? db.dailyCheck(current: dailyCheckCounts(), groups: DailyCheckGroup.exam, snapshot: snapshot)) ?? .empty
+        refreshAnnotate()
+        dailyCheck = (try? db.dailyCheck(current: dailyCheckCounts(), groups: examGroups, snapshot: snapshot)) ?? .empty
         refreshCheckin()
         dailyCheckRevision += 1
     }
@@ -43,6 +50,7 @@ extension LibraryStore {
             selection = .cards
         case .revisit: openRevisit()
         case .selfTest: openSelfTest()
+        case .annotate: openExam()
         }
     }
 

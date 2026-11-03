@@ -112,6 +112,9 @@ final class LibraryStore {
     /// 5.2.0：今日检查（各组已做 / 应做）
     var dailyCheck = DailyCheckState.empty
     var dailyCheckRevision = 0
+    /// 6.0.4：今天要标注的文章，与正在标注的一篇
+    var annotate = AnnotateToday.empty
+    var annotating: AnnotateRequest?
     /// 5.2.2：打卡天数；打卡状态变化后由提醒模块重排晚间打卡提醒
     var checkin = CheckinSummary.empty
     @ObservationIgnored var onCheckinChanged: (() -> Void)?
@@ -575,6 +578,8 @@ final class LibraryStore {
     func addHighlight(from article: Article, text raw: String) {
         let text = ArticleText.cleanSelection(raw)
         guard !text.isEmpty else { return }
+        // 6.0.4：标注文章（长摘录当作文章打开，id 取负）
+        if let id = article.id, id < 0 { addAnnotationMark(articleId: -id, text: text); return }
         perform {
             try db.save(Highlight(sourceId: article.sourceId, text: text))
         }

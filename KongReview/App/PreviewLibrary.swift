@@ -145,7 +145,20 @@ import KongReviewCore
             plan.dueDate = day(-2); plan.createdAt = day(-6); plan.completedAt = day(-1)
             try db.saveLearningPlan(plan)
             try db.saveLearningPlan(LearningPlan(title: "写一篇《学而》札记", originKey: week.key))
+            // 6.0.4：几篇整篇存进来、还没划过的文章（今日标注）；另有两篇以前在别处划过（同一出处的短摘录出现在正文里），不抽
+            let essays: [(Int, String, [String])] = [
+                (2, "梁启超论清学", ["清代学术，以复古为解放。", "其始也，自宋明理学之反动而起；其继也，考证之学大盛，乾嘉诸老，各有专门。", "其末也，今文学兴，经世之说复起，而西学之输入，遂开新局。"]),
+                (1, "钱穆论读史", ["凡读本书请先具下列诸信念。", "当信任何一国之国民，尤其是自称知识在水平线以上之国民，对其本国已往历史，应该略有所知。", "所谓对其本国已往历史略有所知者，尤必附随一种对其本国已往历史之温情与敬意。"]),
+                (0, "论语学而章疏", ["学而时习之，不亦说乎。", "学者，觉也，效也；习者，鸟数飞也。学之不已，如鸟数飞，所以说也。", "有朋自远方来，不亦乐乎。同门曰朋，同志曰友。"]),
+                (1, "钱穆论国史之精神", ["治国史之第一任务，在能于国家民族之内部自身，求得其独特精神之所在。", "此种精神，即其民族文化之生命。", "国史所载，非帝王将相之家谱，乃一民族之全体生命史也。"]),
+            ]
+            for (i, essay) in essays.enumerated() {
+                let body = (0..<16).flatMap { round in essay.2.map { "\($0)（\(round + 1)）" } }.joined(separator: "\n\n")
+                _ = try db.save(Highlight(sourceId: sources[essay.0].id, text: "## \(essay.1)\n\n" + body + String(repeating: "\n\n读者按：此段宜反复读之。", count: 6), createdAt: day(-20 - i)))
+            }
+            _ = try db.save(Highlight(sourceId: sources[2].id, text: "## 已在别处划过的一篇\n\n" + String(repeating: "梁启超作清代学术概论，谓经世致用之学，起于明末清初诸大儒。顾炎武、黄宗羲、王夫之，皆以天下为己任。\n\n", count: 20), createdAt: day(-25)))
             UserDefaults.standard.set(10, forKey: SettingsKeys.dailyCount)
+            UserDefaults.standard.set(3, forKey: AnnotateSettings.perDayKey)
             let store = LibraryStore(db: db, draftPersistence: nil, positionDefaults: nil)
             store.journeyNavigation.period = .week
             return store

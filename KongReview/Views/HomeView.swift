@@ -26,7 +26,9 @@ struct HomeView: View {
                 // 5.2.1：有新版本时提示一行
                 UpdateHomeBanner()
 
-                TodayWorkBar(summary: store.homeLearningSummary, revisit: store.revisitCounts, gains: store.todayGains, focus: nil,
+                TodayWorkBar(summary: store.homeLearningSummary, revisit: store.revisitCounts,
+                             annotate: DailyCheckCount(done: store.annotate.done, left: store.annotate.left),
+                             gains: store.todayGains, focus: nil,
                              check: store.dailyCheck, checkedIn: store.checkin.todayChecked,
                              onStart: { store.startTodayWork() },
                              onCheck: { store.openDailyCheck() },
