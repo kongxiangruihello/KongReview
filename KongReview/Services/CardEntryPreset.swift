@@ -120,8 +120,11 @@ struct CardEntryPreset: Codable, Equatable, Identifiable, Sendable {
     }
 
     func blankDraft(templates: [String: NoteTemplate], deckOverride: String? = nil) throws -> CardDraft {
-        let card = try blankCard(templates: templates, deckOverride: deckOverride)
-        return CardDraft(card: card, tagsText: TagParser.format(card.tags), entryGuidance: guidance(for: card))
+        let blank = try blankCard(templates: templates, deckOverride: deckOverride)
+        let g = guidance(for: blank)
+        // 6.0.7：各栏的起始内容（HTML）先填进去
+        let card = g.prefilled(blank)
+        return CardDraft(card: card, tagsText: TagParser.format(card.tags), entryGuidance: g)
     }
 
     /// Only the editor's truly empty placeholder HTML counts as empty; hidden media is input too.
@@ -186,7 +189,8 @@ extension LibraryStore {
             guard !fullBackupBusy else { throw CardEntryPresetError.backupBusy }
             guard let current = cardEditor else { return false }
             guard current.isNew else { throw CardEntryPresetError.existingCard }
-            guard !CardEntryPreset.hasInput(current.card), current.card.highlightId == nil else { throw CardEntryPresetError.inputExists }
+            let hasInput = current.entryGuidance?.hasInput(current.card) ?? CardEntryPreset.hasInput(current.card)
+            guard !hasInput, current.card.highlightId == nil else { throw CardEntryPresetError.inputExists }
             let library = try db.cardEntryPresetLibrary()
             guard let latest = library.presets.first(where: { $0.id == preset.id }) else { throw CardEntryPresetError.missingPreset }
             let next = try latest.blankDraft(templates: db.noteTemplates(), deckOverride: keepCurrentDeck ? current.card.deck : nil)

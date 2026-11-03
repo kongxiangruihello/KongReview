@@ -19,6 +19,8 @@ extension LibraryStore {
         cardWorkflow.duplicateReturn = nil
         var nextDraft = CardDraft(card:next,tagsText:TagParser.format(next.tags))
         if cardWorkflow.keepStructure { nextDraft.entryGuidance = draft.entryGuidance?.rebased(from:saved,to:next) }
+        // 6.0.7：下一张也先填上起始内容
+        if let g = nextDraft.entryGuidance { nextDraft.card = g.prefilled(nextDraft.card) }
         cardEditor = nextDraft
         return true
     }

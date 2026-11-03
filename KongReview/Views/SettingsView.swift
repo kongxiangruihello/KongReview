@@ -98,6 +98,7 @@ private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.reminderHour) private var hour = 8
     @AppStorage(SettingsKeys.reminderMinute) private var minute = 0
     @AppStorage(AnnotateSettings.perDayKey) private var annotatePerDay = AnnotateSettings.defaultPerDay
+    @AppStorage(ExamSettings.minutesKey) private var examMinutes = 0
 
     var body: some View {
         Form {
@@ -110,6 +111,13 @@ private struct ReviewSettings: View {
                 Stepper("进展题（「常念」的问题）：\(revisitQuestions) 道", value: $revisitQuestions, in: 0...5)
                 Stepper("复述题（笔记）：\(revisitBlocks) 道", value: $revisitBlocks, in: 0...10)
                 Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。「常念」且未解决的问题约每周回来一次。设为 0 即不出这一类。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("每天考多久") {
+                Stepper(examMinutes == 0 ? "不限时长（各类按上面的题数出）" : "每天约 \(examMinutes) 分钟", value: $examMinutes, in: 0...240, step: 5)
+                Text("设了时长，当天第一次组卷时按这个次序分配：补考的摘录 → 到期的记忆卡 → 札记 → 笔记 → 问题 → 其余摘录（每道约 20 秒到 2 分钟估算）；超出的题顺延到明天，卷子答完时可以“再考 10 分钟”。标注文章另算。卷面上忘了的题会在卷尾再考一次（不另占时长）。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -154,6 +162,7 @@ private struct ReviewSettings: View {
         .formStyle(.grouped)
         .onChange(of: revisitNotes) { store.refreshRevisit() }
         .onChange(of: annotatePerDay) { store.refreshDailyCheck() }
+        .onChange(of: examMinutes) { store.examResetBudget() }
         .onChange(of: revisitQuestions) { store.refreshRevisit() }
         .onChange(of: revisitBlocks) { store.refreshRevisit() }
         .onChange(of: checkinReminder) { ReminderScheduler.shared.applyCheckinReminder() }

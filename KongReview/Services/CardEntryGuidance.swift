@@ -1,10 +1,26 @@
 import Foundation
 import KongReviewCore
 
-/// Editor-only instructions. These values are never inserted into Card body fields.
+/// 录入时的提示与必填（只在编辑器里显示，不进卡片正文）；6.0.7 起另有“起始内容”（HTML），新建卡片时先填进这一栏。
 struct CardEntryInputRule: Codable, Equatable, Sendable {
     var hint = ""
     var required = false
+    /// 6.0.7：起始内容（HTML）。新建卡片时先填进这一栏，作格式与结构的起点；没改动过的起始内容不算填写
+    var html: String? = nil
+
+    var startHTML: String? { html.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } }
+
+    /// 这一栏还是原样的起始内容（按纯文字比较，编辑器改写了标签写法也认得出）
+    func isUntouchedStart(_ value: String) -> Bool {
+        guard let start = startHTML else { return false }
+        // 文字相同、图片与声音的个数也相同，才算原样
+        func signature(_ s: String) -> String {
+            let text = Markdown.plainText(fromHTML: s).components(separatedBy: .whitespacesAndNewlines).joined()
+            let images = s.components(separatedBy: "<img").count, sounds = s.components(separatedBy: "[sound:").count
+            return text + "|\(images)|\(sounds)"
+        }
+        return signature(value) == signature(start)
+    }
 }
 
 struct CardEntryValidationIssue: Equatable, Sendable {
@@ -48,7 +64,7 @@ struct CardEntryGuidance: Codable, Equatable, Sendable {
         }
         var issues: [CardEntryValidationIssue] = []
         func inspect(_ key: String, _ title: String, _ value: String, _ rule: CardEntryInputRule?) {
-            if rule?.required == true, !Self.hasContent(value) {
+            if rule?.required == true, !Self.hasContent(value) || rule?.isUntouchedStart(value) == true {
                 issues.append(.init(key: key, title: title, message: "请填写「\(title)」（必填）。"))
             }
         }
@@ -85,6 +101,40 @@ struct CardEntryGuidance: Codable, Equatable, Sendable {
             return mapped
         }
         return value
+    }
+
+    /// 6.0.7：把空着的栏目填上起始内容（新建、保存并新增时）
+    func prefilled(_ card: Card) -> Card {
+        var c = card
+        func fill(_ value: String, _ rule: CardEntryInputRule?) -> String {
+            guard let start = rule?.startHTML, !Self.hasContent(value) else { return value }
+            return start
+        }
+        if noteType == nil {
+            c.front = fill(c.front, front)
+            c.back = fill(c.back, back)
+        } else if let fields {
+            for i in c.fields.indices where fields.indices.contains(i) { c.fields[i] = fill(c.fields[i], fields[i]) }
+        }
+        if var secs = c.sections {
+            for i in secs.indices { secs[i].text = fill(secs[i].text, rule(for: "section:" + secs[i].id)) }
+            c.sections = secs
+        }
+        return c
+    }
+
+    /// 除了原样的起始内容以外，有没有填过东西
+    func hasInput(_ card: Card) -> Bool {
+        var c = card
+        func clear(_ value: String, _ key: String) -> String { rule(for: key)?.isUntouchedStart(value) == true ? "" : value }
+        c.front = clear(c.front, "front")
+        c.back = clear(c.back, "back")
+        for i in c.fields.indices { c.fields[i] = clear(c.fields[i], "field:\(i)") }
+        if var secs = c.sections {
+            for i in secs.indices { secs[i].text = clear(secs[i].text, "section:" + secs[i].id) }
+            c.sections = secs
+        }
+        return CardEntryPreset.hasInput(c)
     }
 
     static func hasContent(_ value: String) -> Bool {

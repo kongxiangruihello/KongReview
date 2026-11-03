@@ -73,12 +73,12 @@ enum CardEntryPresetTransfer {
         let rules = [preset.frontRule, preset.backRule].compactMap { $0 } + (preset.fieldRules ?? []) + preset.sections.compactMap(\.rule)
         guard preset.sections.count <= 100, preset.fieldNames.count <= 100, preset.tags.count <= 100,
               strings.allSatisfy({ $0.utf8.count <= 4_096 }), rules.count <= 202,
-              rules.allSatisfy({ $0.hint.utf8.count <= 16_384 }) else { throw CardEntryPresetTransferError.tooComplex }
+              rules.allSatisfy({ $0.hint.utf8.count <= 16_384 && ($0.html ?? "").utf8.count <= 65_536 }) else { throw CardEntryPresetTransferError.tooComplex }
     }
 
     private static func checkRuleKeys(_ object: Any?) throws {
         guard let object, !(object is NSNull) else { return }
-        guard let rule = object as? [String: Any], Set(rule.keys).isSubset(of: ["hint", "required"]) else {
+        guard let rule = object as? [String: Any], Set(rule.keys).isSubset(of: ["hint", "required", "html"]) else {
             throw CardEntryPresetTransferError.invalidFile
         }
     }

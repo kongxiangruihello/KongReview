@@ -209,7 +209,7 @@ extension AppDatabase {
     }
 
     /// 这一段之前最近的小标题
-    private static func headingBefore(_ db: Database, notebookId: Int64, position: Double) throws -> String? {
+    static func headingBefore(_ db: Database, notebookId: Int64, position: Double) throws -> String? {
         try String.fetchOne(db, sql: """
             SELECT text FROM notebook_block WHERE notebookId = ? AND kind = 'heading' AND position < ?
             ORDER BY position DESC LIMIT 1

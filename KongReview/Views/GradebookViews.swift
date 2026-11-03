@@ -456,8 +456,13 @@ struct WeakItemsSection: View {
                             ForEach(items[k] ?? []) { row($0) }
                         }
                     }
-                    Text("错的题会照常回到卷子上：摘录两天后补考，记忆卡按 FSRS，笔记“需重读”三天后。点一道可打开修改。")
-                        .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        Text("错的题会照常回到卷子上：今天卷尾再考一次，摘录两天后补考，记忆卡按 FSRS，笔记“需重读”三天后。点题面打开修改；“今天再考”放进今天的卷尾；反复记不住的摘录可以做成记忆卡。")
+                            .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        PillButton(icon: "arrow.uturn.backward.circle", title: "全部今天再考", style: .ghost) { queueAll() }
+                            .help("把这里的摘录、札记、笔记都放进今天的卷尾再考（记忆卡按 FSRS，不另加）")
+                    }
                 }
             }
         }
@@ -465,21 +470,56 @@ struct WeakItemsSection: View {
     }
 
     private func row(_ w: WeakItem) -> some View {
-        Button { store.openWeakItem(w) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(w.title).font(.system(size: 13, design: .serif)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
-                    if !w.detail.isEmpty { Text(w.detail).font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).lineLimit(1) }
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Button { store.openWeakItem(w) } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(w.title).font(.system(size: 13, design: .serif)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+                        if !w.detail.isEmpty { Text(w.detail).font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).lineLimit(1) }
+                    }
+                    Spacer()
+                    Text("错 \(w.misses) / \(w.attempts) 次").font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(w.lastMissed ? ReviewPalette.pending : ReviewPalette.sub)
+                        .help(w.lastMissed ? "最近一次是错的" : "最近一次答对了")
                 }
-                Spacer()
-                Text("错 \(w.misses) / \(w.attempts) 次").font(.system(size: 12).monospacedDigit())
-                    .foregroundStyle(w.lastMissed ? ReviewPalette.pending : ReviewPalette.sub)
-                    .help(w.lastMissed ? "最近一次是错的" : "最近一次答对了")
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 3).padding(.leading, 10)
-            .overlay(alignment: .leading) { Rectangle().fill(ReviewPalette.hair).frame(width: 2) }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain).handCursor()
+            // 6.0.7：一键处理
+            HStack(spacing: 8) {
+                if let kind = relearnKind(w.kind) {
+                    let queued = store.examRelearn.items.contains { $0.kind == kind && $0.id == w.recordId }
+                    Button(queued ? "已排进" : "今天再考") { store.examRelearnAdd(kind, w.recordId) }
+                        .disabled(queued)
+                        .help("放进今天的卷尾再考：常规的题答完后出这一道，答对才算过关")
+                }
+                if w.kind == .highlight {
+                    Button("做成记忆卡") { store.batch(.addToMastery, ids: [w.recordId]) }
+                        .help("反复记不住的原文，改用记忆卡的作答题来考（牌组“摘录”）")
+                    Button("弃置") { store.batch(.discard(true), ids: [w.recordId]) }
+                        .help("以后不再出这一条（可在全部摘录里恢复，⌘Z 可撤销）")
+                }
+            }
+            .buttonStyle(.link).font(.system(size: 11.5)).handCursor()
         }
-        .buttonStyle(.plain).handCursor()
+        .padding(.vertical, 3).padding(.leading, 10)
+        .overlay(alignment: .leading) { Rectangle().fill(ReviewPalette.hair).frame(width: 2) }
+    }
+
+    private func relearnKind(_ k: GradeKind) -> ExamRelearnItem.Kind? {
+        switch k {
+        case .highlight: .highlight
+        case .note: .note
+        case .block: .block
+        case .card: nil
+        }
+    }
+
+    /// 把常错的摘录、札记、笔记都放进今天的卷尾再考
+    private func queueAll() {
+        for k in [GradeKind.highlight, .note, .block] {
+            guard let kind = relearnKind(k) else { continue }
+            for w in items[k] ?? [] { store.examRelearnAdd(kind, w.recordId) }
+        }
     }
 }

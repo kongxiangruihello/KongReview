@@ -8,7 +8,7 @@ extension LibraryStore {
         let deck = value.trimmingCharacters(in:.whitespacesAndNewlines).nilIfBlank ?? "默认"
         draft.card.deck = deck
         cardEditor = draft
-        guard draft.isNew,!CardEntryPreset.hasInput(draft.card),draft.card.highlightId == nil else { return }
+        guard draft.isNew,!(draft.entryGuidance?.hasInput(draft.card) ?? CardEntryPreset.hasInput(draft.card)),draft.card.highlightId == nil else { return }
         applyCurrentDeckEntryPreset()
     }
 
