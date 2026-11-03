@@ -21,11 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !EditorValidation.isEnabled, !PreviewLibrary.isEnabled else { return }
         HotKeyCenter.shared.action = { QuickCaptureController.shared.show() }
         HotKeyCenter.shared.apply(HotKeyPreset.current)
-        HotKeyCenter.shared.lookupAction = { CitationLookupController.shared.show() }
-        HotKeyCenter.shared.applyLookup(HotKeyPreset.lookup)
         StatusItemController.shared.apply()
         ServiceProvider.install()
         QuickCaptureController.shared.store?.runStartupMaintenance()
+        // 6.0.1：第一次打开时导出舍弃功能里的内容，并留一份数据库快照
+        QuickCaptureController.shared.store?.runSlimUpgradeIfNeeded()
 
         // 提醒与“今天是否已回顾”挂钩：首次回顾后、跨日时重排通知
         QuickCaptureController.shared.store?.onReviewedToday = {
@@ -68,11 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in
             MainActor.assumeIsolated {
                 QuickCaptureController.shared.store?.checkDayChange()
-                // 1.3：每周一 8 点后推送一次“上周小结”
-                if let s = QuickCaptureController.shared.store { WeeklyDigestNotifier.checkAndPost(store: s) }
             }
         }
-        if let s = QuickCaptureController.shared.store { WeeklyDigestNotifier.checkAndPost(store: s) }
+        // 6.0.1：引文速查、每周小结推送已舍弃。记下最近用的浏览器，供“服务”录入摘录时取网址
         BrowserWatcher.shared.start()
 
         // 5.2.1：在线更新——安装前先备份学习库；启动时每天至多自动检查一次（晚一点，免得和启动维护抢资源）
@@ -112,8 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             QuickCaptureController.shared.store?.openTodayReview()
             WindowOpener.showMain()
         case .save(let url):
-            WindowOpener.showMain()
-            QuickCaptureController.shared.store?.saveArticle(from: url.absoluteString)
+            // 6.0.1：网页存档已舍弃；旧的“整页存档”书签改为把网址带进快速录入
+            QuickCaptureController.shared.show(prefill: CaptureRequest(text: "", url: url.absoluteString))
         }
     }
 }

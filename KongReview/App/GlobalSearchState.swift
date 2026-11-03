@@ -18,7 +18,7 @@ final class GlobalSearchState {
 
     static let pageSize = 20
     var normalizedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
-    var total: Int { sections.reduce(0) { $0 + $1.total } }
+    var total: Int { sections.filter { GlobalSearchKind.shown.contains($0.kind) }.reduce(0) { $0 + $1.total } }
 
     func present() {
         pendingTarget = nil

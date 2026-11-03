@@ -90,18 +90,6 @@ struct QuestionBookView: View {
     private var filterBar: some View {
         HStack(spacing: 12) {
             Menu {
-                Button("全部项目") { store.questionBookFilter.projectID = nil }
-                Divider()
-                ForEach(store.researchProjects) { p in
-                    Button { store.questionBookFilter.projectID = p.id } label: {
-                        if p.id == store.questionBookFilter.projectID { Label(p.title, systemImage: "checkmark") } else { Text(p.title) }
-                    }
-                }
-            } label: {
-                Label(store.questionBookFilter.projectID.flatMap { id in store.researchProjects.first { $0.id == id }?.title } ?? "按项目", systemImage: "folder")
-            }
-            .menuStyle(.borderlessButton).fixedSize()
-            Menu {
                 Button("全部专题") { store.questionBookFilter.notebookID = nil }
                 Divider()
                 ForEach(store.notebooks) { n in
@@ -506,7 +494,6 @@ struct QuestionView: View {
                 }
                 HStack(spacing: 12) {
                     scopeMenu("归入专题", kind: .notebook, items: store.notebooks.compactMap { n in n.id.map { ScopeChoice(id: $0, title: n.title) } }, current: d.scopes)
-                    scopeMenu("归入项目", kind: .project, items: store.researchProjects.compactMap { p in p.id.map { ScopeChoice(id: $0, title: p.title) } }, current: d.scopes)
                 }
                 .font(.system(size: 12.5))
             }

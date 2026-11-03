@@ -308,3 +308,25 @@ struct StatChip: View {
         }
     }
 }
+
+/// 页面上的一块：标题、说明与内容
+struct ProjectPanel<Content: View>: View {
+    let title: String
+    var subtitle: String = ""
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(ReviewPalette.ink)
+                Spacer(minLength: 8)
+                if !subtitle.isEmpty { Text(subtitle).font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).lineLimit(1) }
+            }
+            content
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ReviewPalette.hair))
+    }
+}

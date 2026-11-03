@@ -160,7 +160,6 @@ struct IdeaNoteView: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Label("札记", systemImage: "lightbulb").font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
                 Spacer()
-                ResearchProjectLinkMenu(kind: .note, recordId: noteId).fixedSize()
                 Button(editing ? "完成" : "编辑") { if editing { commit() } else { draftTitle = d.note.title; draftBody = d.note.body; editing = true } }
                     .keyboardShortcut(editing ? KeyboardShortcut(.return, modifiers: .command) : nil)
                     .buttonStyle(.borderedProminent).controlSize(.small).handCursor()

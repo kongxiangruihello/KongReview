@@ -69,7 +69,7 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>© 孔祥瑞</string>
-  <key>NSAppleEventsUsageDescription</key><string>存档网页时读取浏览器当前标签页的网址，自动填入。</string>
+  <key>NSAppleEventsUsageDescription</key><string>从浏览器录入摘录时读取当前标签页的网址，自动填入出处。</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsArbitraryLoads</key><true/>
@@ -81,13 +81,6 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
       <key>NSMessage</key><string>addHighlight</string>
       <key>NSPortName</key><string>${APP}</string>
       <key>NSSendTypes</key><array><string>public.html</string><string>public.rtf</string><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array>
-      <key>NSRequiredContext</key><dict/>
-    </dict>
-    <dict>
-      <key>NSMenuItem</key><dict><key>default</key><string>在 KongReview 中查引文</string></dict>
-      <key>NSMessage</key><string>lookupSelection</string>
-      <key>NSPortName</key><string>${APP}</string>
-      <key>NSSendTypes</key><array><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array>
       <key>NSRequiredContext</key><dict/>
     </dict>
   </array>

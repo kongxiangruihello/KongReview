@@ -236,13 +236,10 @@ struct GrowthReportView: View {
                 AcademicDivider()
                 distributionSection
                 AcademicDivider()
-                focusSection
-                AcademicDivider()
+                // 6.0.1：项目进展、学习计划两节已舍弃
                 goalsSection
                 AcademicDivider()
                 reflectionSection
-                AcademicDivider()
-                plansSection
                 AcademicDivider()
                 appendixSection
             }
@@ -367,8 +364,6 @@ struct GrowthReportView: View {
                     .onTapGesture { metric = item; page = 0 }
                     .handCursor()
                 }
-                writingRow("写作（字）", writingNow.added, writingBefore.added)
-                writingRow("写作天数", writingNow.days, writingBefore.days)
                 writingRow("新写札记（条）", notesNow, notesBefore)
                 writingRow("重温札记（条）", revisitedNow, revisitedBefore)
                 writingRow("解决问题（个）", solvedNow, solvedBefore)

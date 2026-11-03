@@ -16,7 +16,7 @@ final class V503SidebarHomeTests: XCTestCase {
         XCTAssertTrue(first.applied)
         let later = SidebarLayout.applyV5Defaults(collapsed: [], applied: true)
         XCTAssertEqual(later.collapsed, [], "之后按自己的折叠状态")
-        XCTAssertEqual(SidebarLayout.groups, ["review", "thinking", "materials", "research"])
+        XCTAssertEqual(SidebarLayout.groups, ["exam", "bank", "other"], "6.0.1：考场、题库、其他")
     }
 
     func testOnThisDaySameDayPreviousYearsNewestFirst() throws {

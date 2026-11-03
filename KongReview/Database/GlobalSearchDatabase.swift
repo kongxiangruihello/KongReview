@@ -9,6 +9,8 @@ enum GlobalSearchKind: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// 4.1.1：问题簿
     case question
     var id: String { rawValue }
+    /// 6.0.1：网页存档已舍弃，搜索面板不再列出（存档数据仍在库里）
+    static let shown: [GlobalSearchKind] = allCases.filter { $0 != .article }
     var title: String {
         switch self {
         case .note: return "札记"

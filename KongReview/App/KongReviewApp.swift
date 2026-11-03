@@ -57,22 +57,20 @@ struct KongReviewApp: App {
                     .keyboardShortcut("n")
                 Button("快速录入浮窗") { QuickCaptureController.shared.show() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
-                Button("引文速查…") { CitationLookupController.shared.show() }
                 Button("新建专题笔记本…") { store.newNotebookRequest = NewNotebookRequest() }
-                Button("存档网页…") { store.showAddArticle() }
-                    .keyboardShortcut("l")
                 Button("新建出处") {
                     store.editingSource = Source(title: "")
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                             }.disabled(store.fullBackupBusy || store.learningExplorer != nil || store.learningMaterialExport != nil)
             }
-            CommandMenu("回顾") {
+            CommandMenu("考场") {
                 Group {
                 Button("今日回顾") { store.openTodayReview(); WindowOpener.showMain() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("记忆卡") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("今日检查") { store.openDailyCheck(); WindowOpener.showMain() }
                 Button("回顾统计") { store.selection = .stats }
                             }.disabled(store.fullBackupBusy || store.learningExplorer != nil || store.learningMaterialExport != nil)
             }
@@ -102,7 +100,6 @@ struct KongReviewApp: App {
                 Button("导出完整备份…") { store.exportFullBackup() }
                 Button("恢复完整备份…") { store.chooseFullBackupRestore() }
                 Divider()
-                Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
                 Button("从 LiquidText 导入笔记…") { ExportService.importLiquidText(store: store) }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
                 Button("从剪贴板导入 LiquidText 笔记") { ExportService.importLiquidTextFromClipboard(store: store) }

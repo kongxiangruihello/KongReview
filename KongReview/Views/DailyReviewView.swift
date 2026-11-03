@@ -39,9 +39,6 @@ struct DailyReviewView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 18) {
-                            if let d = store.currentWeeklyDigest() {
-                                WeeklyDigestCard(digest: d)
-                            }
                             if let notice = state.draftNotice {
                                 HStack(alignment: .top, spacing: 8) {
                                     Label(notice, systemImage: "doc.badge.clock")

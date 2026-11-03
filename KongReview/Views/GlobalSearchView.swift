@@ -30,7 +30,7 @@ struct GlobalSearchView: View {
                 }
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(ReviewPalette.sub)
-                    TextField("搜索摘录、记忆卡、网页正文或出处", text: $state.query)
+                    TextField("搜索摘录、记忆卡、出处、札记或问题", text: $state.query)
                         .textFieldStyle(.plain)
                         .font(.body)
                         .focused($searchFocused)
@@ -51,7 +51,7 @@ struct GlobalSearchView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(ReviewPalette.hair))
                 Picker("搜索范围", selection: $state.selectedKind) {
                     Text("全部").tag(Optional<GlobalSearchKind>.none)
-                    ForEach(GlobalSearchKind.allCases) { kind in
+                    ForEach(GlobalSearchKind.shown) { kind in
                         Text(kind.title).tag(Optional(kind))
                     }
                 }
@@ -84,7 +84,7 @@ struct GlobalSearchView: View {
             ContentUnavailableView {
                 Label("从全部资料中查找", systemImage: "magnifyingglass")
             } description: {
-                Text("可搜索摘录原文、译文、按语，记忆卡正反面与标签，网页正文和出处信息。")
+                Text("可搜索摘录原文、译文、按语，记忆卡正反面与标签，出处信息，札记与问题。")
             }
         } else if state.isLoading {
             VStack(spacing: 12) {
@@ -108,7 +108,7 @@ struct GlobalSearchView: View {
                             Button("重试") { state.invalidate() }.handCursor()
                         }
                     }
-                    ForEach(state.sections.filter { $0.total > 0 }, id: \.kind) { page in
+                    ForEach(state.sections.filter { $0.total > 0 && GlobalSearchKind.shown.contains($0.kind) }, id: \.kind) { page in
                         resultSection(page)
                     }
                 }

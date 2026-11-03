@@ -60,34 +60,6 @@ private struct QuickCaptureSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Button("现在试一下") { QuickCaptureController.shared.show() }
             }
-            Section("引文速查") {
-                Picker("快捷键", selection: Binding(
-                    get: { HotKeyPreset.lookup },
-                    set: { p in
-                        HotKeyPreset.lookup = p
-                        HotKeyCenter.shared.applyLookup(p)
-                        store.reload()
-                    })) {
-                    ForEach(HotKeyPreset.allCases) { Text($0.label).tag($0) }
-                }
-                if HotKeyCenter.shared.lookupRegistrationFailed {
-                    Text("这个快捷键已被其他应用占用，请换一个。").font(.caption).foregroundStyle(.red)
-                }
-                Text("写作时在任何应用里按快捷键，搜索摘录，回车把“原文 + 出处”粘到光标处。出处按“设置 → 摘录”里的引文体例生成。")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button("现在试一下") { CitationLookupController.shared.show() }
-                    if AXIsProcessTrusted() {
-                        Label("已允许自动粘贴", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
-                    } else {
-                        Button("允许自动粘贴…") { CitationLookupController.requestAccessibility() }
-                    }
-                }
-                Text("自动粘贴要在“系统设置 → 隐私与安全性 → 辅助功能”里允许 KongReview（用来模拟按 ⌘V）。不允许也能用：选中后自动复制，自己按 ⌘V。注意：本应用是本机签名，每次重新构建安装后可能要重新勾选一次。")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             Section {
                 Toggle("在菜单栏显示图标", isOn: $showMenuBarIcon)
                     .onChange(of: showMenuBarIcon) { StatusItemController.shared.apply() }
@@ -113,14 +85,12 @@ private struct ReviewSettings: View {
     @AppStorage(SettingsKeys.dailyCount) private var dailyCount = 10
     @AppStorage(RevisitLimits.notesKey) private var revisitNotes = 2
     @AppStorage(RevisitLimits.questionsKey) private var revisitQuestions = 1
-    @AppStorage(RevisitLimits.booksKey) private var revisitBooks = 1
     @AppStorage(RevisitLimits.blocksKey) private var revisitBlocks = 2
     @AppStorage(DailyCheckSettings.selfTestPerDayKey) private var dailySelfTest = 2
     @AppStorage(CheckinReminderPlan.enabledKey) private var checkinReminder = true
     @AppStorage(CheckinReminderPlan.hourKey) private var checkinHour = CheckinReminderPlan.defaultHour
     @AppStorage(CheckinReminderPlan.minuteKey) private var checkinMinute = 0
     @AppStorage(ReflectionReminderPlan.enabledKey) private var reflectionReminder = false
-    @AppStorage(SidebarLayout.showResearchKey) private var showResearch = true
     @AppStorage(ReflectionReminderPlan.weekdayKey) private var reflectionWeekday = 1
     @AppStorage(ReflectionReminderPlan.hourKey) private var reflectionHour = 20
     @AppStorage(ReflectionReminderPlan.minuteKey) private var reflectionMinute = 0
@@ -134,17 +104,9 @@ private struct ReviewSettings: View {
             Text("改动从明天（或点“再抽一组”）开始生效。")
                 .font(.caption).foregroundStyle(.secondary)
 
-            Section("侧栏与首页") {
-                Toggle("显示“研究与写作”（研究项目、专题笔记本）", isOn: $showResearch)
-                Text("隐藏后侧栏不再列出这一组，首页不显示当前项目；项目、笔记本与当前项目的回顾加权都不变，随时可以再打开。")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             Section("重温（今日功课第三步）") {
                 Stepper("每天至多重温札记：\(revisitNotes) 条", value: $revisitNotes, in: 0...10)
                 Stepper("每天至多重温「常念」的问题：\(revisitQuestions) 个", value: $revisitQuestions, in: 0...5)
-                Stepper("每天至多重温读完的书：\(revisitBooks) 本", value: $revisitBooks, in: 0...3)
                 Stepper("每天至多重温笔记：\(revisitBlocks) 段", value: $revisitBlocks, in: 0...10)
                 Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。「常念」且未解决的问题约每周回来一次。设为 0 即不重温这一类。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -192,7 +154,6 @@ private struct ReviewSettings: View {
         .formStyle(.grouped)
         .onChange(of: revisitNotes) { store.refreshRevisit() }
         .onChange(of: revisitQuestions) { store.refreshRevisit() }
-        .onChange(of: revisitBooks) { store.refreshRevisit() }
         .onChange(of: revisitBlocks) { store.refreshRevisit() }
         .onChange(of: dailySelfTest) { store.refreshDailyCheck() }
         .onChange(of: checkinReminder) { ReminderScheduler.shared.applyCheckinReminder() }
@@ -254,16 +215,6 @@ private struct CaptureSettings: View {
                     Button("复制“摘录选中文字”书签") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(CaptureRequest.bookmarklet, forType: .string)
-                    }
-                    Spacer()
-                }
-                Text("另一个书签“整页存档”：点一下就把当前网页整篇存进 KongReview 的“网页存档”，之后在应用里阅读、划线。")
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button("复制“整页存档”书签") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(CaptureRequest.saveBookmarklet, forType: .string)
                     }
                     Spacer()
                 }
@@ -353,27 +304,6 @@ private struct DataSettings: View {
                     }
                 }
             }
-            Section("自动同步到 Obsidian") {
-                Toggle("摘录有改动时自动更新 Markdown 文件", isOn: Binding(
-                    get: { ObsidianSync.isEnabled },
-                    set: { on in
-                        if on && ObsidianSync.folder == nil { chooseObsidianFolder() }
-                        ObsidianSync.isEnabled = on && ObsidianSync.folder != nil
-                        store.reload()
-                    }))
-                HStack {
-                    Text(ObsidianSync.folder?.path ?? "未选择文件夹")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("选择文件夹…") { chooseObsidianFolder() }
-                    Button("立即同步") { store.syncObsidianNow() }
-                        .disabled(ObsidianSync.folder == nil)
-                }
-                Text("每个出处一个 .md 文件（YAML 头 + 引用块 + 按语、出处、标签）；札记写在“札记”子文件夹里，一条一个文件，文件名即题目，[[题目]] 链接在 Obsidian 里可直接跳转。建议选 Obsidian 库里的一个子文件夹，如“KongReview”。只在内容变化时写入；这些文件由 KongReview 生成，在 Obsidian 里的改动会在下次同步时被覆盖。"
-                     + ((UserDefaults.standard.object(forKey: ObsidianSync.lastSyncKey) as? Date).map { "上次同步：\($0.formatted(date: .abbreviated, time: .shortened))。" } ?? ""))
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             Section("收件箱（其他应用投递摘录）") {
                 HStack {
                     Button("在访达中打开收件箱") {
@@ -419,9 +349,6 @@ private struct DataSettings: View {
                 Text("在 LiquidText 里导出笔记为 Word（.docx），这里选中即可（可多选）；图片摘录一并导入。也可以在 LiquidText 里选中笔记 ⌘C，再点“从剪贴板导入”。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("从 Readwise 导入 CSV…") { ExportService.importReadwiseCSV(store: store) }
-                Text("在 readwise.io/export 选择 CSV 下载。可重复导入同一文件，已存在的摘录会自动跳过。")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("导出") {
                 Button("导出全部为 Markdown（每个出处一个文件）…") {
@@ -462,17 +389,6 @@ private func chooseLiquidTextFolder() {
     LiquidTextFolder.folder = url
 }
 
-@MainActor
-private func chooseObsidianFolder() {
-    let panel = NSOpenPanel()
-    panel.canChooseDirectories = true
-    panel.canChooseFiles = false
-    panel.canCreateDirectories = true
-    panel.prompt = "同步到这里"
-    panel.message = "选择 Obsidian 库里的一个文件夹（建议新建“KongReview”子文件夹）"
-    guard panel.runModal() == .OK, let url = panel.url else { return }
-    ObsidianSync.folder = url
-}
 
 private struct CardSettingsTab: View {
     @Environment(LibraryStore.self) private var store

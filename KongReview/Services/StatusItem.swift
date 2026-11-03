@@ -63,8 +63,6 @@ final class StatusItemController: NSObject {
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
         add(menu, "快速录入（\(HotKeyPreset.current.label)）", #selector(quickCapture))
-        add(menu, "引文速查（\(HotKeyPreset.lookup.label)）", #selector(lookup))
-        add(menu, "存档网页…", #selector(addArticle))
         if let c = QuickCaptureController.shared.store?.todayCounts() {
             add(menu, "今日回顾（还剩 \(c.highlights) 条）", #selector(review))
             add(menu, "记忆卡（待学 \(c.cards) 张）", #selector(cards))
@@ -87,8 +85,6 @@ final class StatusItemController: NSObject {
 
     @objc private func quickCapture() { QuickCaptureController.shared.show() }
 
-    @objc private func lookup() { CitationLookupController.shared.show() }
-
     @objc private func review() {
         QuickCaptureController.shared.store?.openTodayReview()
         WindowOpener.showMain()
@@ -99,11 +95,6 @@ final class StatusItemController: NSObject {
     @objc private func cards() {
         QuickCaptureController.shared.store?.openCardsHome()
         WindowOpener.showMain()
-    }
-
-    @objc private func addArticle() {
-        WindowOpener.showMain()
-        QuickCaptureController.shared.store?.showAddArticle()
     }
 
     @objc private func backup() {

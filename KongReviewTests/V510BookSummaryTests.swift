@@ -5,6 +5,10 @@ import KongReviewCore
 
 /// 5.1：精简提要——保存、读完后 1 个月、半年、一年重温、每日上限、小胜与读完的书
 final class V510BookSummaryTests: XCTestCase {
+    // 6.0.1：这里测的是已舍弃、代码暂留到 6.0.3 的旧功能——测试时临时打开
+    override func setUp() { super.setUp(); SlimSwitch.featuresOff = false }
+    override func tearDown() { SlimSwitch.featuresOff = true; super.tearDown() }
+
     private let t0: Date = {
         var c = DateComponents(); c.year = 2026; c.month = 3; c.day = 1; c.hour = 9
         return Calendar.current.date(from: c)!

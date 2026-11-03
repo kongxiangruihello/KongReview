@@ -5,6 +5,10 @@ import KongReviewCore
 
 /// 4.0-a：研究项目——迁移、材料并集、阶段记录、归档、项目页汇总、当前项目
 final class V40ResearchProjectTests: XCTestCase {
+    // 6.0.1：这里测的是已舍弃、代码暂留到 6.0.3 的旧功能——测试时临时打开
+    override func setUp() { super.setUp(); SlimSwitch.featuresOff = false }
+    override func tearDown() { SlimSwitch.featuresOff = true; super.tearDown() }
+
     private var calendar: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = .current; return c }
     private var now: Date { calendar.date(from: .init(year: 2026, month: 10, day: 21, hour: 12))! }
     private func day(_ offset: Int) -> Date { now.addingTimeInterval(Double(offset) * 86_400) }

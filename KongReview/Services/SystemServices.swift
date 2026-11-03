@@ -42,11 +42,6 @@ final class ServiceProvider: NSObject {
         }
     }
 
-    @objc func lookupSelection(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>?) {
-        let text = (pboard.string(forType: .string) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        DispatchQueue.main.async { CitationLookupController.shared.show(query: String(text.prefix(60))) }
-    }
-
     /// 前台应用最前面窗口的标题（需要辅助功能权限；没有权限返回 nil）
     static func windowTitle(of app: NSRunningApplication?) -> String? {
         guard let app, AXIsProcessTrusted() else { return nil }
