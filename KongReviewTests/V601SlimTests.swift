@@ -85,7 +85,7 @@ final class V601SlimTests: XCTestCase {
     }
 
     func testFocusIsOffInApp() throws {
-        XCTAssertTrue(LibraryStore.slimmedFeaturesOff)
+        XCTAssertTrue(SlimSwitch.featuresOff)
         try MainActor.assumeIsolated {
             let db = try AppDatabase(DatabaseQueue())
             let source = try db.save(Source(title: "焦点书"))
