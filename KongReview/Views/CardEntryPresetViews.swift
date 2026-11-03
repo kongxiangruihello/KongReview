@@ -212,6 +212,18 @@ private struct CardEntryPresetEditorView: View {
                         }
                         if preset.sections.isEmpty { Text("可添加释义、出处、例句等空白栏目。").font(.caption).foregroundStyle(.secondary) }
                     }
+                    // 6.0.7：写了起始内容时，看新卡片在复习时的样子（正面、背面与栏目合在一起）
+                    if preset.hasStartHTML {
+                        let card = preset.previewCard()
+                        let faces = store.faces(of: card)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("新卡片的样子").font(.headline)
+                            CardWebView(front: faces.front, back: faces.back, store: store, css: store.cardCSS(for: card))
+                                .frame(height: 240)
+                                .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                            Text("按卡片样式显示起始内容；填写提示不会出现在卡片上。").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }.padding(.trailing, 6)
             }
             if let error { Text(error).font(.callout).foregroundStyle(.red) }
@@ -221,7 +233,7 @@ private struct CardEntryPresetEditorView: View {
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("保存") { save() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
             }
-        }.padding(24).frame(width: 640, height: 650).disabled(store.fullBackupBusy)
+        }.padding(24).frame(width: 720, height: 720).disabled(store.fullBackupBusy)
             .task {
                 tagsText = TagParser.format(preset.tags)
                 do { templates = try store.db.noteTemplates() }
@@ -297,6 +309,8 @@ private struct CardEntryRuleEditor: View {
     let label: String
     @Binding var rule: CardEntryInputRule
     @State private var showsHTML = false
+    /// 在光标处插入（不在末尾追加）
+    @State private var inserter = TemplateCodeInserter()
 
     private var html: Binding<String> {
         Binding(get: { rule.html ?? "" }, set: { rule.html = $0.isEmpty ? nil : $0 })
@@ -319,29 +333,28 @@ private struct CardEntryRuleEditor: View {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("HTML").font(.caption).foregroundStyle(.secondary)
-                        TextEditor(text: html)
-                            .font(.system(size: 12.5, design: .monospaced))
-                            .autocorrectionDisabled()
-                            .frame(minHeight: 110)
+                        // 代码框：等宽，不把直引号换成弯引号（否则 href="…" 会写坏）
+                        TemplateCodeEditor(text: html, inserter: inserter)
+                            .frame(minHeight: 120)
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text("预览").font(.caption).foregroundStyle(.secondary)
-                        EditorHTMLPreview(html: rule.html ?? "", store: store)
-                            .frame(minHeight: 110)
+                        EditorHTMLPreview(html: rule.startHTML ?? "", store: store)
+                            .frame(minHeight: 120)
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                     }
                 }
                 HStack(spacing: 10) {
                     Menu("插入") {
                         ForEach(Self.snippets.indices, id: \.self) { i in
-                            Button(Self.snippets[i].0) { rule.html = (rule.html ?? "") + Self.snippets[i].1 }
+                            Button(Self.snippets[i].0) { inserter.insert(Self.snippets[i].1) }
                         }
                     }
                     .menuStyle(.borderlessButton).fixedSize()
                     Button("清空") { rule.html = nil }.disabled(rule.html == nil)
                     Spacer()
-                    Text("新建卡片时先填进这一栏；原样没改不算填写（设了必填仍须填写）。不运行脚本。")
+                    Text("新建卡片时先填进这一栏；原样没改不算填写（设了必填仍须填写）。脚本、内嵌框架与事件属性存时去掉。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .controlSize(.small)

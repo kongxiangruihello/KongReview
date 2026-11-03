@@ -67,12 +67,39 @@ struct CardEntryPreset: Codable, Equatable, Identifiable, Sendable {
         value.sections = sections.map { section in
             var section = section
             section.name = section.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            section.rule = section.rule?.cleaned
             return section
         }
+        // 6.0.7：起始内容（HTML）去掉脚本等再存
+        value.frontRule = frontRule?.cleaned
+        value.backRule = backRule?.cleaned
+        value.fieldRules = fieldRules?.map(\.cleaned)
         return value
     }
 
+    /// 6.0.7：各栏的填写规则（含起始内容）
+    var allRules: [CardEntryInputRule] {
+        [frontRule, backRule].compactMap { $0 } + (fieldRules ?? []) + sections.compactMap(\.rule)
+    }
+
+    /// 6.0.7：有没有写起始内容
+    var hasStartHTML: Bool { allRules.contains { $0.startHTML != nil } }
+
+    /// 6.0.7：编辑预设时看新卡片的样子（不校验名称；笔记类型的字段按位置填）
+    func previewCard() -> Card {
+        let value = cleaned
+        var card = Card(deck: value.deck, front: value.noteType == nil ? value.frontRule?.startHTML ?? "" : "", tags: value.tags)
+        if value.noteType == nil { card.back = value.backRule?.startHTML ?? "" }
+        card.noteType = value.noteType
+        card.fields = value.fieldNames.indices.map { i in value.fieldRules?.indices.contains(i) == true ? value.fieldRules![i].startHTML ?? "" : "" }
+        card.sections = value.sections.isEmpty ? nil : value.sections.map {
+            CardSection(name: $0.name.isEmpty ? "栏目" : $0.name, text: $0.rule?.startHTML ?? "", folded: false)
+        }
+        return card
+    }
+
     func validate(templates: [String: NoteTemplate]) throws {
+        guard allRules.allSatisfy({ ($0.html?.utf8.count ?? 0) <= CardEntryInputRule.maximumHTMLBytes }) else { throw CardEntryPresetError.htmlTooLong }
         let value = cleaned
         guard !value.name.isEmpty else { throw CardEntryPresetError.emptyName }
         guard value.sections.allSatisfy({ !$0.name.isEmpty }) else { throw CardEntryPresetError.emptySection }
@@ -149,7 +176,7 @@ struct CardEntryPresetLibrary: Codable, Equatable, Sendable {
 
 enum CardEntryPresetError: LocalizedError, Equatable {
     case emptyName, duplicateName, emptySection, missingPreset, changedPreset, inputExists, existingCard, backupBusy
-    case missingNoteType(String), changedFields(String), unassignedFields, typedSections
+    case missingNoteType(String), changedFields(String), unassignedFields, typedSections, htmlTooLong
 
     var errorDescription: String? {
         switch self {
@@ -165,6 +192,7 @@ enum CardEntryPresetError: LocalizedError, Equatable {
         case .changedFields(let name): return "笔记类型「\(name)」的字段已变化，请在预设管理中重新确认笔记类型后保存。"
         case .unassignedFields: return "这些字段没有可用的笔记类型，无法保存为录入预设。"
         case .typedSections: return "多字段笔记类型使用自身字段，请先移除额外栏目。"
+        case .htmlTooLong: return "某一栏的起始内容（HTML）超过 64 KB，请精简后再保存。"
         }
     }
 }

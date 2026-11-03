@@ -136,4 +136,37 @@ final class V607RelearnTests: XCTestCase {
         var typed = next; typed.back = "已有内容"
         XCTAssertEqual(g.prefilled(typed).back, "已有内容", "有内容的不覆盖")
     }
+
+    /// 起始内容去掉脚本、内嵌框架、事件属性与 javascript: 链接；超长的不存；批量录入不带起始内容；预览卡
+    func testPresetStartHTMLCleanedAndLimited() throws {
+        var preset = CardEntryPreset(name: "名词解释", sections: [.init(name: "背景"), .init(name: "意义")])
+        preset.frontRule = .init(hint: "写概念", html: "<h4 onclick=\"steal()\">概念</h4><p></p><script>alert(1)</script>")
+        preset.backRule = .init(html: "<p><b>一句话：</b></p><iframe src=\"https://x\"></iframe><ul><li></li></ul>")
+        preset.sections[1].rule = .init(html: "<a href=\"javascript:run()\">影响</a>：")
+        XCTAssertEqual(preset.frontRule?.startHTML, "<h4>概念</h4><p></p>")
+        XCTAssertEqual(preset.backRule?.startHTML, "<p><b>一句话：</b></p><ul><li></li></ul>")
+        XCTAssertEqual(preset.sections[1].rule?.startHTML, "<a href=\"#\">影响</a>：")
+        XCTAssertNil(CardEntryInputRule(html: " \n ").startHTML, "只有空白的不算起始内容")
+        XCTAssertEqual(preset.cleaned.frontRule?.html, "<h4>概念</h4><p></p>", "存之前清理")
+        XCTAssertTrue(preset.hasStartHTML)
+
+        let draft = try preset.blankDraft(templates: [:])
+        XCTAssertEqual(draft.card.front, "<h4>概念</h4><p></p>")
+        XCTAssertEqual(draft.card.sections?.map(\.text), ["", "<a href=\"#\">影响</a>："])
+        XCTAssertEqual(try preset.blankCard(templates: [:]).front, "", "批量录入用的空白卡不带起始内容")
+        let preview = preset.previewCard()
+        XCTAssertEqual(preview.front, draft.card.front)
+        XCTAssertEqual(preview.sections?.map(\.text), ["", "<a href=\"#\">影响</a>："])
+
+        let data = try CardEntryPresetTransfer.encode([preset])
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("<script"), "导出的是清理过的")
+
+        var big = preset
+        big.backRule?.html = "<p>" + String(repeating: "字", count: 30_000) + "</p>"
+        XCTAssertThrowsError(try big.validate(templates: [:])) { XCTAssertEqual($0 as? CardEntryPresetError, .htmlTooLong) }
+        let db = try AppDatabase(DatabaseQueue())
+        XCTAssertThrowsError(try db.saveCardEntryPreset(big))
+        try db.saveCardEntryPreset(preset)
+        XCTAssertEqual(try db.cardEntryPresetLibrary().presets.first?.frontRule?.html, "<h4>概念</h4><p></p>")
+    }
 }

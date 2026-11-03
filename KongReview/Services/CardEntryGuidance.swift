@@ -8,7 +8,35 @@ struct CardEntryInputRule: Codable, Equatable, Sendable {
     /// 6.0.7：起始内容（HTML）。新建卡片时先填进这一栏，作格式与结构的起点；没改动过的起始内容不算填写
     var html: String? = nil
 
-    var startHTML: String? { html.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } }
+    /// 起始内容，去掉脚本、内嵌框架、事件属性与 javascript: 链接；只有空白的为 nil
+    var startHTML: String? {
+        html.map(Self.cleanHTML).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    }
+
+    static let maximumHTMLBytes = 65_536
+
+    /// 存进学习库、导出导入时用：起始内容清理过
+    var cleaned: Self {
+        var value = self
+        value.html = startHTML
+        return value
+    }
+
+    /// 只留排版用的标记：<script>、<style>、<iframe>、<object>、<embed>、<form> 等整段去掉，
+    /// <link>、<meta>、<base>、<input>、<button> 去掉，on…= 事件属性与 javascript: 链接去掉
+    static func cleanHTML(_ html: String) -> String {
+        var s = html
+        for tag in ["script", "style", "iframe", "object", "embed", "form", "textarea", "select"] {
+            s = s.replacingOccurrences(of: "(?is)<\\s*\(tag)\\b[^>]*>.*?<\\s*/\\s*\(tag)\\s*>", with: "", options: .regularExpression)
+            s = s.replacingOccurrences(of: "(?is)<\\s*/?\\s*\(tag)\\b[^>]*>", with: "", options: .regularExpression)
+        }
+        for tag in ["link", "meta", "base", "input", "button"] {
+            s = s.replacingOccurrences(of: "(?is)<\\s*\(tag)\\b[^>]*>", with: "", options: .regularExpression)
+        }
+        s = s.replacingOccurrences(of: #"(?is)\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?is)(href|src)\s*=\s*(["']?)\s*javascript:[^"'>\s]*\2"#, with: "$1=\"#\"", options: .regularExpression)
+        return s
+    }
 
     /// 这一栏还是原样的起始内容（按纯文字比较，编辑器改写了标签写法也认得出）
     func isUntouchedStart(_ value: String) -> Bool {
