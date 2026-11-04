@@ -23,6 +23,8 @@ struct ExamView: View {
     @State private var remark = ""
     @State private var tally = MasteryTally()
     @State private var organize: [OrganizeBlockItem] = []
+    /// 6.2：答题时编辑这道题
+    @State private var editRequest: ExamEditRequest?
     @FocusState private var typing: Bool
 
     var body: some View {
@@ -47,6 +49,9 @@ struct ExamView: View {
             }
             .padding(.horizontal, 40).padding(.top, 28).padding(.bottom, 40)
             .frame(maxWidth: 820).frame(maxWidth: .infinity)
+            .sheet(item: $editRequest) { r in
+                ExamEditSheet(request: r) { updated in current = updated }.environment(store)
+            }
         }
         .background(ReviewPalette.page)
         .navigationTitle("今日试卷")
@@ -186,6 +191,13 @@ struct ExamView: View {
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
             if !detail.isEmpty { Text(detail).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1) }
             Spacer()
+            // 6.2：答题时随手改这道题（HTML），改完回到卷面
+            if let q = current {
+                Button { editRequest = store.examEditRequest(q) } label: { Label("编辑这道题", systemImage: "pencil") }
+                    .buttonStyle(.link).font(.system(size: 12)).handCursor()
+                    .keyboardShortcut("e", modifiers: .command)
+                    .help("改这道题的内容（HTML 源码，即时预览），改完回到卷面；展开与否、“我的回答”不动（⌘E）")
+            }
         }
     }
 
