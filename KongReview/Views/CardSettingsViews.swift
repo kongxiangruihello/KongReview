@@ -331,7 +331,7 @@ struct PlainCardStyleEditorView: View {
                     TemplateCodeEditor(text: $css, inserter: inserter)
                         .frame(minHeight: 360)
                         .border(Color.secondary.opacity(0.3))
-                    Text("例：.face { font-size: 24px; } 或 .back { color: #555; }。可用的类名：.face（正面）、.back（背面）、.kr-field、.kr-label、.cloze。")
+                    Text("例：.face { font-size: 24px; } 或 .back { color: #7A5C3E; }；深色模式另写在 @media (prefers-color-scheme: dark) { … } 里，否则深色底上可能看不清。可用的类名：.face（正面）、.back（背面）、.kr-field、.kr-label、.cloze。")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

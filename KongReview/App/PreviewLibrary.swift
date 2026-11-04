@@ -7,7 +7,49 @@ import KongReviewCore
 @MainActor enum PreviewLibrary {
     static var isEnabled: Bool { Bundle.main.bundleIdentifier == "com.kongxiangrui.KongReview.Preview" }
 
+    /// 6.1.1：启动参数 `-previewBackup <完整备份路径>` 时，改用这份备份的副本（解到缓存目录的临时库）。
+    /// 原备份文件只读不改；正式学习库不碰；关掉预览后副本留在缓存目录，下次打开时清掉。
+    static let backupKey = "previewBackup"
+    /// 载入了备份时为备份的说明（侧栏底部显示），否则为 nil
+    private(set) static var backupLabel: String?
+
     static func makeStore() -> LibraryStore {
+        if let path = UserDefaults.standard.string(forKey: backupKey), !path.isEmpty {
+            do { return try makeStore(backup: URL(fileURLWithPath: (path as NSString).expandingTildeInPath)) }
+            catch { NSLog("预览：载入备份失败，改用示例库：\(error)") }
+        }
+        return makeSampleStore()
+    }
+
+    static func makeStore(backup url: URL, workRoot: URL? = nil, defaults: UserDefaults = .standard) throws -> LibraryStore {
+        let prepared = try FullBackupService.prepare(url: url)
+        defer { prepared.cleanup() }
+        let fm = FileManager.default
+        let root = workRoot ?? fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("KongReview预览·备份副本", isDirectory: true)
+        try? fm.removeItem(at: root)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let copy = root.appendingPathComponent("library.sqlite")
+        try fm.copyItem(at: FullBackupService.databaseFile(of: prepared), to: copy)
+        let db = try AppDatabase(DatabaseQueue(path: copy.path))
+        // 设置照备份里的（卷面题数等）。先清掉上次预览留下的一切——包括当天的卷尾再考、新录轮次等，
+        // 它们记的是示例库的编号，留着会指到副本里别的摘录
+        if isEnabled, let domain = Bundle.main.bundleIdentifier { defaults.removePersistentDomain(forName: domain) }
+        for key in FullBackupService.preferenceKeys { defaults.removeObject(forKey: key) }
+        for (key, value) in try FullBackupService.settings(of: prepared) { defaults.set(value, forKey: key) }
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "M月d日 HH:mm"
+        backupLabel = "学习库副本（备份于 \(f.string(from: prepared.manifest.createdAt))，\(prepared.counts.highlights) 条摘录）"
+        return LibraryStore(db: db, draftPersistence: nil, positionDefaults: nil)
+    }
+
+    static func makeSampleStore() -> LibraryStore {
+        backupLabel = nil
+        // 6.1.1：上次预览（可能载入过备份）留下的当天卷面状态记的是别的库的编号，清掉
+        if isEnabled {
+            for key in [LibraryStore.examRelearnKey, ExamFresh.sessionKey] { UserDefaults.standard.removeObject(forKey: key) }
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix("review.session.") {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
         do {
             let db = try AppDatabase(DatabaseQueue())
             let now = Date()
@@ -194,6 +236,16 @@ import KongReviewCore
             if let textBlock = try db.writer.read({ try Int64.fetchOne($0, sql: "SELECT id FROM notebook_block WHERE kind = 'text' ORDER BY id LIMIT 1") }) {
                 try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-10, hour: 20))
                 try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-3, hour: 20))
+            }
+            // 6.1.1：一种带 HTML 模板的多字段笔记类型与两张卡（一个月后才到期，不进今天的卷子），便于检查卡片模板编辑窗
+            try db.save(NoteTemplate(name: "人物（示例）", fieldNames: ["人名", "生卒", "要旨"], front: [0], back: [1, 2],
+                                     html: NoteTemplateHTML(front: "<div class=\"who\">{{人名}}</div>",
+                                                            back: "{{FrontSide}}<p class=\"years\">{{生卒}}</p>{{#要旨}}<div class=\"gist\">{{要旨}}</div>{{/要旨}}",
+                                                            css: ".who { font-size: 30px; letter-spacing: .1em; } .years { color: #8a6d3b; } .gist { text-align: left; }")))
+            for (name, years, gist) in [("顾炎武", "1613—1682", "经学即理学；行己有耻，博学于文"), ("戴震", "1724—1777", "由字通词，由词通道")] {
+                var c = Card(deck: "学术史", front: name, back: gist, state: .review, interval: 30, due: day(30), reps: 3, createdAt: day(-40))
+                c.noteType = "人物（示例）"; c.fields = [name, years, gist]
+                _ = try db.save(c)
             }
             // 6.0.7：“默认”牌组绑一个带起始内容（HTML）的录入预设，新建卡片时可看到填进去的样子
             var preset = CardEntryPreset(name: "名词解释（示例）", sections: [.init(name: "背景"), .init(name: "意义")])
