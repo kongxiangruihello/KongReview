@@ -4,13 +4,15 @@ import KongReviewCore
 
 // MARK: - 6.2：自评准不准
 //
-// 摘录题、解答题写了“我的回答”的，展开对照时把标准答案切成几处要点，标出写出了几处（IdeaUnits）；
+// 摘录题、解答题（6.2.2 起也包括记忆卡作答题、札记论证题、笔记复述题）写了“我的回答”的，展开对照时把标准答案切成几处要点，标出写出了几处（IdeaUnits）；
 // 判分时把“写出几处 / 共几处”与自己判的分一并记下。判“记得”而要点写出不到一半，记为自评偏高；
 // 判“忘了”而写出八成以上，记为自评偏低。只做提示与统计，不改判分、不改排程。
 
 /// 记哪一类题
 enum CalibrationKind: String, Sendable {
     case highlight, answer
+    /// 6.2.2：记忆卡作答题、札记论证题、笔记复述题
+    case card, note, block
 }
 
 /// 一期里的自评对照
@@ -25,6 +27,24 @@ struct CalibrationTally: Equatable, Sendable {
 }
 
 extension SelfTestResult {
+    /// 6.2.2：记忆卡评分折成自评——重来算忘了，困难算大致，良好、简单算记得
+    init(card answer: CardAnswer) {
+        switch answer {
+        case .again: self = .forgot
+        case .hard: self = .partly
+        case .good, .easy: self = .remembered
+        }
+    }
+
+    /// 6.2.2：复述题的判定折成自评——已吸收算记得，需重读算忘了，待整理算大致
+    init(block outcome: RevisitOutcome) {
+        switch outcome {
+        case .absorbed: self = .remembered
+        case .reread: self = .forgot
+        default: self = .partly
+        }
+    }
+
     var ideaGrade: IdeaUnits.Grade {
         switch self {
         case .remembered: .remembered
