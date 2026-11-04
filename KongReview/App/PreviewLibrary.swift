@@ -237,6 +237,12 @@ import KongReviewCore
                 try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-10, hour: 20))
                 try db.recordBlockRevisit(blockId: textBlock, outcome: .reread, now: day(-3, hour: 20))
             }
+            // 6.2：近几天写了回答的摘录题——一道判“记得”而要点只写出 1/4（自评偏高），其余对得上
+            for (i, h) in highlights.prefix(6).enumerated() {
+                let m = IdeaUnitMatch(units: (0..<4).map { IdeaUnit(text: "要点\($0 + 1)", hit: $0 <= i % 4) })
+                try db.recordCalibration(kind: .highlight, recordId: h.id!, match: m, result: i % 3 == 0 ? .remembered : .partly,
+                                         now: day(-(i % 3), hour: 20))
+            }
             // 6.1.1：一种带 HTML 模板的多字段笔记类型与两张卡（一个月后才到期，不进今天的卷子），便于检查卡片模板编辑窗
             try db.save(NoteTemplate(name: "人物（示例）", fieldNames: ["人名", "生卒", "要旨"], front: [0], back: [1, 2],
                                      html: NoteTemplateHTML(front: "<div class=\"who\">{{人名}}</div>",

@@ -480,6 +480,10 @@ final class AppDatabase {
         m.registerMigration("v28-question-exam") { db in
             try AppDatabase.installQuestionExam(in: db)
         }
+        // 6.2：对照要点——自评准不准
+        m.registerMigration("v29-exam-calibration") { db in
+            try AppDatabase.installExamCalibration(in: db)
+        }
         return m
     }
 }

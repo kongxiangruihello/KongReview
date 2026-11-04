@@ -209,6 +209,13 @@ extension LibraryStore {
     }
 
     /// 6.0.9：解答题——记得 / 大致 / 忘了（计入掌握度），忘了的当天卷尾再考
+    /// 6.2：记下这道题写出了几处要点与自己判的分（只作统计）
+    func examRecordCalibration(_ kind: CalibrationKind, recordId: Int64, match: IdeaUnitMatch, result: SelfTestResult, now: Date = Date()) {
+        guard !fullBackupBusy else { return }
+        do { try db.recordCalibration(kind: kind, recordId: recordId, match: match, result: result, now: now) }
+        catch { report(error) }
+    }
+
     func examAnswerQuestionAnswer(_ item: RevisitAnswerItem, result: SelfTestResult, now: Date = Date()) {
         guard !fullBackupBusy else { return }
         checkDayChange()
