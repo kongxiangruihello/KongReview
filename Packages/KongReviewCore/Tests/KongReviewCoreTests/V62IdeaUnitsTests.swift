@@ -6,12 +6,26 @@ final class V62IdeaUnitsTests: XCTestCase {
     func testUnitsSplitByPunctuationAndMergeShort() {
         XCTAssertEqual(IdeaUnits.units(from: "学而时习之，不亦说乎？有朋自远方来，不亦乐乎？"),
                        ["学而时习之", "不亦说乎", "有朋自远方来", "不亦乐乎"])
-        // “曰”这样的短片段并到后一段
-        XCTAssertEqual(IdeaUnits.units(from: "子曰：学而不思则罔，思而不学则殆。"), ["子曰，学而不思则罔", "思而不学则殆"])
+        // “子曰：”这样冒号前的短标签并到后一句（6.2.2）
+        XCTAssertEqual(IdeaUnits.units(from: "子曰：学而不思则罔，思而不学则殆。"), ["子曰：学而不思则罔", "思而不学则殆"])
         let units = IdeaUnits.units(from: "子曰：学而不思则罔，思而不学则殆。")
         XCTAssertEqual(units.last, "思而不学则殆")
         XCTAssertTrue(units.first?.contains("学而不思则罔") == true)
         XCTAssertFalse(units.contains("子曰"), "两个字的片段不单算一处")
+    }
+
+    /// 6.2.2：冒号前的短标签不单算一处，也不计入比较；文言短分句（不足 4 字）并到相邻一段
+    func testLabelsAndShortClauses() {
+        let units = IdeaUnits.units(from: "新录示例：士不可以不弘毅，任重而道远。")
+        XCTAssertEqual(units, ["新录示例：士不可以不弘毅", "任重而道远"])
+        let m = IdeaUnits.match(answer: "士不可以不弘毅", units: units)
+        XCTAssertEqual(m.units.map(\.hit), [true, false], "标签“新录示例”不计入比较")
+        XCTAssertEqual(IdeaUnits.body(of: "按：旨在重建义理"), "旨在重建义理")
+        XCTAssertEqual(IdeaUnits.body(of: "孟子字义疏证：一书"), "孟子字义疏证：一书", "五个字以上不算标签")
+        XCTAssertEqual(IdeaUnits.units(from: "戴震以考据为手段。按：旨在重建义理"), ["戴震以考据为手段", "按：旨在重建义理"])
+        XCTAssertEqual(IdeaUnits.units(from: "孟子字义疏证：一书即是明证"), ["孟子字义疏证", "一书即是明证"])
+        XCTAssertEqual(IdeaUnits.units(from: "三人行，必有我师焉"), ["三人行，必有我师焉"])
+        XCTAssertEqual(IdeaUnits.units(from: "然则，何以为士？士尚志"), ["然则，何以为士，士尚志"])
     }
 
     func testLongTextFallsBackToSentences() {

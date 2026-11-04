@@ -69,11 +69,22 @@ public enum IdeaUnits {
         return found.sorted { $0.0 < $1.0 }.map(\.1)
     }
 
+    /// 要点里用来比较的部分：去掉开头的短标签（“按：”“新录示例：”）
+    public static func body(of unit: String) -> String {
+        var rest = Substring(unit)
+        while let r = rest.firstIndex(where: { $0 == "：" || $0 == ":" }), rest.distance(from: rest.startIndex, to: r) < labelLength {
+            let after = rest[rest.index(after: r)...]
+            guard !after.isEmpty else { break }
+            rest = after
+        }
+        return String(rest)
+    }
+
     /// 回答与要点对照
     public static func match(answer: String, units: [String]) -> IdeaUnitMatch {
         let have = Set(tokens(answer))
         return IdeaUnitMatch(units: units.map { u in
-            let t = tokens(u)
+            let t = tokens(body(of: u))
             guard !t.isEmpty else { return IdeaUnit(text: u, hit: false) }
             let found = t.filter { have.contains($0) }.count
             return IdeaUnit(text: u, hit: Double(found) / Double(t.count) >= hitThreshold)
@@ -128,24 +139,42 @@ public enum IdeaUnits {
         s.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
+    /// 冒号前不足几个字的算标签（“按：”“朱注：”“新录示例：”），并入后一句，不单算一处
+    public static let labelLength = 5
+    /// 不足几个字的片段并到相邻一段（“子曰”“然则”之类）
+    public static let shortLength = 4
+
     private static func split(_ text: String, by marks: String) -> [String] {
         let set = Set(marks)
+        let colons: Set<Character> = ["：", ":"]
         var parts: [String] = []
         var cur = ""
+        var label = ""
         for ch in text {
-            if set.contains(ch) { parts.append(cur); cur = "" } else { cur.append(ch) }
+            if set.contains(ch) {
+                let piece = clean(cur)
+                if colons.contains(ch), !piece.isEmpty, piece.count < labelLength {
+                    // 6.2.2：冒号前的短标签留着，接到下一段前面
+                    label += piece + "："
+                } else {
+                    if !(label + piece).isEmpty { parts.append(label + piece) }
+                    label = ""
+                }
+                cur = ""
+            } else { cur.append(ch) }
         }
-        parts.append(cur)
+        let rest = clean(cur)
+        if !(label + rest).isEmpty { parts.append(label + rest) }
         return parts.map(clean).filter { !tokens($0).isEmpty }
     }
 
-    /// 太短的片段（不足 3 个字）并到前一段，免得“曰”“也”之类单算一处
+    /// 太短的片段并到前一段（开头的并到后一段），免得“曰”“也”之类单算一处
     private static func mergeShort(_ parts: [String]) -> [String] {
         var out: [String] = []
         for p in parts {
-            if p.count < 3, let last = out.popLast() { out.append(last + "，" + p) } else { out.append(p) }
+            if p.count < shortLength, let last = out.popLast() { out.append(last + "，" + p) } else { out.append(p) }
         }
-        if out.count > 1, let first = out.first, first.count < 3 { out.removeFirst(); out[0] = first + "，" + out[0] }
+        if out.count > 1, let first = out.first, first.count < shortLength { out.removeFirst(); out[0] = first + "，" + out[0] }
         return dedupe(out)
     }
 

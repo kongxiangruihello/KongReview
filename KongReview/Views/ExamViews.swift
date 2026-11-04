@@ -233,12 +233,15 @@ struct ExamView: View {
                 } else if !myAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text("我的回答：" + myAnswer).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                         .fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+                    // 6.2.2：记忆卡也对照要点（以背面为准）
+                    if let m = cardMatch(c) { ideaUnitsPanel(m) }
                 }
             }
             if revealed {
                 HStack(spacing: 10) {
                     ForEach(CardAnswer.allCases, id: \.self) { a in
                         PillButton(title: a.label, key: "\(a.rawValue)", style: a == .good ? .primary : .normal) {
+                            calibrate(.card, c.id, cardMatch(c), SelfTestResult(card: a))
                             store.examAnswerCard(c, a); next()
                         }
                         .keyboardShortcut(key(KeyEquivalent(Character("\(a.rawValue)"))))
@@ -401,6 +404,34 @@ struct ExamView: View {
         return m.total > 0 ? m : nil
     }
 
+    /// 6.2.2：记忆卡以背面为准（模板卡取背面的字段；原文里加粗、标记的为要点）
+    private func cardMatch(_ c: Card) -> IdeaUnitMatch? {
+        guard let answer = writtenAnswer else { return nil }
+        var standard = c.back
+        if let t = c.noteType.flatMap({ store.noteTemplates[$0] }), !c.fields.isEmpty {
+            standard = t.back.filter { $0 < c.fields.count }.map { c.fields[$0] }.joined(separator: "\n")
+        }
+        return Self.match(answer, standard)
+    }
+
+    /// 6.2.2：论证题以札记正文为准
+    private func noteMatch(_ n: RevisitNoteItem) -> IdeaUnitMatch? {
+        guard let answer = writtenAnswer else { return nil }
+        return Self.match(answer, WikiLinks.plain(n.body))
+    }
+
+    /// 6.2.2：复述题以这一段为准
+    private func blockMatch(_ k: RevisitBlockItem) -> IdeaUnitMatch? {
+        guard let answer = writtenAnswer else { return nil }
+        return Self.match(answer, k.text)
+    }
+
+    private static func match(_ answer: String, _ source: String) -> IdeaUnitMatch? {
+        let m = IdeaUnits.match(answer: answer, standard: Markdown.plainText(fromHTML: Markdown.richHTML(source)),
+                                marked: IdeaUnits.markedSpans(in: source))
+        return m.total > 0 ? m : nil
+    }
+
     private func calibrate(_ kind: CalibrationKind, _ id: Int64?, _ match: IdeaUnitMatch?, _ r: SelfTestResult) {
         guard let id, let match else { return }
         store.examRecordCalibration(kind, recordId: id, match: match, result: r)
@@ -450,6 +481,10 @@ struct ExamView: View {
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
                 if revealed {
                     VStack(alignment: .leading, spacing: 12) {
+                        if !myAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("我的回答：" + myAnswer).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        }
                         if plain(n.body).isEmpty {
                             Text("（还没有正文）").font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                         } else {
@@ -459,10 +494,14 @@ struct ExamView: View {
                             Text("引用的摘录 \(n.highlights.count) 条").font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.sub)
                             ForEach(n.highlights.prefix(5), id: \.id) { h in quoteRow(h) }
                         }
+                        if relearnItem == nil, let m = noteMatch(n) { ideaUnitsPanel(m) }
                     }
                     .padding(.top, 16)
                 } else {
                     think("为什么这么看？依据是哪些材料？想好了再展开正文对照。")
+                    // 6.2.2：先写下来再对照（可不写）
+                    TextField("我的回答：理由与依据（可不写）", text: $myAnswer, axis: .vertical)
+                        .lineLimit(1...5).textFieldStyle(.roundedBorder).focused($typing).padding(.top, 12)
                     revealButton()
                 }
             }
@@ -484,7 +523,7 @@ struct ExamView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("理由与依据想起来多少？").font(.system(size: 13.5, weight: .medium)).foregroundStyle(ReviewPalette.ink)
-                        gradeButtons { r in noteGrade = r }
+                        gradeButtons { r in calibrate(.note, n.id, noteMatch(n), r); noteGrade = r }
                     }
                 }
             }
@@ -513,10 +552,18 @@ struct ExamView: View {
                     .font(.system(size: 22, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 14)
                 if revealed {
+                    if !myAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("我的回答：" + myAnswer).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+                    }
                     RichWebText(text: Markdown.richHTML(k.text), style: .preview, slot: "exam-block").padding(.top, 16)
+                    if relearnItem == nil, let m = blockMatch(k) { ideaUnitsPanel(m) }
                 } else {
                     Text("这一段开头：" + k.opening).font(.system(size: 14, design: .serif)).foregroundStyle(ReviewPalette.sub).padding(.top, 10)
                     think("先合上想一想：这一段说了什么？要点是哪几条？想好了再展开对照。")
+                    // 6.2.2：先写下来再对照（可不写）
+                    TextField("我的回答：这一段的要点（可不写）", text: $myAnswer, axis: .vertical)
+                        .lineLimit(1...5).textFieldStyle(.roundedBorder).focused($typing).padding(.top, 12)
                     revealButton("展开这一段")
                 }
             }
@@ -527,9 +574,9 @@ struct ExamView: View {
                 ])
             } else if revealed {
                 choices([
-                    ("1", "已吸收", "checkmark", "能说出要点；下次在 \(AppDatabase.nextNoteInterval(after: k.intervalDays)) 天后", { store.examAnswerBlock(k, .absorbed); next() }),
-                    ("2", "需重读", "arrow.uturn.backward", "说不出或说错；\(AppDatabase.blockRereadDays) 天后再来", { store.examAnswerBlock(k, .reread); next() }),
-                    ("3", "待整理", "tray.full", "内容还乱；一周后再来，列入成绩单下的“待整理”", { store.examAnswerBlock(k, .organize); next() }),
+                    ("1", "已吸收", "checkmark", "能说出要点；下次在 \(AppDatabase.nextNoteInterval(after: k.intervalDays)) 天后", { calibrate(.block, k.id, blockMatch(k), SelfTestResult(block: .absorbed)); store.examAnswerBlock(k, .absorbed); next() }),
+                    ("2", "需重读", "arrow.uturn.backward", "说不出或说错；\(AppDatabase.blockRereadDays) 天后再来", { calibrate(.block, k.id, blockMatch(k), SelfTestResult(block: .reread)); store.examAnswerBlock(k, .reread); next() }),
+                    ("3", "待整理", "tray.full", "内容还乱；一周后再来，列入成绩单下的“待整理”", { calibrate(.block, k.id, blockMatch(k), SelfTestResult(block: .organize)); store.examAnswerBlock(k, .organize); next() }),
                 ])
             }
         }
