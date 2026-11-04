@@ -29,14 +29,35 @@ public struct BuildLogProgress: Equatable, Sendable {
     public private(set) var testsCrashed = false
     /// 预计的测试条数（上一次的实数）
     public var expectedTests: Int
+    /// 6.3.1：编译新版本预计几秒。编译 KongReview 本身是一整步（整模块优化），约一分钟里几乎没有输出，
+    /// 按“[n/m]”算进度会停在一处不动；有了这个数就按已用的时间推进
+    public var expectedCompileSeconds: Double?
+    /// expectedCompileSeconds 是上一次实测的（否则是估计值，说明里写“一般约”）
+    public var compileEstimateIsLast: Bool
+    /// 这份源码在本机测过，没有再测（6.3）
+    public private(set) var testsSkipped = false
+    /// 这份源码在本机编译过，直接用编好的程序（6.3.1）
+    public private(set) var compileReused = false
+    /// 开始编译新版本的时刻
+    public private(set) var compileStarted: Date?
+    /// 这次编译新版本用了几秒（编译段结束时记下；用编好的程序时为 nil）
+    public private(set) var compileSeconds: Double?
+    /// 编译时最近一行“[n/m]”，如“（10 / 40）”
+    private var counterText = ""
 
-    public init(expectedTests: Int = 790) {
+    public init(expectedTests: Int = 790, expectedCompileSeconds: Double? = nil, compileEstimateIsLast: Bool = true) {
         self.expectedTests = max(1, expectedTests)
+        self.expectedCompileSeconds = expectedCompileSeconds.flatMap { $0 > 0 ? $0 : nil }
+        self.compileEstimateIsLast = compileEstimateIsLast
     }
 
-    /// 整个构建的进度，0…1（各阶段按大致用时加权）
+    /// 整个构建的进度，0…1（各阶段按大致用时加权）。
+    /// 测试照跑时，测试约占四成；测过而跳过时，几乎整段都是编译（6.3.1：原先跳过测试后编译一开始就显示过半，再停在八成上下）
     public var overall: Double {
-        let spans: [Stage: (Double, Double)] = [
+        let spans: [Stage: (Double, Double)] = testsSkipped ? [
+            .starting: (0, 0.02), .buildingTests: (0.02, 0.04), .runningTests: (0.04, 0.06),
+            .compiling: (0.06, 0.94), .packaging: (0.94, 1), .finished: (1, 1),
+        ] : [
             .starting: (0, 0.02), .buildingTests: (0.02, 0.40), .runningTests: (0.40, 0.55),
             .compiling: (0.55, 0.93), .packaging: (0.93, 1), .finished: (1, 1),
         ]
@@ -45,7 +66,7 @@ public struct BuildLogProgress: Equatable, Sendable {
     }
 
     /// swift build 的“[3/20]”可能用回车分隔；按 \r 或 \n 切开的每一段都当作一行传进来
-    public mutating func consume(_ rawLine: String) {
+    public mutating func consume(_ rawLine: String, now: Date = Date()) {
         let line = Self.plain(rawLine).trimmingCharacters(in: .whitespaces)
         guard !line.isEmpty else { return }
         if let failure = Self.testFailure(line) {
@@ -65,6 +86,7 @@ public struct BuildLogProgress: Equatable, Sendable {
         } else if line.contains("已在本机用同一版 Swift 测过") {
             // 6.3：这份源码在本机测过，build-app.sh 不再测
             advance(to: .runningTests, "这份源码已在本机测过、全部通过，不再测一遍")
+            testsSkipped = true
             fraction = 1
         } else if line.hasPrefix("Test Suite 'All tests' started") {
             advance(to: .runningTests, "正在运行测试…")
@@ -76,22 +98,63 @@ public struct BuildLogProgress: Equatable, Sendable {
             fraction = min(0.99, Double(testsRun) / Double(total))
             detail = "测试：已通过 \(testsRun - failedTests.count) / \(total) 项" + (failedTests.isEmpty ? "" : "，\(failedTests.count) 项未通过")
         } else if line.hasPrefix("== compile ==") {
-            advance(to: .compiling, "正在编译新版本…")
+            advance(to: .compiling, "正在编译新版本…", now: now)
+            if compileStarted == nil { compileStarted = now }
+            if let expected = expectedCompileSeconds { detail = "正在编译新版本（\(Self.estimate(expected, last: compileEstimateIsLast))）…" }
+        } else if line.contains("已在本机编译过") {
+            // 6.3.1：同一份源码在本机编译过（多半是合并前在本机测试时编的），build-app.sh 直接用编好的程序
+            if stage == .compiling {
+                compileReused = true
+                fraction = 1
+                detail = "这份源码已在本机编译过，直接用编好的程序"
+            }
         } else if line.hasPrefix("== icon ==") || line.hasPrefix("== sign ==") {
-            advance(to: .packaging, line.hasPrefix("== sign ==") ? "正在签名…" : "正在打包…")
+            advance(to: .packaging, line.hasPrefix("== sign ==") ? "正在签名…" : "正在打包…", now: now)
         } else if line.hasPrefix("Built: ") {
-            advance(to: .finished, "编译完成")
+            advance(to: .finished, "编译完成", now: now)
         } else if let counter = Self.stepCounter(line), stage == .buildingTests || stage == .runningTests || stage == .compiling {
             // 核心包测完再编译应用的测试：这时仍在“编译测试”，进度条不后退
             if stage == .runningTests { return }
+            if stage == .compiling {
+                counterText = "（\(counter.done) / \(counter.total)）"
+                // 有预计用时就按时间走（见 tick），“[n/m]”只记下来
+                if expectedCompileSeconds != nil { return }
+            }
             fraction = max(fraction, Double(counter.done) / Double(max(1, counter.total)))
             detail = (stage == .buildingTests ? "正在编译测试" : "正在编译新版本") + "（\(counter.done) / \(counter.total)）"
         }
     }
 
-    private mutating func advance(to next: Stage, _ text: String) {
+    /// 6.3.1：编译新版本时每秒调一次——按已用时间推进进度，说明里写已用几秒
+    public mutating func tick(now: Date = Date()) {
+        guard stage == .compiling, !compileReused, let start = compileStarted else { return }
+        let elapsed = max(0, now.timeIntervalSince(start))
+        let seconds = Int(elapsed.rounded())
+        if let expected = expectedCompileSeconds {
+            // 到预计用时的 97% 为止；超过预计时停在那里，等编译结束
+            fraction = max(fraction, min(0.97, elapsed / expected))
+            let estimate = Self.estimate(expected, last: compileEstimateIsLast)
+            detail = elapsed <= expected
+                ? "正在编译新版本：已用 \(seconds) 秒（\(estimate)）"
+                : "正在编译新版本：已用 \(seconds) 秒，比\(compileEstimateIsLast ? "上次" : "一般")久一些，请稍候"
+        } else {
+            detail = "正在编译新版本\(counterText)：已用 \(seconds) 秒"
+        }
+    }
+
+    /// “上次用了约 68 秒”或“一般约 70 秒”
+    static func estimate(_ seconds: Double, last: Bool) -> String {
+        (last ? "上次用了约 " : "一般约 ") + "\(Int(seconds.rounded())) 秒"
+    }
+
+    private mutating func advance(to next: Stage, _ text: String, now: Date = Date()) {
         guard next >= stage else { return }
-        if next > stage { fraction = 0 }
+        if next > stage {
+            if stage == .compiling, !compileReused, let start = compileStarted {
+                compileSeconds = max(0, now.timeIntervalSince(start))
+            }
+            fraction = 0
+        }
         stage = next
         if !text.isEmpty { detail = text }
     }
