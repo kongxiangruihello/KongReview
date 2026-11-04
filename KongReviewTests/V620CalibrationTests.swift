@@ -42,7 +42,9 @@ final class V620CalibrationTests: XCTestCase {
         XCTAssertEqual(both.over, 2)
         XCTAssertEqual(both.fairRatio, 0.4)
 
-        let report = try db.gradebookReport(GrowthPeriod.week.window(containing: t0, now: t0), now: t0)
+        // 报告到“现在”为止：取当天晚上
+        let evening = d(0, hour: 22)
+        let report = try db.gradebookReport(GrowthPeriod.week.window(containing: evening, now: evening), now: evening)
         XCTAssertEqual(report.calibration.written, Calendar.current.isDate(d(-1), equalTo: t0, toGranularity: .weekOfYear) ? 5 : 4)
         XCTAssertEqual(GradebookFormat.calibration(CalibrationTally()), "")
         XCTAssertEqual(GradebookFormat.calibration(CalibrationTally(written: 5, over: 2, under: 1)),
