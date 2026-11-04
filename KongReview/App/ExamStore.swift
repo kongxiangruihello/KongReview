@@ -209,6 +209,13 @@ extension LibraryStore {
     }
 
     /// 6.0.9：解答题——记得 / 大致 / 忘了（计入掌握度），忘了的当天卷尾再考
+    /// 6.2：记下这道题写出了几处要点与自己判的分（只作统计）
+    func examRecordCalibration(_ kind: CalibrationKind, recordId: Int64, match: IdeaUnitMatch, result: SelfTestResult, now: Date = Date()) {
+        guard !fullBackupBusy else { return }
+        do { try db.recordCalibration(kind: kind, recordId: recordId, match: match, result: result, now: now) }
+        catch { report(error) }
+    }
+
     func examAnswerQuestionAnswer(_ item: RevisitAnswerItem, result: SelfTestResult, now: Date = Date()) {
         guard !fullBackupBusy else { return }
         checkDayChange()
@@ -241,5 +248,58 @@ extension LibraryStore {
     var examHandedIn: Bool {
         get { UserDefaults.standard.string(forKey: Self.examHandedInKey) == today }
         set { UserDefaults.standard.set(newValue ? today : "", forKey: Self.examHandedInKey); dailyCheckRevision += 1 }
+    }
+}
+
+// MARK: - 6.2：做题时随手记
+
+/// 今日试卷上当前这道题：随手记摘录时沿用的出处、记札记时挂上的摘录
+struct ExamCaptureContext: Equatable {
+    /// 面板上显示“记于 ……”
+    var label = ""
+    var highlight: Highlight?
+    var source: Source?
+}
+
+extension LibraryStore {
+    func examCaptureContext(_ q: ExamQuestion?) -> ExamCaptureContext {
+        guard let q else { return ExamCaptureContext(label: "今日试卷") }
+        func short(_ s: String) -> String {
+            let t = Markdown.plainText(fromHTML: Markdown.richHTML(s)).replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.count > 24 ? String(t.prefix(24)) + "…" : t
+        }
+        switch q {
+        case .highlight(let h, _):
+            return ExamCaptureContext(label: "今日试卷 · 摘录“\(short(h.text))”", highlight: h, source: source(for: h))
+        case .card(let c):
+            let h = c.highlightId.flatMap { id in (try? db.highlights(ids: [id]))?.first { $0.deletedAt == nil } }
+            return ExamCaptureContext(label: "今日试卷 · 记忆卡“\(short(c.front))”", highlight: h, source: h.flatMap { source(for: $0) })
+        case .note(let n):
+            return ExamCaptureContext(label: "今日试卷 · 札记《\(n.title)》")
+        case .block(let b):
+            return ExamCaptureContext(label: "今日试卷 · 笔记《\(b.notebookTitle)》")
+        case .question(let item):
+            return ExamCaptureContext(label: "今日试卷 · 问题“\(short(item.title))”")
+        case .answer(let a):
+            return ExamCaptureContext(label: "今日试卷 · 问题“\(short(a.title))”")
+        }
+    }
+
+    /// 随手记一条摘录：快速录入浮窗，出处沿用这道题的（可改），正文取剪贴板里新复制的
+    func examCaptureHighlight(_ ctx: ExamCaptureContext) {
+        guard !fullBackupBusy else { return }
+        if let s = ctx.source {
+            QuickCaptureController.shared.show(prefill: CaptureRequest(text: "", title: s.title, author: s.author), useClipboard: true)
+        } else {
+            QuickCaptureController.shared.show()
+        }
+    }
+
+    /// 随手写一条札记：随手札记浮窗，挂上这道题的摘录（可改为加入已有札记）
+    static func examNoteComposer(_ ctx: ExamCaptureContext) -> IdeaNoteComposer {
+        var c = ideaNoteComposer(highlight: ctx.highlight)
+        c.context = ctx.label
+        return c
     }
 }

@@ -14,6 +14,8 @@ struct IdeaNoteComposer: Identifiable, Equatable, Sendable {
     var highlightPreview = ""
     /// 从按语发展而来
     var fromAnnotation = false
+    /// 6.2：在哪儿记的（今日试卷上的这道题），面板上显示
+    var context = ""
 }
 
 extension LibraryStore {

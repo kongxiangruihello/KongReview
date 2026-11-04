@@ -39,6 +39,7 @@ private struct QuickCaptureSettings: View {
     @AppStorage("menubar.visible") private var showMenuBarIcon = true
     @AppStorage(PointerCursor.enabledKey) private var handCursor = true
     @AppStorage(HotKeyPreset.defaultsKey) private var presetRaw = HotKeyPreset.ctrlOptK.rawValue
+    @AppStorage(HotKeyPreset.noteKey) private var notePresetRaw = HotKeyPreset.ctrlOptJ.rawValue
 
     var body: some View {
         // 读取 revision，使登录项状态等非观察值在操作后刷新
@@ -60,6 +61,22 @@ private struct QuickCaptureSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("现在试一下") { QuickCaptureController.shared.show() }
+            }
+            // 6.2：随手札记——任何应用里（包括做题时）随手写一条札记，不离开当前页面
+            Section {
+                Picker("随手札记快捷键", selection: $notePresetRaw) {
+                    ForEach(HotKeyPreset.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .onChange(of: notePresetRaw) { HotKeyCenter.shared.applyNote(HotKeyPreset.note) }
+                .onChange(of: presetRaw) { HotKeyCenter.shared.applyNote(HotKeyPreset.note) }
+                if HotKeyCenter.shared.noteRegistrationFailed {
+                    Text("这个快捷键已被快速录入或其他应用占用，请换一个。")
+                        .font(.caption).foregroundStyle(.red)
+                }
+                Text("在任何应用里按下快捷键，弹出随手札记浮窗：写题目与正文，⌘↩ 保存，Esc 取消；浮窗浮在最前，写完不离开当前页面。菜单“文件 → 随手札记浮窗”（⌥⌘J）同此。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("现在试一下") { QuickNoteController.shared.show() }
             }
             Section {
                 Toggle("在菜单栏显示图标", isOn: $showMenuBarIcon)

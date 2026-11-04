@@ -97,6 +97,15 @@ struct GradebookCard<Content: View>: View {
 enum GradebookFormat {
     static func percent(_ x: Double?) -> String { x.map { "\(Int(($0 * 100).rounded()))%" } ?? "—" }
 
+    /// 6.2：“写了回答 12 道：对得上 9 道（75%）；判记得而要点不到一半 2 道；判忘了而写出八成以上 1 道”
+    static func calibration(_ t: CalibrationTally) -> String {
+        guard t.written > 0 else { return "" }
+        var parts = ["写了回答 \(t.written) 道：对得上 \(t.fair) 道" + (t.fairRatio.map { "（\(percent($0))）" } ?? "")]
+        if t.over > 0 { parts.append("判“记得”而要点写出不到一半 \(t.over) 道（偏高）") }
+        if t.under > 0 { parts.append("判“忘了”而写出八成以上 \(t.under) 道（偏低）") }
+        return parts.joined(separator: "；")
+    }
+
     static func day(_ key: String) -> String {
         let p = key.split(separator: "-")
         guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]) else { return key }
@@ -229,6 +238,8 @@ struct GradebookReportSection: View {
                 guard let t = r.byKind[k], t.total > 0 else { return nil }
                 return "\(k.title) \(GradebookFormat.percent(t.ratio))（\(t.total)）"
             }.joined(separator: " · "), empty: "这一期还没有作答")
+            // 6.2：写了回答的题，自评与要点对照
+            line("自评准不准", GradebookFormat.calibration(r.calibration), empty: "这一期写了回答的题还没有")
             line("新加的题", [("摘录", r.newHighlights), ("记忆卡", r.newCards), ("札记", r.newNotes), ("问题", r.newQuestions)]
                 .filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · "), empty: "没有新加")
             if r.annotatedArticles > 0 || r.annotationMarks > 0 {

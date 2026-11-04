@@ -63,6 +63,8 @@ final class StatusItemController: NSObject {
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
         add(menu, "快速录入（\(HotKeyPreset.current.label)）", #selector(quickCapture))
+        // 6.2：随手札记
+        add(menu, "随手札记" + (HotKeyPreset.note == .off ? "" : "（\(HotKeyPreset.note.label)）"), #selector(quickNote))
         if let left = QuickCaptureController.shared.store?.dailyCheck.left, left > 0 {
             add(menu, "今日试卷（还有 \(left) 题）", #selector(review))
         } else {
@@ -84,6 +86,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func quickCapture() { QuickCaptureController.shared.show() }
+    @objc private func quickNote() { QuickNoteController.shared.show() }
 
     @objc private func review() {
         QuickCaptureController.shared.store?.openExam()

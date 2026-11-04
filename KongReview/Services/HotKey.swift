@@ -52,6 +52,13 @@ enum HotKeyPreset: String, CaseIterable, Identifiable {
         get { HotKeyPreset(rawValue: UserDefaults.standard.string(forKey: lookupKey) ?? "") ?? .ctrlOptL }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: lookupKey) }
     }
+
+    /// 6.2：随手札记浮窗的快捷键（默认 ⌃⌥J）
+    static let noteKey = "hotkey.note"
+    static var note: HotKeyPreset {
+        get { HotKeyPreset(rawValue: UserDefaults.standard.string(forKey: noteKey) ?? "") ?? .ctrlOptJ }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: noteKey) }
+    }
 }
 
 @MainActor
@@ -62,6 +69,9 @@ final class HotKeyCenter {
     var action: (() -> Void)?
     /// 引文速查（id 2）
     var lookupAction: (() -> Void)?
+    /// 6.2：随手札记（id 3）
+    var noteAction: (() -> Void)?
+    private(set) var noteRegistrationFailed = false
     /// 最近一次注册是否成功（快捷键被其他应用占用时为 false）
     private(set) var lastRegistrationFailed = false
     private(set) var lookupRegistrationFailed = false
@@ -71,6 +81,16 @@ final class HotKeyCenter {
 
     func apply(_ preset: HotKeyPreset) {
         lastRegistrationFailed = !register(preset, id: 1)
+    }
+
+    /// 6.2：随手札记；与快速录入用了同一组键时不注册（算作占用）
+    func applyNote(_ preset: HotKeyPreset) {
+        if preset != .off, preset == HotKeyPreset.current {
+            if let old = refs[3] { UnregisterEventHotKey(old); refs[3] = nil }
+            noteRegistrationFailed = true
+            return
+        }
+        noteRegistrationFailed = !register(preset, id: 3)
     }
 
     func unregister() {
@@ -94,6 +114,7 @@ final class HotKeyCenter {
     fileprivate func fire(_ id: UInt32) {
         switch id {
         case 2: lookupAction?()
+        case 3: noteAction?()
         default: action?()
         }
     }

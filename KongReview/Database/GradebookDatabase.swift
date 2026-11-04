@@ -100,6 +100,8 @@ struct GradebookReport: Equatable, Sendable {
     var wins: [String] = []
     var winCount = 0
     var breaks: [StreakBreakReason: Int] = [:]
+    /// 6.2：写了回答的题里，自评与要点对照是否一致
+    var calibration = CalibrationTally()
     var completion: Double? { due > 0 ? min(1, Double(done) / Double(due)) : nil }
 }
 
@@ -358,6 +360,7 @@ extension AppDatabase {
                 r.activeDays = row?["active"] ?? 0
             }
             r.byKind = try Self.masteryByKind(db, start: window.start, end: window.end, calendar: calendar)
+            r.calibration = try Self.calibrationTally(db, start: window.start, end: window.end)
             r.mastery = r.byKind.values.reduce(MasteryTally(), +)
             func count(_ sql: String) throws -> Int { try Int.fetchOne(db, sql: sql, arguments: [window.start, window.end]) ?? 0 }
             r.newHighlights = try count("SELECT COUNT(*) FROM highlight WHERE createdAt >= ? AND createdAt < ? AND deletedAt IS NULL")

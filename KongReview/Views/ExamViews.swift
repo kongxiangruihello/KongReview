@@ -39,6 +39,7 @@ struct ExamView: View {
                 } else {
                     finished(state)
                 }
+                if loaded { jotBar }
                 AnnotateSection()
                 if loaded && (current == nil || store.examHandedIn) {
                     reportCard
@@ -294,6 +295,7 @@ struct ExamView: View {
                         Text("我的回答：" + myAnswer).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                             .fixedSize(horizontal: false, vertical: true).padding(.top, 8)
                     }
+                    if relearnItem == nil, let m = highlightMatch(h, mode) { ideaUnitsPanel(m) }
                 } else {
                     // 6.0.7：先写下来再对照（可不写）
                     TextField(mode == .source ? "我的回答：书名、作者、大致位置（可不写）" : "我的回答：这一处说了什么（可不写）", text: $myAnswer, axis: .vertical)
@@ -310,12 +312,18 @@ struct ExamView: View {
                 }
             } else if revealed {
                 VStack(alignment: .leading, spacing: 8) {
-                    gradeButtons { r in store.examAnswerHighlight(h, mode: mode, result: r); next() }
+                    gradeButtons { r in calibrate(.highlight, h.id, highlightMatch(h, mode), r); store.examAnswerHighlight(h, mode: mode, result: r); next() }
                     HStack(spacing: 14) {
-                        Button("记得，并收藏") { store.examAnswerHighlight(h, mode: mode, result: .remembered, action: .favorite); next() }
+                        Button("记得，并收藏") {
+                            calibrate(.highlight, h.id, highlightMatch(h, mode), .remembered)
+                            store.examAnswerHighlight(h, mode: mode, result: .remembered, action: .favorite); next()
+                        }
                             .keyboardShortcut(key("f"))
                         KeyCap(text: "F")
-                        Button("记得，以后不再出（弃置）") { store.examAnswerHighlight(h, mode: mode, result: .remembered, action: .discard); next() }
+                        Button("记得，以后不再出（弃置）") {
+                            calibrate(.highlight, h.id, highlightMatch(h, mode), .remembered)
+                            store.examAnswerHighlight(h, mode: mode, result: .remembered, action: .discard); next()
+                        }
                             .keyboardShortcut(key("d"))
                         KeyCap(text: "D")
                         Spacer()
@@ -327,6 +335,87 @@ struct ExamView: View {
                 }
             }
         }
+    }
+
+    // MARK: 6.2：做题时随手记
+
+    /// 不离开卷子：摘录用快速录入浮窗（出处沿用这道题的），札记用随手札记浮窗（挂上这道题的摘录）
+    private var jotBar: some View {
+        let ctx = store.examCaptureContext(current)
+        return HStack(spacing: 12) {
+            Image(systemName: "square.and.pencil").foregroundStyle(ReviewPalette.sub)
+            Text("随手记").font(.system(size: 12.5, weight: .medium)).foregroundStyle(ReviewPalette.sub)
+            Button { store.examCaptureHighlight(ctx) } label: { Label("记一条摘录", systemImage: "text.quote") }
+                .help(ctx.source.map { "快速录入浮窗；出处先填《\($0.title)》，剪贴板里新复制的文字自动填入正文" } ?? "快速录入浮窗；剪贴板里新复制的文字自动填入正文")
+            Button { QuickNoteController.shared.show(LibraryStore.examNoteComposer(ctx)) } label: { Label("写一条札记", systemImage: "lightbulb") }
+                .help(ctx.highlight != nil ? "随手札记浮窗；挂上这道题的摘录，也可改为加入已有札记" : "随手札记浮窗")
+            Spacer()
+            Text("浮窗写完收起，卷子照旧；别处也可按 \(HotKeyPreset.current.label) 记摘录" + (HotKeyPreset.note == .off ? "" : "、\(HotKeyPreset.note.label) 写札记"))
+                .font(.system(size: 11)).foregroundStyle(ReviewPalette.sub).lineLimit(1).truncationMode(.tail)
+        }
+        .buttonStyle(.link).font(.system(size: 12.5)).handCursor()
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(ReviewPalette.hair))
+    }
+
+    // MARK: 6.2：对照要点
+
+    private var writtenAnswer: String? {
+        let t = myAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    /// 摘录题：出处题对照作者、书名、位置；要点题、开头题对照原文（有加粗、标记的以标出的为要点）
+    private func highlightMatch(_ h: Highlight, _ mode: ExamHighlightMode) -> IdeaUnitMatch? {
+        guard let answer = writtenAnswer else { return nil }
+        if mode == .source {
+            let s = store.source(for: h)
+            let units = [s?.author ?? "", s?.title ?? "", h.location ?? ""]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            return units.isEmpty ? nil : IdeaUnits.match(answer: answer, units: units)
+        }
+        let text = ExamHighlightMode.withoutImages(h.text)
+        let m = IdeaUnits.match(answer: answer, standard: Markdown.plainText(fromHTML: Markdown.richHTML(text)), marked: IdeaUnits.markedSpans(in: text))
+        return m.total > 0 ? m : nil
+    }
+
+    /// 解答题：对照解答；解答为空而指向札记的，对照札记正文
+    private func answerMatch(_ a: RevisitAnswerItem) -> IdeaUnitMatch? {
+        guard let answer = writtenAnswer else { return nil }
+        let source = plain(a.answer).isEmpty ? (a.noteBody ?? "") : a.answer
+        let text = WikiLinks.plain(source)
+        let m = IdeaUnits.match(answer: answer, standard: Markdown.plainText(fromHTML: Markdown.richHTML(text)), marked: IdeaUnits.markedSpans(in: text))
+        return m.total > 0 ? m : nil
+    }
+
+    private func calibrate(_ kind: CalibrationKind, _ id: Int64?, _ match: IdeaUnitMatch?, _ r: SelfTestResult) {
+        guard let id, let match else { return }
+        store.examRecordCalibration(kind, recordId: id, match: match, result: r)
+    }
+
+    /// 写出了几处要点；只作对照，分数仍由自己判
+    private func ideaUnitsPanel(_ m: IdeaUnitMatch) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist").foregroundStyle(ReviewPalette.sub)
+                Text("要点对照：写出 \(m.hits) / \(m.total) 处").font(.system(size: 13, weight: .medium)).foregroundStyle(ReviewPalette.ink)
+            }
+            ForEach(Array(m.units.enumerated()), id: \.offset) { _, u in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: u.hit ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 11)).foregroundStyle(u.hit ? ReviewPalette.done : ReviewPalette.sub)
+                    Text(u.text).font(.system(size: 12.5)).foregroundStyle(u.hit ? ReviewPalette.ink : ReviewPalette.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Text("按标点把答案分成几处（原文里加粗、标记的以标出的为准），每处的字有一半以上出现在回答里算写出。只作对照，分数仍由你判；判“记得”而写出不到一半的，成绩册记为自评偏高。")
+                .font(.system(size: 11)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ReviewPalette.soft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.top, 10)
     }
 
     private func gradeButtons(_ grade: @escaping (SelfTestResult) -> Void) -> some View {
@@ -513,6 +602,7 @@ struct ExamView: View {
                             }
                         }
                     }
+                    if relearnItem == nil, let m = answerMatch(a) { ideaUnitsPanel(m) }
                 }
             }
             if revealed {
@@ -521,7 +611,7 @@ struct ExamView: View {
                     if let item = relearnItem {
                         gradeButtons { r in store.examRelearnAnswer(item, passed: r == .remembered); next() }
                     } else {
-                        gradeButtons { r in store.examAnswerQuestionAnswer(a, result: r); next() }
+                        gradeButtons { r in calibrate(.answer, a.id, answerMatch(a), r); store.examAnswerQuestionAnswer(a, result: r); next() }
                         Text("记得的隔得越来越久再考（\(AppDatabase.nextNoteInterval(after: a.intervalDays)) 天后）；忘了的交卷前在卷尾再考，两天后再来。")
                             .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                     }

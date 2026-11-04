@@ -342,13 +342,19 @@ struct IdeaNoteComposerSheet: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State var composer: IdeaNoteComposer
+    /// 6.2：在随手札记浮窗里用时由浮窗关闭
+    var onClose: (() -> Void)? = nil
     @State private var appendMode = false
     @State private var query = ""
     @State private var candidates: [IdeaNoteSummary] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(composer.fromAnnotation ? "按语发展为札记" : "记札记").font(.title2.bold())
+            Text(composer.fromAnnotation ? "按语发展为札记" : (onClose != nil ? "随手札记" : "记札记")).font(.title2.bold())
+            if !composer.context.isEmpty {
+                Label("记于 " + composer.context, systemImage: "list.clipboard")
+                    .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1)
+            }
             if !composer.highlightPreview.isEmpty {
                 HStack(alignment: .top, spacing: 8) {
                     RoundedRectangle(cornerRadius: 1.5).fill(ReviewPalette.accent.opacity(0.6)).frame(width: 3)
@@ -410,6 +416,7 @@ struct IdeaNoteComposerSheet: View {
     }
 
     private func close() {
+        if let onClose { onClose(); return }
         store.ideaNoteComposer = nil
         dismiss()
     }
