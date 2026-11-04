@@ -392,7 +392,7 @@ extension FullBackupService {
         "revisit.notesPerDay": 0...10, "revisit.questionsPerDay": 0...10, "revisit.blocksPerDay": 0...10, "revisit.answersPerDay": 0...10
     ]
     static let stringPreferenceKeys: Set<String> = [
-        "editor.pasteStyle", "cards.fsrsInfo", "cards.syncFromHighlight", "citation.style", "sidebar.sourceSort", "hotkey.preset", "hotkey.lookup"
+        "editor.pasteStyle", "cards.fsrsInfo", "cards.syncFromHighlight", "citation.style", "sidebar.sourceSort", "hotkey.preset", "hotkey.lookup", "hotkey.note"
     ]
     static var preferenceKeys: Set<String> {
         booleanPreferenceKeys.union(integerPreferenceKeys.keys).union(stringPreferenceKeys)
@@ -448,7 +448,7 @@ extension FullBackupService {
                     case "cards.syncFromHighlight": valid = ["ask", "always", "never"].contains(text)
                     case "citation.style": valid = CitationStyle.allCases.contains { $0.rawValue == text }
                     case "sidebar.sourceSort": valid = SourceSort.allCases.contains { $0.rawValue == text }
-                    case "hotkey.preset", "hotkey.lookup": valid = HotKeyPreset.allCases.contains { $0.rawValue == text }
+                    case "hotkey.preset", "hotkey.lookup", "hotkey.note": valid = HotKeyPreset.allCases.contains { $0.rawValue == text }
                     default: valid = true
                     }
                 } else { valid = false }

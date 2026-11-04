@@ -20,6 +20,8 @@ struct KongReviewApp: App {
         }
         if PreviewLibrary.isEnabled {
             self.store = PreviewLibrary.makeStore()
+            // 6.2：预览里也能用快速录入与随手札记浮窗（写进内存里的示例库或副本）
+            QuickCaptureController.shared.store = self.store
             return
         }
         LegacyMigration.migrateSettings()
@@ -57,6 +59,9 @@ struct KongReviewApp: App {
                     .keyboardShortcut("n")
                 Button("快速录入浮窗") { QuickCaptureController.shared.show() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+                // 6.2：随手札记浮窗，写完不离开当前页面（如今日试卷）
+                Button("随手札记浮窗") { QuickNoteController.shared.show() }
+                    .keyboardShortcut("j", modifiers: [.command, .option])
                 Button("新建专题笔记本…") { store.newNotebookRequest = NewNotebookRequest() }
                 Button("新建出处") {
                     store.editingSource = Source(title: "")

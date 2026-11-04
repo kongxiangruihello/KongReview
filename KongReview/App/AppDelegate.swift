@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !EditorValidation.isEnabled, !PreviewLibrary.isEnabled else { return }
         HotKeyCenter.shared.action = { QuickCaptureController.shared.show() }
         HotKeyCenter.shared.apply(HotKeyPreset.current)
+        // 6.2：随手札记（任何应用里按快捷键）
+        HotKeyCenter.shared.noteAction = { QuickNoteController.shared.show() }
+        HotKeyCenter.shared.applyNote(HotKeyPreset.note)
         StatusItemController.shared.apply()
         ServiceProvider.install()
         QuickCaptureController.shared.store?.runStartupMaintenance()

@@ -39,6 +39,7 @@ struct ExamView: View {
                 } else {
                     finished(state)
                 }
+                if loaded { jotBar }
                 AnnotateSection()
                 if loaded && (current == nil || store.examHandedIn) {
                     reportCard
@@ -334,6 +335,28 @@ struct ExamView: View {
                 }
             }
         }
+    }
+
+    // MARK: 6.2：做题时随手记
+
+    /// 不离开卷子：摘录用快速录入浮窗（出处沿用这道题的），札记用随手札记浮窗（挂上这道题的摘录）
+    private var jotBar: some View {
+        let ctx = store.examCaptureContext(current)
+        return HStack(spacing: 12) {
+            Image(systemName: "square.and.pencil").foregroundStyle(ReviewPalette.sub)
+            Text("随手记").font(.system(size: 12.5, weight: .medium)).foregroundStyle(ReviewPalette.sub)
+            Button { store.examCaptureHighlight(ctx) } label: { Label("记一条摘录", systemImage: "text.quote") }
+                .help(ctx.source.map { "快速录入浮窗；出处先填《\($0.title)》，剪贴板里新复制的文字自动填入正文" } ?? "快速录入浮窗；剪贴板里新复制的文字自动填入正文")
+            Button { QuickNoteController.shared.show(LibraryStore.examNoteComposer(ctx)) } label: { Label("写一条札记", systemImage: "lightbulb") }
+                .help(ctx.highlight != nil ? "随手札记浮窗；挂上这道题的摘录，也可改为加入已有札记" : "随手札记浮窗")
+            Spacer()
+            Text("浮窗写完收起，卷子照旧；别处也可按 \(HotKeyPreset.current.label) 记摘录" + (HotKeyPreset.note == .off ? "" : "、\(HotKeyPreset.note.label) 写札记"))
+                .font(.system(size: 11)).foregroundStyle(ReviewPalette.sub).lineLimit(1).truncationMode(.tail)
+        }
+        .buttonStyle(.link).font(.system(size: 12.5)).handCursor()
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(ReviewPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(ReviewPalette.hair))
     }
 
     // MARK: 6.2：对照要点

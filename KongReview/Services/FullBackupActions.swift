@@ -198,6 +198,7 @@ extension LibraryStore {
         selection = .home
         reload()
         HotKeyCenter.shared.apply(HotKeyPreset.current)
+        HotKeyCenter.shared.applyNote(HotKeyPreset.note)
         StatusItemController.shared.apply()
         ReminderScheduler.shared.applySavedSettings()
     }

@@ -40,10 +40,11 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
 
     // MARK: 显示 / 关闭
 
-    func show(prefill: CaptureRequest? = nil) {
+    /// useClipboard：带了预填（如今日试卷上这道题的出处）时，正文仍取剪贴板里新复制的文字
+    func show(prefill: CaptureRequest? = nil, useClipboard: Bool = false) {
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        reset(prefill: prefill)
+        reset(prefill: prefill, useClipboard: useClipboard)
         if !panel.isVisible { panel.center() }
         panel.makeKeyAndOrderFront(nil)
         // 等新内容送进编辑器（SwiftUI 下一次刷新）后再设焦点、全选
@@ -60,7 +61,7 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
         panel?.orderOut(nil)
     }
 
-    private func reset(prefill: CaptureRequest?) {
+    private func reset(prefill: CaptureRequest?, useClipboard: Bool = false) {
         let defaults = UserDefaults.standard
         statusLabel.stringValue = "⌘↩ 保存　Esc 取消　Tab 切换栏目"
         statusLabel.textColor = .secondaryLabelColor
@@ -79,8 +80,15 @@ final class QuickCaptureController: NSObject, NSTextFieldDelegate, NSComboBoxDel
             tagsField.stringValue = TagParser.format(p.tags)
             noteModel.text = p.note ?? ""
             pendingURL = p.url
-            lastChangeCount = NSPasteboard.general.changeCount
             selectAllOnShow = false
+            let pb = NSPasteboard.general
+            if useClipboard, p.text.isEmpty, pb.changeCount != lastChangeCount,
+               let clip = (pb.string(forType: .string) ?? pb.string(forType: .html))?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !clip.isEmpty, clip.count <= 20_000 {
+                editorModel.text = clip
+                selectAllOnShow = true
+            }
+            lastChangeCount = pb.changeCount
             return
         }
 
