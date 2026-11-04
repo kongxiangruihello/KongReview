@@ -41,7 +41,7 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
         }
         .background(ReviewPalette.page)
-        .navigationTitle("考场门口")
+        .navigationTitle("日课首页")
         .onAppear {
             store.checkDayChange()
             store.refreshDerived()
@@ -63,8 +63,8 @@ struct HomeView: View {
             Text(ExamDate.line())
                 .font(.system(size: 12.5, weight: .medium)).tracking(0.8)
                 .foregroundStyle(ReviewPalette.sub)
-            Text("考场").font(.system(size: 32, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
-            Text("每天来考一次：先作答、后对照、再判分；考完写一句日评就算打卡，错的题会再回到卷子上。")
+            Text("日课").font(.system(size: 32, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+            Text("每天做一次日课：先作答、后对照、再判分；做完写一句日评就算打卡，错的题会再回到日课上。")
                 .font(.system(size: 13.5)).foregroundStyle(ReviewPalette.sub)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -96,7 +96,7 @@ struct HomeView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                Text("最近 30 天还没有成绩。答完今天的卷子、写一句日评，这里就会出现。")
+                Text("最近 30 天还没有成绩。答完今天的日课、写一句日评，这里就会出现。")
                     .font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
             }
         }

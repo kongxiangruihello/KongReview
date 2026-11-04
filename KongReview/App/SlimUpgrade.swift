@@ -52,7 +52,7 @@ enum SlimUpgrade {
 
         var message: String {
             let parts = files.sorted { $0.key < $1.key }.map { "\($0.key)（\($0.value) 条）" }
-            return "6.0.1 起应用改为“考场”，研究项目、网页存档、精简提要、学习计划等功能已拿掉。"
+            return "6.0.1 起应用改为“日课”，研究项目、网页存档、精简提要、学习计划等功能已拿掉。"
                 + (parts.isEmpty ? "这些功能里没有您写的内容。" : "其中您写的内容已导出为 Markdown：" + parts.joined(separator: "、") + "。")
                 + "另存了一份完整的数据库快照。都在备份文件夹的“\(folder.lastPathComponent)”里；数据库里的原始记录也都保留着。"
         }

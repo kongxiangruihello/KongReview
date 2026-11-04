@@ -165,7 +165,7 @@ struct DeckHomeView: View {
     private func heroPrimaryButtons(remaining: Int) -> some View {
         if remaining == 0 && store.revisitCounts.left > 0 {
             // 6.0.3：记忆卡学完，回到今日试卷接着答
-            PillButton(icon: "list.clipboard", title: "回到今日试卷", style: .primary) {
+            PillButton(icon: "list.clipboard", title: "回到今日日课", style: .primary) {
                 store.openExam()
             }
             .fixedSize()

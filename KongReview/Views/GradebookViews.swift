@@ -20,6 +20,8 @@ struct GradebookView: View {
                 GradebookMonthSection(month: $month)
                 MasteryTrendSection()
                 WeakItemsSection()
+                // 6.3：判“记得”而要点写出不到一半的题，点名列出
+                OverconfidentSection()
                 // 原“回顾统计”里的记忆卡负荷预测、保留率与各牌组统计
                 if let insights = store.cardInsights {
                     GradebookCard("记忆卡", subtitle: "未来的复习量、实际保留率、各牌组") {
@@ -42,7 +44,7 @@ struct GradebookView: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("成绩册").font(.system(size: 24, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 Spacer()
-                PillButton(icon: "list.clipboard", title: "去答今天的卷子", style: .ghost) { store.openExam() }
+                PillButton(icon: "list.clipboard", title: "去做今天的日课", style: .ghost) { store.openExam() }
             }
             Text("每天一行，每周、每月一份报告；看掌握度的走势与常错的题。成绩只作记录，不设目标线。")
                 .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub)
@@ -468,11 +470,11 @@ struct WeakItemsSection: View {
                         }
                     }
                     HStack(spacing: 10) {
-                        Text("错的题会照常回到卷子上：今天卷尾再考一次，摘录两天后补考，记忆卡按 FSRS，笔记“需重读”三天后。点题面打开修改；“今天再考”放进今天的卷尾；反复记不住的摘录可以做成记忆卡。")
+                        Text("错的题会照常回到日课上：今天课末再练一次，摘录两天后补练，记忆卡按 FSRS，笔记“需重读”三天后。点题面打开修改；“今天再练”放进今天的课末；反复记不住的摘录可以做成记忆卡。")
                             .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
                         Spacer()
-                        PillButton(icon: "arrow.uturn.backward.circle", title: "全部今天再考", style: .ghost) { queueAll() }
-                            .help("把这里的摘录、札记、笔记都放进今天的卷尾再考（记忆卡按 FSRS，不另加）")
+                        PillButton(icon: "arrow.uturn.backward.circle", title: "全部今天再练", style: .ghost) { queueAll() }
+                            .help("把这里的摘录、札记、笔记都放进今天的课末再练（记忆卡按 FSRS，不另加）")
                     }
                 }
             }
@@ -500,13 +502,13 @@ struct WeakItemsSection: View {
             HStack(spacing: 8) {
                 if let kind = relearnKind(w.kind) {
                     let queued = store.examRelearn.items.contains { $0.kind == kind && $0.id == w.recordId }
-                    Button(queued ? "已排进" : "今天再考") { store.examRelearnAdd(kind, w.recordId) }
+                    Button(queued ? "已排进" : "今天再练") { store.examRelearnAdd(kind, w.recordId) }
                         .disabled(queued)
-                        .help("放进今天的卷尾再考：常规的题答完后出这一道，答对才算过关")
+                        .help("放进今天的课末再练：常规的题答完后出这一道，答对才算过关")
                 }
                 if w.kind == .highlight {
                     Button("做成记忆卡") { store.batch(.addToMastery, ids: [w.recordId]) }
-                        .help("反复记不住的原文，改用记忆卡的作答题来考（牌组“摘录”）")
+                        .help("反复记不住的原文，改用记忆卡的作答题来练（牌组“摘录”）")
                     Button("弃置") { store.batch(.discard(true), ids: [w.recordId]) }
                         .help("以后不再出这一条（可在全部摘录里恢复，⌘Z 可撤销）")
                 }
@@ -532,6 +534,72 @@ struct WeakItemsSection: View {
         for k in [GradeKind.highlight, .note, .block, .question] {
             guard let kind = relearnKind(k) else { continue }
             for w in items[k] ?? [] { store.examRelearnAdd(kind, w.recordId) }
+        }
+    }
+}
+
+/// 6.3：自评偏高的题——近 30 天里最近一次判“记得”、而“我的回答”写出的要点不到一半
+struct OverconfidentSection: View {
+    @Environment(LibraryStore.self) private var store
+    @State private var items: [OverconfidentItem] = []
+
+    var body: some View {
+        GradebookCard("自评偏高的题", subtitle: "近 \(AppDatabase.overconfidentDays) 天最近一次判“记得”，写下的回答里要点不到一半") {
+            if items.isEmpty {
+                Text("近来没有自评偏高的题（只看写了“我的回答”的题）。").font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(items) { row($0) }
+                    HStack(spacing: 10) {
+                        Text("自评偏高的人容易过早停止复习（Dunlosky、Rawson，2012）。这些题判了“记得”，写下的回答却没写出多少要点：点题面打开对照，或“今天再练”放进今天的课末。记忆卡按 FSRS 排程，不另加。")
+                            .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        PillButton(icon: "arrow.uturn.backward.circle", title: "全部今天再练", style: .ghost) {
+                            for w in items { if let k = relearnKind(w.kind) { store.examRelearnAdd(k, w.recordId) } }
+                        }
+                        .help("把这里的摘录、札记、笔记、解答题都放进今天的课末再练")
+                    }
+                    .padding(.top, 6)
+                }
+            }
+        }
+        .task(id: "\(store.dailyCheckRevision)|\(store.revision)|\(store.today)") { items = (try? store.db.overconfidentItems()) ?? [] }
+    }
+
+    private func row(_ w: OverconfidentItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Button { store.openWeakItem(w.weakItem) } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(w.kind.title).font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).frame(width: 44, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(w.title).font(.system(size: 13, design: .serif)).foregroundStyle(ReviewPalette.ink).lineLimit(1)
+                        if !w.detail.isEmpty { Text(w.detail).font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub).lineLimit(1) }
+                    }
+                    Spacer()
+                    Text("写出 \(w.hits) / \(w.units) 处").font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.pending)
+                        .help("最近一次：\(w.at.formatted(.dateTime.month().day().hour().minute()))")
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).handCursor()
+            if let kind = relearnKind(w.kind) {
+                let queued = store.examRelearn.items.contains { $0.kind == kind && $0.id == w.recordId }
+                Button(queued ? "已排进" : "今天再练") { store.examRelearnAdd(kind, w.recordId) }
+                    .disabled(queued).buttonStyle(.link).font(.system(size: 11.5)).handCursor()
+                    .help("放进今天的课末再练：常规的题答完后出这一道，答对才算过关")
+            }
+        }
+        .padding(.vertical, 3).padding(.leading, 10)
+        .overlay(alignment: .leading) { Rectangle().fill(ReviewPalette.hair).frame(width: 2) }
+    }
+
+    private func relearnKind(_ k: GradeKind) -> ExamRelearnItem.Kind? {
+        switch k {
+        case .highlight: .highlight
+        case .note: .note
+        case .block: .block
+        case .question: .answer
+        case .card: nil
         }
     }
 }

@@ -23,7 +23,7 @@ struct AnnotateSection: View {
                         Text("此外约 \(today.remaining) 篇待标").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
                     }
                 }
-                Text("全部摘录里整篇存进来、还没划过要点的文章。打开读一遍，选中要紧的一段按 H，就存为同一出处下的一条摘录，以后在卷子上出题；原文不动。划过一条或点了“标完了”即算这篇完成。")
+                Text("全部摘录里整篇存进来、还没划过要点的文章。打开读一遍，选中要紧的一段按 H，就存为同一出处下的一条摘录，以后在日课上出题；原文不动。划过一条或点了“标完了”即算这篇完成。")
                     .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
                     .fixedSize(horizontal: false, vertical: true)
                 ForEach(today.items) { item in row(item) }

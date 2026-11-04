@@ -247,12 +247,12 @@ struct SidebarView: View {
         )) {
             // 6.0.1：侧栏改为三组——考场（每天来考）、题库（考的内容）、其他。各组可折叠，记住状态。
             Section(isExpanded: store.sidebarGroupBinding("exam")) {
-                Label("考场门口", systemImage: "door.left.hand.open")
+                Label("日课首页", systemImage: "door.left.hand.open")
                     .sidebarMenuRow()
                     .tag(SidebarItem.home)
                 // 6.0.3：今日试卷——今日检查、今日回顾、记忆卡学习、重温、自测合成一张卷子；行尾为还没答的题数
                 HStack {
-                    Label("今日试卷", systemImage: "list.clipboard")
+                    Label("今日日课", systemImage: "list.clipboard")
                     Spacer()
                     if store.dailyCheck.left > 0 { SidebarCount(store.dailyCheck.left) }
                 }
@@ -263,7 +263,7 @@ struct SidebarView: View {
                     .sidebarMenuRow()
                     .tag(SidebarItem.gradebook)
             } header: {
-                Text("考场")
+                Text("日课")
             }
 
             Section(isExpanded: store.sidebarGroupBinding("bank")) {
@@ -367,16 +367,12 @@ struct SidebarView: View {
                 HStack {
                     Text("题库")
                     Spacer()
-                    Menu {
-                        Button("新写札记…") { store.composeIdeaNote() }
-                        Button("记一个问题…") { store.newQuestion() }
-                        Button("新建专题笔记本…") { store.newNotebookRequest = NewNotebookRequest() }
-                    } label: { Image(systemName: "plus") }
+                    Menu { AddEverythingMenu() } label: { Image(systemName: "plus") }
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()
                         .handCursor()
-                        .help("新写札记、记问题或新建专题笔记本")
+                        .help("新建摘录、记忆卡、札记、问题、专题笔记本、出处，或导入")
                 }
             }
 
@@ -453,13 +449,11 @@ struct SidebarView: View {
             SidebarBrandView()
         }
         .toolbar {
+            // 6.3：加号列出所有可以新建、导入的
             ToolbarItem {
-                Button {
-                    store.newHighlight()
-                } label: {
-                    Label("新建摘录", systemImage: "plus")
-                }
-                .help("新建摘录（⌘N）")
+                Menu { AddEverythingMenu() } label: { Label("新建", systemImage: "plus") }
+                    .menuIndicator(.hidden)
+                    .help("新建摘录（⌘N）、记忆卡、札记、问题、专题笔记本、出处，或导入")
             }
         }
     }
@@ -543,5 +537,34 @@ struct CardSheets: ViewModifier {
             } message: {
                 Text("这条摘录已做成 \(store.cardSyncOffer?.cardCount ?? 1) 张记忆卡。同步后卡片的正反面换成摘录的新内容，复习进度不变。（可在“设置 → 记忆卡”改为总是同步或从不同步）")
             }
+    }
+}
+
+/// 6.3：侧栏加号的菜单——所有可以新建、导入的都在这里
+struct AddEverythingMenu: View {
+    @Environment(LibraryStore.self) private var store
+
+    var body: some View {
+        Group {
+            Section("新建") {
+                Button { store.newHighlight() } label: { Label("新建摘录（⌘N）", systemImage: "text.quote") }
+                Button { QuickCaptureController.shared.show() } label: { Label("快速录入浮窗（⌥⌘N）", systemImage: "rectangle.and.pencil.and.ellipsis") }
+                Button { store.newCard(deck: store.study.lastDeck) } label: { Label("新建记忆卡", systemImage: "rectangle.on.rectangle") }
+                Button { store.showsCardBulkEntry = true } label: { Label("批量粘贴问答（记忆卡）…", systemImage: "list.bullet.rectangle") }
+                Button { store.composeIdeaNote() } label: { Label("新写札记…", systemImage: "lightbulb") }
+                Button { QuickNoteController.shared.show() } label: { Label("随手札记浮窗（⌥⌘J）", systemImage: "square.and.pencil") }
+                Button { store.newQuestion() } label: { Label("记一个问题…", systemImage: "questionmark.circle") }
+                Button { store.newNotebookRequest = NewNotebookRequest() } label: { Label("新建专题笔记本…", systemImage: "text.book.closed") }
+                Button { store.editingSource = Source(title: "") } label: { Label("新建出处…", systemImage: "books.vertical") }
+            }
+            Section("导入") {
+                Button("从 KongFolio 导入") { store.checkKongFolio(quiet: false, force: true) }
+                Button("从 KongFolio 文件导入…") { store.chooseKongFolioFile() }
+                Button("从 LiquidText 导入笔记…") { ExportService.importLiquidText(store: store) }
+                Button("从剪贴板导入 LiquidText 笔记") { ExportService.importLiquidTextFromClipboard(store: store) }
+                Button("导入 Anki 牌组…") { ExportService.importAnki(store: store) }
+            }
+        }
+        .disabled(store.fullBackupBusy)
     }
 }

@@ -42,7 +42,7 @@ final class StatusItemController: NSObject {
             button.imagePosition = .imageLeading
             item?.length = NSStatusItem.variableLength
         }
-        button.toolTip = "今日试卷：摘录题还剩 \(c.highlights) 道，记忆卡 \(c.cards) 道"
+        button.toolTip = "今日日课：摘录题还剩 \(c.highlights) 道，记忆卡 \(c.cards) 道"
     }
 
     private func install() {
@@ -66,9 +66,9 @@ final class StatusItemController: NSObject {
         // 6.2：随手札记
         add(menu, "随手札记" + (HotKeyPreset.note == .off ? "" : "（\(HotKeyPreset.note.label)）"), #selector(quickNote))
         if let left = QuickCaptureController.shared.store?.dailyCheck.left, left > 0 {
-            add(menu, "今日试卷（还有 \(left) 题）", #selector(review))
+            add(menu, "今日日课（还有 \(left) 题）", #selector(review))
         } else {
-            add(menu, "今日试卷", #selector(review))
+            add(menu, "今日日课", #selector(review))
         }
         add(menu, "记忆卡（牌组）", #selector(cards))
         add(menu, "打开 KongReview", #selector(openMain))

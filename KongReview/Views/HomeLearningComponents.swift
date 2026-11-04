@@ -38,16 +38,16 @@ struct TodayWorkBar: View {
         let allDone = reviewLeft == 0 && cardsLeft == 0 && revisitLeft == 0 && annotate.left == 0
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("今日试卷").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                Text("今日日课").font(.system(size: 15, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 if !allDone { Text("约 \(minutes) 分钟").font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).monospacedDigit() }
                 Spacer(minLength: 8)
                 Button(action: onCheck) {
-                    Label(checkedIn ? "今日已打卡" : check.due > 0 ? "已答 \(check.done)/\(check.due)" : "成绩单",
+                    Label(checkedIn ? "今日已打卡" : check.due > 0 ? "已答 \(check.done)/\(check.due)" : "今日小结",
                           systemImage: checkedIn ? "checkmark.seal.fill" : "checklist.checked").lineLimit(1)
                 }
                 .buttonStyle(.plain).font(.system(size: 12, weight: .medium).monospacedDigit())
                 .foregroundStyle(checkedIn || (check.due > 0 && check.left == 0) ? ReviewPalette.done : ReviewPalette.accent)
-                .help("打开今日试卷：已答 / 应答，答完看成绩单").handCursor()
+                .help("打开今日日课：已答 / 应答，答完看今日小结").handCursor()
                 if let focus {
                     Button(action: onFocus) {
                         Label(focus.kind == .project ? "当前\(focus.label)" : "本期焦点：\(focus.label)", systemImage: "scope").lineLimit(1)
@@ -103,7 +103,7 @@ struct TodayWorkBar: View {
     private func startButton(allDone: Bool) -> some View {
         Button(action: onStart) {
             HStack(spacing: 6) {
-                Text(allDone ? "今日试卷已答完 · 看成绩单" : (summary.reviewCompletedCount + summary.cardsStudiedCount + revisit.done + annotate.done > 0 ? "接着答卷" : "开始答卷")).font(.system(size: 13, weight: .semibold))
+                Text(allDone ? "今日日课已答完 · 看今日小结" : (summary.reviewCompletedCount + summary.cardsStudiedCount + revisit.done + annotate.done > 0 ? "接着做日课" : "开始做日课")).font(.system(size: 13, weight: .semibold))
                 Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(allDone ? ReviewPalette.ink : Color.white)
@@ -111,6 +111,6 @@ struct TodayWorkBar: View {
             .background(allDone ? ReviewPalette.soft : ReviewPalette.accent, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain).handCursor().fixedSize()
-        .help("五类题交错出在一张卷子上：记忆卡、摘录、札记、笔记、问题")
+        .help("五类题交错出在一张日课上：记忆卡、摘录、札记、笔记、问题")
     }
 }

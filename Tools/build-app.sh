@@ -39,12 +39,26 @@ if ! xcrun --find swift >/dev/null 2>&1; then
 fi
 xcrun swift --version 2>&1 | head -1
 
+# 6.3：同一份源码（git 树）在本机用同一版 Swift 测过、全部通过，就不再测一遍（“测试KongReview.command”与这里都记）。
+# 树相同即每个文件都相同；GitHub 上合并 PR 产生的提交，树与测过的分支末端相同。
+tested_file="$HOME/Library/Caches/KongReview-tested-trees.txt"
+tree="$(git -C "$root" rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
+swift_id="$(xcrun swift --version 2>&1 | head -1 | shasum | cut -c1-12)"
+stamp="$tree $swift_id"
+clean=0
+[[ -n "$tree" && -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] && clean=1
+
 if [[ $test -eq 1 ]]; then
   echo "== tests =="
-  # 先把应用的测试编译好，再测核心包、应用（测应用时不必再编译，进度不会卡住）
-  xcrun swift build --build-tests
-  (cd Packages/KongReviewCore && xcrun swift test)
-  xcrun swift test --skip-build
+  if [[ $clean -eq 1 && -f "$tested_file" ]] && grep -qxF "$stamp" "$tested_file"; then
+    echo "这份源码（树 ${tree:0:7}）已在本机用同一版 Swift 测过、全部通过，这次不再测。"
+  else
+    # 先把应用的测试编译好，再测核心包、应用（测应用时不必再编译，进度不会卡住）
+    xcrun swift build --build-tests
+    (cd Packages/KongReviewCore && xcrun swift test)
+    xcrun swift test --skip-build
+    if [[ $clean -eq 1 ]]; then echo "$stamp" >> "$tested_file"; fi
+  fi
 fi
 
 echo "== compile =="

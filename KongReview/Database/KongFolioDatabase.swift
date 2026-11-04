@@ -31,7 +31,7 @@ struct KongFolioReport: Equatable, Sendable {
         if added > 0 {
             var s = "从 KongFolio 导入" + [(newHighlights, "条摘录"), (newNotes, "条札记")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: "、")
             if !sources.isEmpty { s += "（" + sources.prefix(5).map { "《\($0)》" }.joined(separator: "、") + (sources.count > 5 ? "等" : "") + "）" }
-            parts.append(s + "，以后在今日试卷上出题。")
+            parts.append(s + "，以后在今日日课上出题。")
         }
         if updated > 0 { parts.append("KongFolio 里改过的 \(updated) 条已更新。") }
         if added == 0 && updated == 0 { parts.append("KongFolio 的阅读记录没有新内容（\(unchanged) 条已导入过）。") }
