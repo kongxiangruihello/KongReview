@@ -100,3 +100,78 @@ extension AppDatabase {
         return t
     }
 }
+
+// MARK: - 6.3：自评偏高的题
+
+/// 最近一次判“记得”而要点写出不到一半的一道题
+struct OverconfidentItem: Identifiable, Equatable, Sendable {
+    var id: String { "\(kind.rawValue)-\(recordId)" }
+    var kind: GradeKind
+    var recordId: Int64
+    var title: String
+    var detail: String
+    var hits: Int
+    var units: Int
+    var at: Date
+    var notebookId: Int64?
+
+    /// 打开这道题（与“常错的题”同一条路径）
+    var weakItem: WeakItem {
+        WeakItem(kind: kind, recordId: recordId, title: title, detail: detail, misses: 0, attempts: 0,
+                 lastAt: at, lastMissed: false, notebookId: notebookId)
+    }
+}
+
+extension AppDatabase {
+    static let overconfidentDays = 30
+
+    /// 近 30 天里、最近一次对照是“判记得而要点写出不到一半”的题，新的在前；已删去的不列
+    func overconfidentItems(limit: Int = 12, now: Date = Date()) throws -> [OverconfidentItem] {
+        let since = now.addingTimeInterval(-Double(Self.overconfidentDays) * 86_400)
+        return try writer.read { db in
+            guard try db.tableExists("exam_calibration") else { return [] }
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT c.kind, c.recordId, c.units, c.hits, c.result, c.at FROM exam_calibration c
+                WHERE c.at >= ? AND c.at = (SELECT MAX(at) FROM exam_calibration x WHERE x.kind = c.kind AND x.recordId = c.recordId)
+                ORDER BY c.at DESC
+                """, arguments: [since])
+            var out: [OverconfidentItem] = []
+            for row in rows {
+                let units: Int = row["units"], hits: Int = row["hits"]
+                guard units > 0, let result = SelfTestResult(rawValue: row["result"]),
+                      IdeaUnits.verdict(result.ideaGrade, coverage: Double(hits) / Double(units)) == .over,
+                      let kind = CalibrationKind(rawValue: row["kind"]) else { continue }
+                let id: Int64 = row["recordId"]
+                var title = "", detail = "", grade = GradeKind.highlight, notebookId: Int64?
+                switch kind {
+                case .highlight:
+                    guard let h = try Row.fetchOne(db, sql: """
+                        SELECT h.text, h.location, s.title FROM highlight h LEFT JOIN source s ON s.id = h.sourceId
+                        WHERE h.id = ? AND h.deletedAt IS NULL
+                        """, arguments: [id]) else { continue }
+                    title = Self.gradebookOpening(h["text"])
+                    detail = [(h["title"] as String?).map { "《\($0)》" }, h["location"] as String?].compactMap { $0 }.joined(separator: " ")
+                case .card:
+                    guard let c = try Row.fetchOne(db, sql: "SELECT front, deck FROM card WHERE id = ? AND deletedAt IS NULL", arguments: [id]) else { continue }
+                    title = Self.gradebookOpening(c["front"]); detail = c["deck"]; grade = .card
+                case .note:
+                    guard let n = try Row.fetchOne(db, sql: "SELECT title FROM idea_note WHERE id = ? AND deletedAt IS NULL", arguments: [id]) else { continue }
+                    title = n["title"]; detail = "札记 · 论证题"; grade = .note
+                case .block:
+                    guard let b = try Row.fetchOne(db, sql: """
+                        SELECT b.text, b.notebookId, n.title FROM notebook_block b JOIN notebook n ON n.id = b.notebookId WHERE b.id = ?
+                        """, arguments: [id]) else { continue }
+                    title = Self.gradebookOpening(Self.blockPlain(b["text"])); detail = "《\(b["title"] as String)》"
+                    grade = .block; notebookId = b["notebookId"]
+                case .answer:
+                    guard let q = try Row.fetchOne(db, sql: "SELECT title FROM question WHERE id = ?", arguments: [id]) else { continue }
+                    title = q["title"]; detail = "问题簿 · 解答题"; grade = .question
+                }
+                out.append(OverconfidentItem(kind: grade, recordId: id, title: title, detail: detail, hits: hits, units: units,
+                                             at: row["at"], notebookId: notebookId))
+                if out.count >= limit { break }
+            }
+            return out
+        }
+    }
+}

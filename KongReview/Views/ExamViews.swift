@@ -54,7 +54,7 @@ struct ExamView: View {
             }
         }
         .background(ReviewPalette.page)
-        .navigationTitle("今日试卷")
+        .navigationTitle("今日日课")
         .sheet(item: Bindable(store).annotating) { AnnotateSheet(request: $0) }
         .task(id: "\(store.today)|\(reload)") { load() }
         .task(id: "\(store.dailyCheckRevision)|\(store.revisitRevision)") {
@@ -113,7 +113,7 @@ struct ExamView: View {
     private func header(_ s: DailyCheckState) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("今日试卷").font(.system(size: 24, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                Text("今日日课").font(.system(size: 24, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 Text(ExamDate.line()).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                 Spacer()
                 if s.due > 0 {
@@ -133,7 +133,7 @@ struct ExamView: View {
                     HStack(spacing: 14) { headerActions; Spacer() }
                 }
             }
-            Text("一律先想、再展开对照、再判分：先提取后对照，比重读记得牢。题目按各自的到期日出，卷面上交错排列；中途离开，回来接着答。")
+            Text("一律先想、再展开对照、再判分：先提取后对照，比重读记得牢。题目按各自的到期日出，日课上交错排列；中途离开，回来接着答。")
                 .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -153,17 +153,17 @@ struct ExamView: View {
     private var headerActions: some View {
         let relearn = store.examRelearn
         if !relearn.items.isEmpty || relearn.passed + relearn.failed > 0 {
-            Label("卷尾再考 \(relearn.items.count) 道" + (relearn.passed > 0 ? " · 已过关 \(relearn.passed)" : ""), systemImage: "arrow.uturn.backward.circle")
+            Label("课末再练 \(relearn.items.count) 道" + (relearn.passed > 0 ? " · 已过关 \(relearn.passed)" : ""), systemImage: "arrow.uturn.backward.circle")
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(relearn.items.isEmpty ? ReviewPalette.done : ReviewPalette.pending)
                 .lineLimit(1).fixedSize()
-                .help("今天答“忘了”的摘录题、论证题、解答题与“需重读”的复述题，在常规的题答完后再考一次，答对才算过关；每道至多再考两轮。卷尾再考不记入掌握度。")
+                .help("今天答“忘了”的摘录题、论证题、解答题与“需重读”的复述题，在常规的题答完后再练一次，答对才算过关；每道至多再练两轮。课末再练不记入掌握度。")
         }
         if current != nil && !store.examHandedIn {
-            Button("先交卷，看成绩单") { store.examHandedIn = true }
+            Button("先收工，看今日小结") { store.examHandedIn = true }
                 .buttonStyle(.link).font(.system(size: 12)).handCursor()
                 .lineLimit(1).fixedSize()
-                .help("还没答的题仍留在卷子上，随时可以接着答")
+                .help("还没答的题仍留在日课上，随时可以接着答")
         }
     }
 
@@ -184,7 +184,7 @@ struct ExamView: View {
     private func badge(_ kind: ExamKind, _ title: String, _ detail: String = "") -> some View {
         HStack(spacing: 8) {
             if let r = relearnItem {
-                Label("卷尾再考 · 第 \(r.rounds + 1) 轮", systemImage: "arrow.uturn.backward.circle")
+                Label("课末再练 · 第 \(r.rounds + 1) 轮", systemImage: "arrow.uturn.backward.circle")
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.pending)
             }
             Label(kind.title + " · " + title, systemImage: kind.symbol)
@@ -196,7 +196,7 @@ struct ExamView: View {
                 Button { editRequest = store.examEditRequest(q) } label: { Label("编辑这道题", systemImage: "pencil") }
                     .buttonStyle(.link).font(.system(size: 12)).handCursor()
                     .keyboardShortcut("e", modifiers: .command)
-                    .help("改这道题的内容（HTML 源码，即时预览），改完回到卷面；展开与否、“我的回答”不动（⌘E）")
+                    .help("改这道题的内容（HTML 源码，即时预览），改完回到日课；展开与否、“我的回答”不动（⌘E）")
             }
         }
     }
@@ -322,7 +322,7 @@ struct ExamView: View {
             if revealed, let item = relearnItem {
                 VStack(alignment: .leading, spacing: 8) {
                     gradeButtons { r in store.examRelearnAnswer(item, passed: r == .remembered); next() }
-                    Text("卷尾再考：答“记得”才算过关；没过的排到后面再考一轮。这一次不记入掌握度。")
+                    Text("课末再练：答“记得”才算过关；没过的排到后面再练一轮。这一次不记入掌握度。")
                         .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                 }
             } else if revealed {
@@ -345,7 +345,7 @@ struct ExamView: View {
                         Button("做成记忆卡") { store.makeCard(from: h) }.handCursor()
                     }
                     .buttonStyle(.link).font(.system(size: 12))
-                    Text("忘了的今天卷尾再考一次，两天后起回到卷子上补考；记得的，隔得越来越久才再出。")
+                    Text("忘了的今天课末再练一次，两天后起回到日课上补练；记得的，隔得越来越久才再出。")
                         .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                 }
             }
@@ -365,7 +365,7 @@ struct ExamView: View {
             Button { QuickNoteController.shared.show(LibraryStore.examNoteComposer(ctx)) } label: { Label("写一条札记", systemImage: "lightbulb") }
                 .help(ctx.highlight != nil ? "随手札记浮窗；挂上这道题的摘录，也可改为加入已有札记" : "随手札记浮窗")
             Spacer()
-            Text("浮窗写完收起，卷子照旧；别处也可按 \(HotKeyPreset.current.label) 记摘录" + (HotKeyPreset.note == .off ? "" : "、\(HotKeyPreset.note.label) 写札记"))
+            Text("浮窗写完收起，日课照旧；别处也可按 \(HotKeyPreset.current.label) 记摘录" + (HotKeyPreset.note == .off ? "" : "、\(HotKeyPreset.note.label) 写札记"))
                 .font(.system(size: 11)).foregroundStyle(ReviewPalette.sub).lineLimit(1).truncationMode(.tail)
         }
         .buttonStyle(.link).font(.system(size: 12.5)).handCursor()
@@ -476,7 +476,7 @@ struct ExamView: View {
     private func noteQuestion(_ n: RevisitNoteItem) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             ReviewCardContainer(padding: 30) {
-                badge(.note, "论证题", n.lastReviewedAt == nil ? "第一次考" : "")
+                badge(.note, "论证题", n.lastReviewedAt == nil ? "第一次做" : "")
                 Text(n.title).font(.system(size: 22, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
                 if revealed {
@@ -507,7 +507,7 @@ struct ExamView: View {
             }
             if revealed, let item = relearnItem {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("卷尾再考：理由与依据这回想起来了吗？").font(.system(size: 13.5, weight: .medium)).foregroundStyle(ReviewPalette.ink)
+                    Text("课末再练：理由与依据这回想起来了吗？").font(.system(size: 13.5, weight: .medium)).foregroundStyle(ReviewPalette.ink)
                     gradeButtons { r in store.examRelearnAnswer(item, passed: r == .remembered); next() }
                 }
             } else if revealed {
@@ -570,13 +570,13 @@ struct ExamView: View {
             if revealed, let item = relearnItem {
                 choices([
                     ("1", "记起来了", "checkmark", "过关", { store.examRelearnAnswer(item, passed: true); next() }),
-                    ("2", "还是想不起", "arrow.uturn.backward", "排到后面再考一轮；明天以后按“需重读”的间隔回来", { store.examRelearnAnswer(item, passed: false); next() }),
+                    ("2", "还是想不起", "arrow.uturn.backward", "排到后面再练一轮；明天以后按“需重读”的间隔回来", { store.examRelearnAnswer(item, passed: false); next() }),
                 ])
             } else if revealed {
                 choices([
                     ("1", "已吸收", "checkmark", "能说出要点；下次在 \(AppDatabase.nextNoteInterval(after: k.intervalDays)) 天后", { calibrate(.block, k.id, blockMatch(k), SelfTestResult(block: .absorbed)); store.examAnswerBlock(k, .absorbed); next() }),
                     ("2", "需重读", "arrow.uturn.backward", "说不出或说错；\(AppDatabase.blockRereadDays) 天后再来", { calibrate(.block, k.id, blockMatch(k), SelfTestResult(block: .reread)); store.examAnswerBlock(k, .reread); next() }),
-                    ("3", "待整理", "tray.full", "内容还乱；一周后再来，列入成绩单下的“待整理”", { calibrate(.block, k.id, blockMatch(k), SelfTestResult(block: .organize)); store.examAnswerBlock(k, .organize); next() }),
+                    ("3", "待整理", "tray.full", "内容还乱；一周后再来，列入今日小结下的“待整理”", { calibrate(.block, k.id, blockMatch(k), SelfTestResult(block: .organize)); store.examAnswerBlock(k, .organize); next() }),
                 ])
             }
         }
@@ -636,7 +636,7 @@ struct ExamView: View {
     private func answerQuestion(_ a: RevisitAnswerItem) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             ReviewCardContainer(padding: 30) {
-                badge(.question, "解答题", a.reviewCount == 0 ? "第一次考" : "")
+                badge(.question, "解答题", a.reviewCount == 0 ? "第一次做" : "")
                 Text(a.title).font(.system(size: 22, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
                 if !revealed {
@@ -671,7 +671,7 @@ struct ExamView: View {
                         gradeButtons { r in store.examRelearnAnswer(item, passed: r == .remembered); next() }
                     } else {
                         gradeButtons { r in calibrate(.answer, a.id, answerMatch(a), r); store.examAnswerQuestionAnswer(a, result: r); next() }
-                        Text("记得的隔得越来越久再考（\(AppDatabase.nextNoteInterval(after: a.intervalDays)) 天后）；忘了的交卷前在卷尾再考，两天后再来。")
+                        Text("记得的隔得越来越久再练（\(AppDatabase.nextNoteInterval(after: a.intervalDays)) 天后）；忘了的收工前在课末再练，两天后再来。")
                             .font(.system(size: 11.5)).foregroundStyle(ReviewPalette.sub)
                     }
                     HStack {
@@ -707,18 +707,18 @@ struct ExamView: View {
     private func finished(_ s: DailyCheckState) -> some View {
         ReviewCardContainer(padding: 28) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(s.done > 0 ? (store.annotate.left > 0 ? "今天的题答完了，还有文章要标" : "今天的卷子答完了") : "今天的卷子上没有题")
+                Text(s.done > 0 ? (store.annotate.left > 0 ? "今天的题答完了，还有文章要标" : "今天的日课做完了") : "今天的日课上没有题")
                     .font(.system(size: 19, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 if s.done > 0 {
                     Text(summaryLine(s)).font(.system(size: 13.5)).foregroundStyle(ReviewPalette.ink)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(s.done > 0 ? "在下面写一句日评，就算打卡。忘了的摘录两天后补考；记忆卡、札记、笔记按各自的间隔回来。"
+                Text(s.done > 0 ? "在下面写一句日评，就算打卡。忘了的摘录两天后补练；记忆卡、札记、笔记按各自的间隔回来。"
                      : "记忆卡、札记、笔记还没到期，摘录也都答过了。可以去题库加几道题：录一条摘录、写一条札记或做几张卡。")
                     .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
                 let relearn = store.examRelearn
                 if relearn.passed + relearn.failed > 0 {
-                    Text("卷尾再考：过关 \(relearn.passed) 道" + (relearn.failed > 0 ? "，两轮仍没想起 \(relearn.failed) 道（照常补考）" : "") + "。")
+                    Text("课末再练：过关 \(relearn.passed) 道" + (relearn.failed > 0 ? "，两轮仍没想起 \(relearn.failed) 道（照常补练）" : "") + "。")
                         .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.ink)
                 }
                 // 6.0.7：设了每天的时长，超出的顺延到明天
@@ -728,7 +728,7 @@ struct ExamView: View {
                             .font(.system(size: 12.5)).foregroundStyle(ReviewPalette.ink)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer()
-                        PillButton(icon: "plus", title: "再考 10 分钟", style: .ghost) {
+                        PillButton(icon: "plus", title: "再做 10 分钟", style: .ghost) {
                             store.examExtendBudget()
                             next()
                         }
@@ -747,7 +747,7 @@ struct ExamView: View {
     private var reportCard: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("成绩单").font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
+                Text("今日小结").font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
                 Spacer()
                 if current != nil && store.examHandedIn {
                     Button("收起，接着答") { store.examHandedIn = false }.buttonStyle(.link).font(.system(size: 12)).handCursor()

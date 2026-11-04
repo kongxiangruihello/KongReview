@@ -29,7 +29,7 @@ struct ExamEditSheet: View {
                 Text(request.question.kind.title).font(.callout).foregroundStyle(.secondary)
                 Spacer()
             }
-            Text("直接改 HTML 源码，右边即时预览；也可写 Markdown。只改内容，不改排程与作答记录；存后回到卷面，展开与否、“我的回答”都不动。")
+            Text("直接改 HTML 源码，右边即时预览；也可写 Markdown。只改内容，不改排程与作答记录；存后回到日课，展开与否、“我的回答”都不动。")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {

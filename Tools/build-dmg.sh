@@ -15,7 +15,10 @@ OUT="build"
 # codesign 会报 “resource fork, Finder information, or similar detritus not allowed”。
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/kongreview-build.XXXXXX")"
 APP_DIR="${WORK}/${APP}.app"
-FINAL_DMG="../${APP}-${VERSION}.dmg"
+# 6.3：设了 KONGREVIEW_DMG_DIR（如测试脚本放到缓存目录）时，产物放那里、同版本直接覆盖，不归档旧产物
+DMG_DIR="${KONGREVIEW_DMG_DIR:-..}"
+mkdir -p "${DMG_DIR}"
+FINAL_DMG="${DMG_DIR}/${APP}-${VERSION}.dmg"
 
 echo "==> 检查工具链"
 if ! xcode-select -p >/dev/null 2>&1; then
@@ -24,15 +27,20 @@ if ! xcode-select -p >/dev/null 2>&1; then
 fi
 swift --version
 
-echo "==> 归档上一次的产物（版本 ${VERSION}）"
-ARCHIVE="../${APP}旧构建/$(date +%Y%m%d-%H%M%S)"
-for f in "${OUT}" "${FINAL_DMG}"; do
-  if [ -e "${f}" ]; then
-    mkdir -p "${ARCHIVE}"
-    mv -n "${f}" "${ARCHIVE}/"
-    echo "已移走：${f} → ${ARCHIVE}"
-  fi
-done
+if [ -n "${KONGREVIEW_DMG_DIR:-}" ]; then
+  echo "==> 清掉上一次的产物（输出到 ${DMG_DIR}，同版本覆盖）"
+  rm -rf "${OUT}" "${FINAL_DMG}"
+else
+  echo "==> 归档上一次的产物（版本 ${VERSION}）"
+  ARCHIVE="../${APP}旧构建/$(date +%Y%m%d-%H%M%S)"
+  for f in "${OUT}" "${FINAL_DMG}"; do
+    if [ -e "${f}" ]; then
+      mkdir -p "${ARCHIVE}"
+      mv -n "${f}" "${ARCHIVE}/"
+      echo "已移走：${f} → ${ARCHIVE}"
+    fi
+  done
+fi
 
 echo "==> 编译并签名（Tools/build-app.sh）"
 bash Tools/build-app.sh
@@ -53,4 +61,4 @@ rm -rf "${WORK}"
 cp "${DMG}" "${FINAL_DMG}"
 
 echo ""
-echo "完成：$(cd .. && pwd)/${APP}-${VERSION}.dmg"
+echo "完成：$(cd "${DMG_DIR}" && pwd)/${APP}-${VERSION}.dmg"

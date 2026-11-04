@@ -263,7 +263,7 @@ struct ExamCaptureContext: Equatable {
 
 extension LibraryStore {
     func examCaptureContext(_ q: ExamQuestion?) -> ExamCaptureContext {
-        guard let q else { return ExamCaptureContext(label: "今日试卷") }
+        guard let q else { return ExamCaptureContext(label: "今日日课") }
         func short(_ s: String) -> String {
             let t = Markdown.plainText(fromHTML: Markdown.richHTML(s)).replacingOccurrences(of: "\n", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -271,18 +271,18 @@ extension LibraryStore {
         }
         switch q {
         case .highlight(let h, _):
-            return ExamCaptureContext(label: "今日试卷 · 摘录“\(short(h.text))”", highlight: h, source: source(for: h))
+            return ExamCaptureContext(label: "今日日课 · 摘录“\(short(h.text))”", highlight: h, source: source(for: h))
         case .card(let c):
             let h = c.highlightId.flatMap { id in (try? db.highlights(ids: [id]))?.first { $0.deletedAt == nil } }
-            return ExamCaptureContext(label: "今日试卷 · 记忆卡“\(short(c.front))”", highlight: h, source: h.flatMap { source(for: $0) })
+            return ExamCaptureContext(label: "今日日课 · 记忆卡“\(short(c.front))”", highlight: h, source: h.flatMap { source(for: $0) })
         case .note(let n):
-            return ExamCaptureContext(label: "今日试卷 · 札记《\(n.title)》")
+            return ExamCaptureContext(label: "今日日课 · 札记《\(n.title)》")
         case .block(let b):
-            return ExamCaptureContext(label: "今日试卷 · 笔记《\(b.notebookTitle)》")
+            return ExamCaptureContext(label: "今日日课 · 笔记《\(b.notebookTitle)》")
         case .question(let item):
-            return ExamCaptureContext(label: "今日试卷 · 问题“\(short(item.title))”")
+            return ExamCaptureContext(label: "今日日课 · 问题“\(short(item.title))”")
         case .answer(let a):
-            return ExamCaptureContext(label: "今日试卷 · 问题“\(short(a.title))”")
+            return ExamCaptureContext(label: "今日日课 · 问题“\(short(a.title))”")
         }
     }
 

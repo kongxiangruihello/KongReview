@@ -106,7 +106,7 @@ final class ReminderScheduler {
             for fire in fires {
                 let content = UNMutableNotificationContent()
                 content.title = "今天还没打卡"
-                content.body = "在今日试卷上答完一类题，再写下日评（给今天打个分），就算打卡。"
+                content.body = "在今日日课上答完一类题，再写下日评（给今天打个分），就算打卡。"
                 content.sound = .default
                 let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
                 let request = UNNotificationRequest(identifier: CheckinReminderPlan.identifier(for: fire), content: content,

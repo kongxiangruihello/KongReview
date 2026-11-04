@@ -69,9 +69,9 @@ struct KongReviewApp: App {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                             }.disabled(store.fullBackupBusy || store.learningExplorer != nil || store.learningMaterialExport != nil)
             }
-            CommandMenu("考场") {
+            CommandMenu("日课") {
                 Group {
-                Button("今日试卷") { store.openExam(); WindowOpener.showMain() }
+                Button("今日日课") { store.openExam(); WindowOpener.showMain() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button("记忆卡（牌组）") { store.openCardsHome(); WindowOpener.showMain() }
                     .keyboardShortcut("k", modifiers: [.command, .shift])

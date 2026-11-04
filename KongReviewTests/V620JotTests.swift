@@ -24,7 +24,7 @@ final class V620JotTests: XCTestCase {
             XCTAssertEqual(b.source?.author, "钱穆")
             let c = store.examCaptureContext(.card(loose))
             XCTAssertNil(c.highlight); XCTAssertNil(c.source)
-            XCTAssertEqual(store.examCaptureContext(nil).label, "今日试卷")
+            XCTAssertEqual(store.examCaptureContext(nil).label, "今日日课")
 
             let composer = LibraryStore.examNoteComposer(a)
             XCTAssertEqual(composer.highlightID, h.id)

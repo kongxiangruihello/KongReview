@@ -19,7 +19,7 @@ struct SettingsView: View {
             QuickCaptureSettings()
                 .tabItem { Label("快速录入", systemImage: "keyboard") }
             ReviewSettings()
-                .tabItem { Label("考场", systemImage: "list.clipboard") }
+                .tabItem { Label("日课", systemImage: "list.clipboard") }
             CardSettingsTab()
                 .tabItem { Label("记忆卡", systemImage: "brain") }
             CaptureSettings()
@@ -121,14 +121,14 @@ private struct ReviewSettings: View {
 
     var body: some View {
         Form {
-            Section("今日试卷：每天至多出几道") {
+            Section("今日日课：每天至多出几道") {
                 Stepper("摘录题：\(dailyCount) 道", value: $dailyCount, in: 3...50)
-                Text("从全库按加权抽样（收藏、写过按语、被札记引用的更常出），忘了的两天后补考（至多 3 道，占名额）。改动从明天开始生效。记忆卡的题数在记忆卡的“每日学习量”里设。")
+                Text("从全库按加权抽样（收藏、写过按语、被札记引用的更常出），忘了的两天后补练（至多 3 道，占名额）。改动从明天开始生效。记忆卡的题数在记忆卡的“每日学习量”里设。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 // 6.0.8：新录的摘录及早上卷
                 Stepper(freshPerDay == 0 ? "其中新录的：不留名额" : "其中新录的：至多 \(freshPerDay) 道", value: $freshPerDay, in: 0...10)
-                Text("新录的摘录（含今日标注划出的、从 KongFolio 导入的）录进来的第二天起考第 1 次，隔两天考第 2 次，之后回到平常的抽样；排在补考之后，占摘录题的名额；先出到了第 2 次的，再出最近录的，一次进来很多时其余往后顺延。30 天内录的才算；整篇存进来的文章归“今日标注”。改动从明天开始生效。")
+                Text("新录的摘录（含今日标注划出的、从 KongFolio 导入的）录进来的第二天起练第 1 次，隔两天练第 2 次，之后回到平常的抽样；排在补练之后，占摘录题的名额；先出到了第 2 次的，再出最近录的，一次进来很多时其余往后顺延。30 天内录的才算；整篇存进来的文章归“今日标注”。改动从明天开始生效。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Stepper("论证题（札记）：\(revisitNotes) 道", value: $revisitNotes, in: 0...10)
@@ -140,16 +140,16 @@ private struct ReviewSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section("每天考多久") {
+            Section("每天做多久") {
                 Stepper(examMinutes == 0 ? "不限时长（各类按上面的题数出）" : "每天约 \(examMinutes) 分钟", value: $examMinutes, in: 0...240, step: 5)
-                Text("设了时长，当天第一次组卷时按这个次序分配：补考的摘录 → 到期的记忆卡 → 札记 → 笔记 → 问题 → 其余摘录（每道约 20 秒到 2 分钟估算）；超出的题顺延到明天，卷子答完时可以“再考 10 分钟”。标注文章另算。卷面上忘了的题会在卷尾再考一次（不另占时长）。")
+                Text("设了时长，当天第一次排日课时按这个次序分配：补练的摘录 → 到期的记忆卡 → 札记 → 笔记 → 问题 → 其余摘录（每道约 20 秒到 2 分钟估算）；超出的题顺延到明天，日课做完时可以“再做 10 分钟”。标注文章另算。日课上忘了的题会在课末再练一次（不另占时长）。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("今日标注：每天标几篇文章") {
                 Stepper(annotatePerDay == 0 ? "不出" : "每天 \(annotatePerDay) 篇", value: $annotatePerDay, in: 0...20)
-                Text("从全部摘录里整篇存进来（至少 1000 字）、还没划过要点的文章中每天随机抽，在今日试卷上打开标注：选中一段按 H 即存为同一出处下的一条摘录，原文不动。以前在 Readwise 等处划过的（同一出处已有出现在正文里的短摘录）不再抽。调多了当天即补足；设为 0 不出这一项，不计入打卡。")
+                Text("从全部摘录里整篇存进来（至少 1000 字）、还没划过要点的文章中每天随机抽，在今日日课上打开标注：选中一段按 H 即存为同一出处下的一条摘录，原文不动。以前在 Readwise 等处划过的（同一出处已有出现在正文里的短摘录）不再抽。调多了当天即补足；设为 0 不出这一项，不计入打卡。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -162,16 +162,16 @@ private struct ReviewSettings: View {
                     set: { let c = Calendar.current.dateComponents([.hour, .minute], from: $0); checkinHour = c.hour ?? 21; checkinMinute = c.minute ?? 0 }
                 ), displayedComponents: .hourAndMinute)
                 .disabled(!checkinReminder)
-                Text("卷子上答完一类并写下日评即打卡；到点还没打卡就提醒一次，打了就不提醒。休息日与补签在今日试卷的成绩单里设置。")
+                Text("日课上答完一类并写下日评即打卡；到点还没打卡就提醒一次，打了就不提醒。休息日与补签在今日日课的今日小结里设置。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("提醒") {
-                Toggle("每天提醒来考", isOn: $reminderEnabled)
+                Toggle("每天提醒做日课", isOn: $reminderEnabled)
                 DatePicker("提醒时间", selection: timeBinding, displayedComponents: .hourAndMinute)
                     .disabled(!reminderEnabled)
-                Text("当天已经在今日试卷上答过题，就不再提醒。")
+                Text("当天已经在今日日课上答过题，就不再提醒。")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("每周复盘提醒", isOn: $reflectionReminder)
                 Picker("提醒日", selection: $reflectionWeekday) {
@@ -309,7 +309,7 @@ private struct DataSettings: View {
                 if !kfLast.isEmpty {
                     Text("上次：" + kfLast).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                Text("读取 KongFolio 的阅读记录（默认在“~/Library/Application Support/KongFolio/ReadingJournal/catalog.json”），启动、回到前台时和每分钟看一次，改过才导入。摘录与有文字的图片摘录导入为摘录（出处取书名与作者，位置取页码，“我的笔记”作按语，带“KongFolio”标签）；笔记、整本书心得与札记导入为札记，引用的原文一并挂上。导入后照常在今日试卷上出题：摘录出要点题、出处题，札记 7 天后出论证题。重复导入不会重复；KongFolio 里改过的会更新；在 KongReview 里删去的不再加回来。“从文件导入”也可以选 KongFolio 导出的 Markdown（只增不改）。只读 KongFolio 的文件，不改动它们。")
+                Text("读取 KongFolio 的阅读记录（默认在“~/Library/Application Support/KongFolio/ReadingJournal/catalog.json”），启动、回到前台时和每分钟看一次，改过才导入。摘录与有文字的图片摘录导入为摘录（出处取书名与作者，位置取页码，“我的笔记”作按语，带“KongFolio”标签）；笔记、整本书心得与札记导入为札记，引用的原文一并挂上。导入后照常在今日日课上出题：摘录出要点题、出处题，札记 7 天后出论证题。重复导入不会重复；KongFolio 里改过的会更新；在 KongReview 里删去的不再加回来。“从文件导入”也可以选 KongFolio 导出的 Markdown（只增不改）。只读 KongFolio 的文件，不改动它们。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
