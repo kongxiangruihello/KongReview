@@ -62,6 +62,10 @@ public struct BuildLogProgress: Equatable, Sendable {
         }
         if line.hasPrefix("== tests ==") {
             advance(to: .buildingTests, "正在编译测试…")
+        } else if line.contains("已在本机用同一版 Swift 测过") {
+            // 6.3：这份源码在本机测过，build-app.sh 不再测
+            advance(to: .runningTests, "这份源码已在本机测过、全部通过，不再测一遍")
+            fraction = 1
         } else if line.hasPrefix("Test Suite 'All tests' started") {
             advance(to: .runningTests, "正在运行测试…")
         } else if line.hasPrefix("Test Case '"), line.contains("' passed") || line.contains("' failed") {

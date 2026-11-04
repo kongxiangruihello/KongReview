@@ -120,4 +120,17 @@ final class V602SourceUpdateTests: XCTestCase {
         XCTAssertEqual(SourceLocalChanges.conflicts(local: local, tracked: ["a.swift", "b.swift", "c.swift"], published: published),
                        ["b.swift", "c.swift"], "与已发布版本相同的可以覆盖；改过的、跟踪中但从未发布的不行；未跟踪的新文件不动")
     }
+
+    /// 6.3：同一份源码在本机测过时 build-app.sh 跳过测试，进度直接越过测试段
+    func testSkippedTests() {
+        var p = BuildLogProgress(expectedTests: 600)
+        p.consume("== tests ==")
+        p.consume("这份源码（树 abc1234）已在本机用同一版 Swift 测过、全部通过，这次不再测。")
+        XCTAssertEqual(p.stage, .runningTests)
+        XCTAssertEqual(p.detail, "这份源码已在本机测过、全部通过，不再测一遍")
+        XCTAssertEqual(p.overall, 0.55, accuracy: 0.001)
+        p.consume("== compile ==")
+        XCTAssertEqual(p.stage, .compiling)
+        XCTAssertEqual(p.testsRun, 0)
+    }
 }

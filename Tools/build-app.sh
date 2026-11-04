@@ -41,7 +41,8 @@ xcrun swift --version 2>&1 | head -1
 
 # 6.3：同一份源码（git 树）在本机用同一版 Swift 测过、全部通过，就不再测一遍（“测试KongReview.command”与这里都记）。
 # 树相同即每个文件都相同；GitHub 上合并 PR 产生的提交，树与测过的分支末端相同。
-tested_file="$HOME/Library/Caches/KongReview-tested-trees.txt"
+tested_file="$HOME/Library/Caches/KongReview-updates/tested-trees.txt"
+mkdir -p "$(dirname "$tested_file")"
 tree="$(git -C "$root" rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
 swift_id="$(xcrun swift --version 2>&1 | head -1 | shasum | cut -c1-12)"
 stamp="$tree $swift_id"
