@@ -48,6 +48,11 @@ swift_id="$(xcrun swift --version 2>&1 | head -1 | shasum | cut -c1-12)"
 stamp="$tree $swift_id"
 clean=0
 [[ -n "$tree" && -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] && clean=1
+if [[ $clean -eq 0 && -n "$tree" ]]; then
+  # 6.3.1：有本地改动时不用“测过 / 编过”的记录；列出改动，便于查为什么没跳过
+  echo "源码有本地改动，不用测过、编过的记录："
+  git -C "$root" status --porcelain 2>/dev/null | head -5 | sed 's/^/  /'
+fi
 
 if [[ $test -eq 1 ]]; then
   echo "== tests =="

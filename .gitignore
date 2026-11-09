@@ -9,7 +9,9 @@ build/
 # Swift Package Manager
 .build/
 .swiftpm/
-Package.resolved
+# 6.3.1：根目录的 Package.resolved 提交进仓库，测试、打包与应用内更新用同一版依赖（GRDB）；
+# 核心包没有外部依赖，它的 Package.resolved 仍不提交
+Packages/KongReviewCore/Package.resolved
 
 # 由 XcodeGen 生成
 KongReview/Info.plist
