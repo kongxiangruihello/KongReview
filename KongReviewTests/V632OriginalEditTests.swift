@@ -9,8 +9,11 @@ final class V632OriginalEditTests: XCTestCase {
         try MainActor.assumeIsolated {
             let db = try AppDatabase(DatabaseQueue())
             let store = LibraryStore(db: db)
-            var card = try db.save(Card(deck: "甲", front: "学而时习之", back: "不亦说乎"))
-            var h = try db.save(Highlight(text: "温故而知新", location: "为政"))
+            // 日课上的题都是从库里取的（日期只存到毫秒）；这里也从库里取，与应用里一致
+            let cid = try db.save(Card(deck: "甲", front: "学而时习之", back: "不亦说乎")).id!
+            let hid = try db.save(Highlight(text: "温故而知新", location: "为政")).id!
+            var card = try XCTUnwrap(try db.card(id: cid))
+            var h = try XCTUnwrap(try db.highlight(id: hid))
             let qc = ExamQuestion.card(card), qh = ExamQuestion.highlight(h, .source)
 
             // 没改：重取的与原来相同
