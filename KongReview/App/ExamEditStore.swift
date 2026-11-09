@@ -123,3 +123,19 @@ enum ExamEditError: LocalizedError {
         switch self { case .empty(let label): "“\(label)”不能为空。" }
     }
 }
+
+extension LibraryStore {
+    /// 6.3.2：记忆卡、摘录在原来的编辑窗口里改过之后，按 id 重新取一遍（删去了、或不是这两类则返回 nil，卷面不动）
+    func examRefreshed(_ q: ExamQuestion) -> ExamQuestion? {
+        switch q {
+        case .card(let c):
+            guard let id = c.id, let fresh = try? db.card(id: id), fresh.deletedAt == nil else { return nil }
+            return .card(fresh)
+        case .highlight(let h, let mode):
+            guard let id = h.id, let fresh = try? db.highlight(id: id), fresh.deletedAt == nil else { return nil }
+            return .highlight(fresh, mode)
+        default:
+            return nil
+        }
+    }
+}
