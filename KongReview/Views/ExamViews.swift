@@ -57,6 +57,10 @@ struct ExamView: View {
         .navigationTitle("今日日课")
         .sheet(item: Bindable(store).annotating) { AnnotateSheet(request: $0) }
         .task(id: "\(store.today)|\(reload)") { load() }
+        // 6.3.2：在原来的编辑窗口里改了记忆卡、摘录，保存后卷面换成改过的内容
+        .onChange(of: store.revision) {
+            if let q = current, let fresh = store.examRefreshed(q), fresh != q { current = fresh }
+        }
         .task(id: "\(store.dailyCheckRevision)|\(store.revisitRevision)") {
             tally = (try? store.db.examTally()) ?? MasteryTally()
             organize = (try? store.db.blocksToOrganize()) ?? []
@@ -191,12 +195,26 @@ struct ExamView: View {
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(ReviewPalette.accent)
             if !detail.isEmpty { Text(detail).font(.system(size: 12)).foregroundStyle(ReviewPalette.sub).lineLimit(1) }
             Spacer()
-            // 6.2：答题时随手改这道题（HTML），改完回到卷面
+            // 6.3.2：记忆卡、摘录用原来的编辑窗口（与记忆卡学习页的“编辑这张卡”、摘录列表的编辑相同）；
+            // 札记、笔记、问题仍用 6.2 的“编辑这道题”。改完回到日课，展开与否、“我的回答”不动
             if let q = current {
-                Button { editRequest = store.examEditRequest(q) } label: { Label("编辑这道题", systemImage: "pencil") }
-                    .buttonStyle(.link).font(.system(size: 12)).handCursor()
-                    .keyboardShortcut("e", modifiers: .command)
-                    .help("改这道题的内容（HTML 源码，即时预览），改完回到日课；展开与否、“我的回答”不动（⌘E）")
+                switch q {
+                case .card(let c):
+                    Button { store.editCard(c) } label: { Label("编辑这张卡", systemImage: "square.and.pencil") }
+                        .buttonStyle(.link).font(.system(size: 12)).handCursor()
+                        .keyboardShortcut("e", modifiers: .command)
+                        .help("打开记忆卡的编辑窗口（与学习页的“编辑这张卡”相同），改完回到日课（⌘E）")
+                case .highlight(let h, _):
+                    Button { store.edit(h) } label: { Label("编辑这条摘录", systemImage: "square.and.pencil") }
+                        .buttonStyle(.link).font(.system(size: 12)).handCursor()
+                        .keyboardShortcut("e", modifiers: .command)
+                        .help("打开摘录的编辑窗口（与摘录列表里的编辑相同），改完回到日课（⌘E）")
+                default:
+                    Button { editRequest = store.examEditRequest(q) } label: { Label("编辑这道题", systemImage: "square.and.pencil") }
+                        .buttonStyle(.link).font(.system(size: 12)).handCursor()
+                        .keyboardShortcut("e", modifiers: .command)
+                        .help("改这道题的内容（HTML 源码，即时预览），改完回到日课；展开与否、“我的回答”不动（⌘E）")
+                }
             }
         }
     }
