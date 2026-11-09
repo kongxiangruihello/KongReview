@@ -48,6 +48,11 @@ swift_id="$(xcrun swift --version 2>&1 | head -1 | shasum | cut -c1-12)"
 stamp="$tree $swift_id"
 clean=0
 [[ -n "$tree" && -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] && clean=1
+if [[ $clean -eq 0 && -n "$tree" ]]; then
+  # 6.3.1：有本地改动时不用“测过 / 编过”的记录；列出改动，便于查为什么没跳过
+  echo "源码有本地改动，不用测过、编过的记录："
+  git -C "$root" status --porcelain 2>/dev/null | head -5 | sed 's/^/  /'
+fi
 
 if [[ $test -eq 1 ]]; then
   echo "== tests =="
@@ -63,8 +68,33 @@ if [[ $test -eq 1 ]]; then
 fi
 
 echo "== compile =="
-xcrun swift build -c release --arch arm64 --product KongReview
-bin_dir="$(xcrun swift build -c release --arch arm64 --show-bin-path)"
+# 6.3.1：同一份源码（树）、同一版 Swift、同样的依赖版本（Package.resolved）在本机编译过，就直接用编好的程序。
+# 编译 KongReview 本身是一整步整模块优化，约一分钟；合并前在本机测试、打安装包时已经编过同一份源码，
+# 合并后“立即更新”时不必再编一遍。编好的程序存在更新缓存目录的 builds/ 里，只留最近 3 份。
+builds_dir="$HOME/Library/Caches/KongReview-updates/builds"
+resolved_id="none"
+[[ -f "$root/Package.resolved" ]] && resolved_id="$(shasum "$root/Package.resolved" | cut -c1-12)"
+build_key=""
+[[ $clean -eq 1 ]] && build_key="${tree}-${swift_id}-${resolved_id}"
+if [[ -n "$build_key" && -x "$builds_dir/$build_key/KongReview" ]]; then
+  echo "这份源码（树 ${tree:0:7}）已在本机编译过，直接用编好的程序，这次不再编译。"
+  bin_dir="$builds_dir/$build_key"
+  touch "$bin_dir"
+else
+  xcrun swift build -c release --arch arm64 --product KongReview
+  bin_dir="$(xcrun swift build -c release --arch arm64 --show-bin-path)"
+  if [[ -n "$build_key" ]]; then
+    mkdir -p "$builds_dir"
+    incoming="$(mktemp -d "$builds_dir/.incoming.XXXXXX")"
+    cp "$bin_dir/KongReview" "$incoming/KongReview"
+    find "$bin_dir" -maxdepth 1 -name '*.bundle' -exec cp -R {} "$incoming/" \;
+    rm -rf "${builds_dir:?}/$build_key"
+    mv "$incoming" "$builds_dir/$build_key"
+    # 只留最近用过的 3 份（ls 不列出以点开头的未完成目录）
+    ls -1t "$builds_dir" | tail -n +4 | while read -r old; do rm -rf "${builds_dir:?}/$old"; done || true
+    echo "编好的程序已存入更新缓存（树 ${tree:0:7}，依赖 ${resolved_id}）"
+  fi
+fi
 
 # 在临时目录里组装与签名：“文稿”若开启了 iCloud 同步，文件会带扩展属性，codesign 会拒绝
 staging="$(mktemp -d "${TMPDIR:-/tmp}/kongreview-build.XXXXXX")"

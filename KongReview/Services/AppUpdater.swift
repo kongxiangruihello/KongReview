@@ -26,6 +26,10 @@ final class AppUpdater {
     nonisolated static let proxyKey = "update.proxy"
     nonisolated static let updatedFromKey = "update.updatedFrom"
     nonisolated static let lastTestCountKey = "update.lastTestCount"
+    /// 6.3.1：上次编译新版本用了几秒（进度条按它推进）
+    nonisolated static let lastCompileSecondsKey = "update.lastCompileSeconds"
+    /// 没有上次的实测时，编译新版本按这个估计（作者的 Mac 上实测 56–69 秒）
+    nonisolated static let defaultCompileSeconds: Double = 70
     /// 自动检查的间隔
     nonisolated static let autoInterval: TimeInterval = 6 * 3600
 
@@ -291,17 +295,28 @@ final class AppUpdater {
                     try Self.bringSourceUpToDate(root)
                 }
                 report(.test, buildStart, "正在编译测试（约几分钟）…")
-                var build = BuildLogProgress(expectedTests: expected > 0 ? expected : 790)
-                var shown = (detail: "", fraction: -1.0)
-                let result = Self.run("/bin/bash", ["Tools/build-app.sh", "--test"], root.path, timeout: 3600) { line in
-                    build.consume(line)
-                    let fraction = buildStart + (0.9 - buildStart) * build.overall
-                    guard build.detail != shown.detail || fraction - shown.fraction >= 0.01 else { return }
-                    shown = (build.detail, fraction)
-                    report(build.stage >= .compiling ? .compile : .test, fraction, build.detail)
+                let lastCompile = UserDefaults.standard.double(forKey: Self.lastCompileSecondsKey)
+                let tracker = BuildTracker(BuildLogProgress(expectedTests: expected > 0 ? expected : 790,
+                                                            expectedCompileSeconds: lastCompile > 0 ? lastCompile : Self.defaultCompileSeconds,
+                                                            compileEstimateIsLast: lastCompile > 0)) { build in
+                    report(build.stage >= .compiling ? .compile : .test, buildStart + (0.9 - buildStart) * build.overall, build.detail)
                 }
+                // 6.3.1：编译新版本那一步约一分钟没有输出，每秒按已用时间推进一次进度
+                let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+                timer.schedule(deadline: .now() + 1, repeating: 1)
+                timer.setEventHandler { tracker.update { $0.tick() } }
+                timer.resume()
+                let result = Self.run("/bin/bash", ["Tools/build-app.sh", "--test"], root.path, timeout: 3600) { line in
+                    tracker.update { $0.consume(line) }
+                }
+                timer.cancel()
+                let build = tracker.snapshot
                 if build.testsRun > 0, build.failedTests.isEmpty { UserDefaults.standard.set(build.testsRun, forKey: Self.lastTestCountKey) }
                 guard result.status == 0 else { throw UpdateError(Self.buildFailure(build)) }
+                if let seconds = build.compileSeconds, seconds >= 5 {
+                    UserDefaults.standard.set(seconds, forKey: Self.lastCompileSecondsKey)
+                    Self.log("编译新版本用了 \(Int(seconds.rounded())) 秒")
+                }
 
                 let built = root.appendingPathComponent("build/KongReview.app")
                 report(.verify, 0.92, "核对新版本的标识、版本与签名…")
@@ -625,6 +640,31 @@ final class AppUpdater {
         if let e = error as? UpdateError { return e.message }
         return error.localizedDescription
     }
+}
+
+/// 6.3.1：读输出与每秒的计时在不同线程，构建进度加锁；进度或说明有变化才报给界面
+private final class BuildTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var build: BuildLogProgress
+    private var shown = (detail: "", overall: -1.0)
+    private let onChange: @Sendable (BuildLogProgress) -> Void
+
+    init(_ build: BuildLogProgress, onChange: @escaping @Sendable (BuildLogProgress) -> Void) {
+        self.build = build
+        self.onChange = onChange
+    }
+
+    func update(_ change: (inout BuildLogProgress) -> Void) {
+        lock.lock()
+        change(&build)
+        let current = build
+        let changed = current.detail != shown.detail || current.overall - shown.overall >= 0.01
+        // 在锁里报（报给界面只是排进主线程，不会卡住），两个线程的报告不会颠倒先后
+        if changed { shown = (current.detail, current.overall); onChange(current) }
+        lock.unlock()
+    }
+
+    var snapshot: BuildLogProgress { lock.lock(); defer { lock.unlock() }; return build }
 }
 
 /// 看门狗与读输出在不同线程，超时标记加锁

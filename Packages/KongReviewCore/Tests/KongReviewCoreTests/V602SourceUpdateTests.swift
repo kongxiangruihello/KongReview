@@ -128,9 +128,75 @@ final class V602SourceUpdateTests: XCTestCase {
         p.consume("这份源码（树 abc1234）已在本机用同一版 Swift 测过、全部通过，这次不再测。")
         XCTAssertEqual(p.stage, .runningTests)
         XCTAssertEqual(p.detail, "这份源码已在本机测过、全部通过，不再测一遍")
-        XCTAssertEqual(p.overall, 0.55, accuracy: 0.001)
+        XCTAssertTrue(p.testsSkipped)
+        // 6.3.1：跳过测试时几乎整段都是编译，不再一开始就显示过半
+        XCTAssertEqual(p.overall, 0.06, accuracy: 0.001)
         p.consume("== compile ==")
         XCTAssertEqual(p.stage, .compiling)
         XCTAssertEqual(p.testsRun, 0)
+    }
+
+    /// 6.3.1：编译新版本按已用时间推进；“[9/10]”这样的行不再让进度一下跳到九成再停住
+    func testCompileProgressFollowsTime() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        var p = BuildLogProgress(expectedTests: 600, expectedCompileSeconds: 68)
+        p.consume("== tests ==", now: t0)
+        p.consume("这份源码（树 abc1234）已在本机用同一版 Swift 测过、全部通过，这次不再测。", now: t0)
+        p.consume("== compile ==", now: t0)
+        XCTAssertEqual(p.detail, "正在编译新版本（上次用了约 68 秒）…")
+        p.consume("[9/10] Compiling KongReview KongReview-product", now: t0.addingTimeInterval(3))
+        XCTAssertEqual(p.fraction, 0, "有预计用时，[n/m] 不推进度")
+        p.tick(now: t0.addingTimeInterval(34))
+        XCTAssertEqual(p.fraction, 0.5, accuracy: 0.001)
+        XCTAssertEqual(p.detail, "正在编译新版本：已用 34 秒（上次用了约 68 秒）")
+        XCTAssertEqual(p.overall, 0.06 + 0.88 * 0.5, accuracy: 0.001)
+        p.tick(now: t0.addingTimeInterval(20))
+        XCTAssertEqual(p.fraction, 0.5, accuracy: 0.001, "不后退")
+        p.tick(now: t0.addingTimeInterval(90))
+        XCTAssertEqual(p.fraction, 0.97, accuracy: 0.001, "超过预计时停在 97%")
+        XCTAssertEqual(p.detail, "正在编译新版本：已用 90 秒，比上次久一些，请稍候")
+        p.consume("== icon ==", now: t0.addingTimeInterval(95))
+        XCTAssertEqual(p.stage, .packaging)
+        XCTAssertEqual(p.compileSeconds ?? 0, 95, accuracy: 0.001, "记下这次编译用时，下次按它估计")
+        p.tick(now: t0.addingTimeInterval(99))
+        XCTAssertEqual(p.detail, "正在打包…", "编译段之后 tick 不改说明")
+
+        // 没有预计用时：照旧按 [n/m]，说明里加上已用秒数
+        var q = BuildLogProgress()
+        q.consume("== compile ==", now: t0)
+        q.consume("[9/10] Compiling KongReview KongReview-product", now: t0)
+        XCTAssertEqual(q.fraction, 0.9, accuracy: 0.001)
+        q.tick(now: t0.addingTimeInterval(41))
+        XCTAssertEqual(q.detail, "正在编译新版本（9 / 10）：已用 41 秒")
+        XCTAssertEqual(q.fraction, 0.9, accuracy: 0.001)
+
+        // 估计值（没有上次实测）
+        var e = BuildLogProgress(expectedCompileSeconds: 70, compileEstimateIsLast: false)
+        e.consume("== compile ==", now: t0)
+        XCTAssertEqual(e.detail, "正在编译新版本（一般约 70 秒）…")
+        e.tick(now: t0.addingTimeInterval(80))
+        XCTAssertEqual(e.detail, "正在编译新版本：已用 80 秒，比一般久一些，请稍候")
+        XCTAssertNil(BuildLogProgress(expectedCompileSeconds: 0).expectedCompileSeconds)
+    }
+
+    /// 6.3.1：同一份源码在本机编译过，build-app.sh 直接用编好的程序
+    func testReusedCompile() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        var p = BuildLogProgress(expectedCompileSeconds: 68)
+        p.consume("== tests ==", now: t0)
+        p.consume("这份源码（树 abc1234）已在本机用同一版 Swift 测过、全部通过，这次不再测。", now: t0)
+        p.consume("== compile ==", now: t0)
+        p.consume("这份源码（树 abc1234）已在本机编译过，直接用编好的程序，这次不再编译。", now: t0)
+        XCTAssertTrue(p.compileReused)
+        XCTAssertEqual(p.overall, 0.94, accuracy: 0.001)
+        XCTAssertEqual(p.detail, "这份源码已在本机编译过，直接用编好的程序")
+        p.tick(now: t0.addingTimeInterval(5))
+        XCTAssertEqual(p.detail, "这份源码已在本机编译过，直接用编好的程序", "用编好的程序时不再按时间走")
+        p.consume("== icon ==", now: t0.addingTimeInterval(1))
+        XCTAssertNil(p.compileSeconds, "没有编译，不记用时，免得下次的估计被拉低")
+        // 编译前出现这句（不该出现）不算
+        var q = BuildLogProgress()
+        q.consume("已在本机编译过", now: t0)
+        XCTAssertFalse(q.compileReused)
     }
 }
