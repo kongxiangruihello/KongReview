@@ -346,7 +346,7 @@
 - [x] 补签卡片（`MakeupCard`）放在日课首页、今日日课、成绩册最上面；成绩册下方的小行去掉
 - [x] 补签后连续天数（`CheckinSummary.makeupStreak`，`AppDatabase.currentStreak`），默认选接得最长的一天
 - [x] 打卡行“可补签 N 天”；打卡图红色虚线框；晚间提醒附一句；可补签时不先问中断原因
-- [ ] Mac 上全量测试与预览检查（见 docs/validation/6.3.5-makeup.md）
+- [x] Mac 上全量测试（核心包 184、应用 621 项，0 失败）与预览检查（见 docs/validation/6.3.5-makeup.md）
 
 ## v6.3.4 — 出处题题面的排版；日课规则的七处修补
 
