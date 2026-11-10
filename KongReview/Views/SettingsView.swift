@@ -264,7 +264,7 @@ private struct CaptureSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("链接格式（供快捷指令、kongfetch 调用）") {
-                Text("kongreview://add?text=…&title=…&author=…&url=…&location=…&tags=…\nkongreview://quick（打开空白浮窗）\nkongreview://review（打开今日回顾）\nkongreview://save?url=…（整页存档）")
+                Text("kongreview://add?text=…&title=…&author=…&url=…&location=…&tags=…\nkongreview://quick（打开空白浮窗）\nkongreview://review（打开今日回顾）")
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                 Text("链接会打开快速录入浮窗并预先填好内容，确认后按 ⌘↩ 保存。Drafts、kongfetch 的配置方法见仓库中的 docs/INTEGRATIONS.md。")

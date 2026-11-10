@@ -289,14 +289,14 @@ struct AddArticleView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("存档网页").font(.title2.bold())
-            Text("粘贴文章网址。KongReview 会打开网页、提取正文并保存一份副本，之后在应用里阅读、划线；原网页改版或删除也不影响。")
+            Text("添加网页").font(.title2.bold())
+            Text("粘贴文章网址。KongReview 会打开网页、提取正文，整篇存为一条摘录，出处是这个网页（标题、作者、网址）；正文够长的会进入“今日标注”。原网页改版或删除也不影响。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("https://", text: urlBinding)
                 .textFieldStyle(.roundedBorder)
-                .onSubmit { store.saveArticle(from: urlBinding.wrappedValue) }
+                .onSubmit { store.saveWebPage(from: urlBinding.wrappedValue) }
             if let hint = store.addArticleDraft?.hint {
                 Label(hint, systemImage: "safari").font(.caption).foregroundStyle(.secondary)
             }
@@ -311,7 +311,7 @@ struct AddArticleView: View {
                 Spacer()
                 Button("取消", role: .cancel) { store.addArticleDraft = nil }
                     .keyboardShortcut(.cancelAction)
-                Button("存档") { store.saveArticle(from: urlBinding.wrappedValue) }
+                Button("添加") { store.saveWebPage(from: urlBinding.wrappedValue) }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .handCursor()
