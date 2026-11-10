@@ -372,7 +372,7 @@ struct SidebarView: View {
                         .menuIndicator(.hidden)
                         .fixedSize()
                         .handCursor()
-                        .help("新建摘录、记忆卡、札记、问题、专题笔记本、出处，或导入")
+                        .help("新建摘录、添加网页、记忆卡、札记、问题、专题笔记本、出处，或导入")
                 }
             }
 
@@ -453,7 +453,7 @@ struct SidebarView: View {
             ToolbarItem {
                 Menu { AddEverythingMenu() } label: { Label("新建", systemImage: "plus") }
                     .menuIndicator(.hidden)
-                    .help("新建摘录（⌘N）、记忆卡、札记、问题、专题笔记本、出处，或导入")
+                    .help("新建摘录（⌘N）、添加网页（⌘L）、记忆卡、札记、问题、专题笔记本、出处，或导入")
             }
         }
     }
@@ -549,6 +549,8 @@ struct AddEverythingMenu: View {
             Section("新建") {
                 Button { store.newHighlight() } label: { Label("新建摘录（⌘N）", systemImage: "text.quote") }
                 Button { QuickCaptureController.shared.show() } label: { Label("快速录入浮窗（⌥⌘N）", systemImage: "rectangle.and.pencil.and.ellipsis") }
+                // 6.3.3：添加网页（6.0.1 前的“存档网页”）——整篇正文存为一条摘录
+                Button { store.showAddWebPage() } label: { Label("添加网页…（⌘L）", systemImage: "globe") }
                 Button { store.newCard(deck: store.study.lastDeck) } label: { Label("新建记忆卡", systemImage: "rectangle.on.rectangle") }
                 Button { store.showsCardBulkEntry = true } label: { Label("批量粘贴问答（记忆卡）…", systemImage: "list.bullet.rectangle") }
                 Button { store.composeIdeaNote() } label: { Label("新写札记…", systemImage: "lightbulb") }

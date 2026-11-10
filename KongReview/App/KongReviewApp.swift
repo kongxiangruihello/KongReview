@@ -59,6 +59,9 @@ struct KongReviewApp: App {
                     .keyboardShortcut("n")
                 Button("快速录入浮窗") { QuickCaptureController.shared.show() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
+                // 6.3.3：添加网页，整篇存为一条摘录
+                Button("添加网页…") { WindowOpener.showMain(); store.showAddWebPage() }
+                    .keyboardShortcut("l")
                 // 6.2：随手札记浮窗，写完不离开当前页面（如今日试卷）
                 Button("随手札记浮窗") { QuickNoteController.shared.show() }
                     .keyboardShortcut("j", modifiers: [.command, .option])
