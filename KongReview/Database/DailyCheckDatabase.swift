@@ -63,6 +63,18 @@ struct DailyCheckPlan: Codable, Equatable, Sendable {
     var skipped: [String] = []
     /// 5.2.2：今天已有一组做完（应做为 0 的组做了任意 1 条也算）；一旦做到就不再撤销
     var groupDone: Bool?
+    /// 6.3.4：今天的日课做完了（摘录、记忆卡、札记·笔记·问题各组都做完，或至少答了一道后点了“收工”）；
+    /// 一旦做到就不再撤销。旧版存下的没有这一项（nil），打卡仍按 groupDone 看
+    var lessonDone: Bool?
+}
+
+/// 6.3.4：打卡条件里“做了功课”怎么算
+enum DailyCheckinRule: Equatable, Sendable {
+    /// 5.2.2 的算法：任意一组做完
+    case anyGroup
+    /// 日课做完：除“标注文章”外未跳过的各组都做完，或至少答了一道题后点了“收工”。
+    /// 这几组今天都没有应做、也没答题时（或都跳过了），退回任意一组做完
+    case lesson(handedIn: Bool)
 }
 
 /// 今日检查页的一行
@@ -336,7 +348,8 @@ extension AppDatabase {
     /// 6.0.3：`groups` 为今天卷子上的各组；每周自测并入卷子后，应用只传回顾、记忆卡、重温三组
     /// resnapshot（6.0.7）：这些组的应做每次按当前数重定（设了每天考多久时，题数按分到的算）
     func dailyCheck(current: [DailyCheckGroup: DailyCheckCount], groups: [DailyCheckGroup] = DailyCheckGroup.legacy,
-                    snapshot: Bool = true, resnapshot: Set<DailyCheckGroup> = [], now: Date = Date()) throws -> DailyCheckState {
+                    snapshot: Bool = true, resnapshot: Set<DailyCheckGroup> = [], rule: DailyCheckinRule = .anyGroup,
+                    now: Date = Date()) throws -> DailyCheckState {
         try writer.write { db in
             guard try db.tableExists("daily_checkin") else { return .empty }
             let day = Self.revisitDay(now)
@@ -353,13 +366,23 @@ extension AppDatabase {
             }
             let state = DailyCheckState(day: day, rows: rows)
             if rows.contains(where: \.countsForCheckin) { plan.groupDone = true }
-            if stored != plan && (snapshot || stored != nil || plan.groupDone == true) {
+            if case .lesson(let handedIn) = rule, plan.lessonDone != true {
+                let lesson = rows.filter { $0.group != .annotate && !$0.skipped }
+                let answered = lesson.reduce(0) { $0 + $1.done }
+                let due = lesson.reduce(0) { $0 + $1.due }
+                if lesson.isEmpty || (due == 0 && answered == 0) {
+                    plan.lessonDone = rows.contains(where: \.countsForCheckin)
+                } else {
+                    plan.lessonDone = answered > 0 && (handedIn || lesson.allSatisfy { $0.done >= $0.due })
+                }
+            }
+            if stored != plan && (snapshot || stored != nil || plan.groupDone == true || plan.lessonDone == true) {
                 try Self.saveDailyPlan(db, day: day, plan: plan, done: state.done, due: state.due, now: now)
             } else if stored != nil {
                 try db.execute(sql: "UPDATE daily_checkin SET doneCount = ?, dueCount = ?, updatedAt = ? WHERE day = ? AND (doneCount != ? OR dueCount != ?)",
                                arguments: [state.done, state.due, now, day, state.done, state.due])
             }
-            // 5.2.2：做完一组且写了日评即打卡
+            // 5.2.2：做了功课且写了日评即打卡（6.3.4：功课按日课做完算）
             try Self.evaluateCheckin(db, day: day, now: now)
             return state
         }

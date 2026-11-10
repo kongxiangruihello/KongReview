@@ -5,6 +5,8 @@ import KongReviewCore
 // MARK: - 5.2.2：打卡天数
 //
 // 打卡：今日检查中至少做完一组（应做为 0 的组做了任意 1 条也算），并保存了日评（自评分）。打卡后不撤销。
+// 6.3.4：改为“日课做完”并保存了日评——摘录、记忆卡、札记·笔记·问题各组都做完，或至少答了一道后点了“收工”；
+// 只标注文章不算。这几组今天都没有应做、也没答题时，仍按任意一组做完算（见 DailyCheckinRule）。
 // 天数：连续（从今天、今天未打卡则从昨天往前数；休息日不打卡不断，打了照样算）、最长连续、累计、本月、本年。
 // 连续中断后不显示“0 天”，改显示本月打卡几天；首页可记一句中断原因（出差、生病、课多、其他），只记录不评判。
 // 休息日：每周至多 1 天（默认不设）。每次改动按“自哪天起生效”记下，改设置不改写过去的连续天数。
@@ -111,7 +113,8 @@ extension AppDatabase {
         guard status == nil, score != nil else { return }
         let json: String = row["plan"]
         let plan = (try? JSONDecoder().decode(DailyCheckPlan.self, from: Data(json.utf8))) ?? DailyCheckPlan()
-        guard plan.groupDone == true else { return }
+        // 6.3.4：有 lessonDone 的按日课做完看；旧版存下的计划（nil）仍按做完一组看
+        guard (plan.lessonDone ?? plan.groupDone) == true else { return }
         try db.execute(sql: "UPDATE daily_checkin SET status = 'checked', updatedAt = ? WHERE day = ?", arguments: [now, day])
     }
 

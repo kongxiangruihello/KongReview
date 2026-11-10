@@ -128,7 +128,7 @@ private struct ReviewSettings: View {
                     .fixedSize(horizontal: false, vertical: true)
                 // 6.0.8：新录的摘录及早上卷
                 Stepper(freshPerDay == 0 ? "其中新录的：不留名额" : "其中新录的：至多 \(freshPerDay) 道", value: $freshPerDay, in: 0...10)
-                Text("新录的摘录（含今日标注划出的、从 KongFolio 导入的）录进来的第二天起练第 1 次，隔两天练第 2 次，之后回到平常的抽样；排在补练之后，占摘录题的名额；先出到了第 2 次的，再出最近录的，一次进来很多时其余往后顺延。30 天内录的才算；整篇存进来的文章归“今日标注”。改动从明天开始生效。")
+                Text("新录的摘录（含今日标注划出的、从 KongFolio 导入的）录进来的第二天起练第 1 次，隔两天练第 2 次，之后回到平常的抽样；排在补练之后，占摘录题的名额；先出到了第 2 次的，再出先录的（6.3.4 起），一次进来很多时其余往后顺延。30 天内录的才算；整篇存进来的文章归“今日标注”。改动从明天开始生效。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Stepper("论证题（札记）：\(revisitNotes) 道", value: $revisitNotes, in: 0...10)

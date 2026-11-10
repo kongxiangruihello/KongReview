@@ -8,7 +8,8 @@ import KongReviewCore
 // 测试效应（Roediger & Karpicke 2006）与连续再学习都要求读后尽早考一次、隔几天再考：
 //   录进来（KongFolio 导入的按导入那天算）的第二天起第 1 次，第 1 次之后隔 2 天起第 2 次；考过两次就回到平常的加权抽样。
 // 每天留几个名额（默认 3，设置可改，0 为不留），排在补考之后、占每天摘录题的名额：
-// 先出到了第 2 次的，再出最近录的；一次进来很多时每天只出几道，其余往后顺延（30 天内）。
+// 先出到了第 2 次的，再出最早录的（6.3.4：先录先考；此前最近录的在前，新录得多时较早的总排不上）；
+// 一次进来很多时每天只出几道，其余往后顺延（30 天内），还在等的条数显示在日课页头。
 // 30 天内录的才算新录；整篇存进来的文章（原文 ≥ 1000 字）归“今日标注”，不算。
 
 enum ExamFresh {
@@ -30,6 +31,8 @@ enum ExamFresh {
     struct Session: Codable, Equatable, Sendable {
         var day: String
         var rounds: [Int64: Int] = [:]
+        /// 6.3.4：今天这一组里排在最前的几条（补考、新录、卡片屡错的摘录）；旧版存下的没有这一项
+        var priority: Int?
 
         static func load(_ defaults: UserDefaults = .standard) -> Session? {
             defaults.data(forKey: sessionKey).flatMap { try? JSONDecoder().decode(Session.self, from: $0) }
@@ -52,7 +55,7 @@ struct ExamFreshCandidate: Equatable, Sendable {
 }
 
 extension AppDatabase {
-    /// 今天该考的新录摘录：到了第 2 次的在前，其余最近录的在前
+    /// 今天该考的新录摘录：到了第 2 次的在前，其余先录的在前
     func examFreshCandidates(now: Date = Date(), limit: Int, calendar: Calendar = .current) throws -> [ExamFreshCandidate] {
         guard limit > 0 else { return [] }
         let today = calendar.startOfDay(for: now)
@@ -70,7 +73,7 @@ extension AppDatabase {
                 \(imports ? "LEFT JOIN (SELECT targetId, MIN(importedAt) AS importedAt FROM kongfolio_item WHERE targetKind = 'highlight' GROUP BY targetId) k ON k.targetId = h.id" : "")
                 WHERE h.deletedAt IS NULL AND h.isDiscarded = 0 AND length(h.text) < ?
                   AND \(entered) >= ? AND \(entered) < ?
-                ORDER BY attempts DESC, enteredAt DESC, h.id DESC
+                ORDER BY attempts DESC, enteredAt, h.id
                 """, arguments: [AnnotateSettings.minimumRawLength, since, today])
             var out: [ExamFreshCandidate] = []
             for row in rows {
@@ -85,5 +88,10 @@ extension AppDatabase {
             }
             return out
         }
+    }
+
+    /// 6.3.4：一共还有多少条新录的摘录等着考（第 1 次或已到第 2 次的；含今天日课上还没答的）
+    func examFreshBacklog(now: Date = Date()) throws -> Int {
+        try examFreshCandidates(now: now, limit: Int.max).count
     }
 }

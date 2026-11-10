@@ -12,7 +12,8 @@ import KongReviewCore
 //   笔记——复述题（给笔记本、小标题与开头几个字），已吸收 / 需重读 / 待整理。
 // 各类按自己的到期日出题（摘录沿用每天的加权抽样），卷面上交错排列。
 // 摘录与札记的“记得 / 大致 / 忘了”记在 self_test_log（setKey = "exam"），计入掌握度；
-// 忘了的摘录 2 天后起优先回到卷子上（“补考”，30 天内、每天至多 3 条，占每日条数的名额）。
+// 忘了的摘录 2 天后起优先回到卷子上（“补考”，每天至多 3 条，占每日条数的名额）。
+// 6.3.4：补考不再有 30 天的期限——忘了的一直排着，直到补考过；积压的条数显示在日课页头。
 
 /// 卷子上的五类题
 enum ExamKind: String, CaseIterable, Codable, Sendable {
@@ -108,28 +109,40 @@ enum ExamHighlightMode: Equatable, Sendable {
 
 extension AppDatabase {
     static let examSetKey = "exam"
-    /// 忘了的摘录几天后开始补考、多少天内还补、每天至多几条
+    /// 忘了的摘录几天后开始补考、每天至多几条
     static let examRetestAfterDays = 2
-    static let examRetestWithinDays = 30
     static let examRetestPerDay = 3
 
-    /// 今天该补考的摘录：最近一次卷面作答是“忘了”，在 2–30 天前，摘录仍在且未弃置；最早忘的在前
+    /// 待补考的摘录：最近一次卷面作答是“忘了”，在 2 天前或更早，摘录仍在且未弃置
+    private static let examRetestFrom = """
+        FROM self_test_log l
+        JOIN (SELECT recordId, MAX(at) AS at FROM self_test_log WHERE kind = 'highlight' GROUP BY recordId) m
+          ON m.recordId = l.recordId AND m.at = l.at
+        JOIN highlight h ON h.id = l.recordId
+        WHERE l.kind = 'highlight' AND l.result = ? AND l.at < ?
+          AND h.deletedAt IS NULL AND h.isDiscarded = 0
+        """
+
+    private static func examRetestLatest(_ now: Date) -> Date {
+        Calendar.current.startOfDay(for: now).addingTimeInterval(-Double(examRetestAfterDays - 1) * 86_400)
+    }
+
+    /// 今天该补考的摘录；最早忘的在前（6.3.4：不再限 30 天内）
     func examRetestHighlightIDs(now: Date = Date(), limit: Int = AppDatabase.examRetestPerDay) throws -> [Int64] {
         guard limit > 0 else { return [] }
-        let start = Calendar.current.startOfDay(for: now)
-        let latest = start.addingTimeInterval(-Double(Self.examRetestAfterDays - 1) * 86_400)
-        let earliest = start.addingTimeInterval(-Double(Self.examRetestWithinDays) * 86_400)
         return try writer.read { db in
             guard try db.tableExists("self_test_log") else { return [] }
-            return try Int64.fetchAll(db, sql: """
-                SELECT l.recordId FROM self_test_log l
-                JOIN (SELECT recordId, MAX(at) AS at FROM self_test_log WHERE kind = 'highlight' GROUP BY recordId) m
-                  ON m.recordId = l.recordId AND m.at = l.at
-                JOIN highlight h ON h.id = l.recordId
-                WHERE l.kind = 'highlight' AND l.result = ? AND l.at < ? AND l.at >= ?
-                  AND h.deletedAt IS NULL AND h.isDiscarded = 0
-                ORDER BY l.at LIMIT ?
-                """, arguments: [SelfTestResult.forgot.rawValue, latest, earliest, limit])
+            return try Int64.fetchAll(db, sql: "SELECT l.recordId " + Self.examRetestFrom + " ORDER BY l.at, l.recordId LIMIT ?",
+                                      arguments: [SelfTestResult.forgot.rawValue, Self.examRetestLatest(now), limit])
+        }
+    }
+
+    /// 6.3.4：一共还有多少条摘录等着补考（含今天日课上还没答的）
+    func examRetestBacklog(now: Date = Date()) throws -> Int {
+        try writer.read { db in
+            guard try db.tableExists("self_test_log") else { return 0 }
+            return try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT l.recordId) " + Self.examRetestFrom,
+                                    arguments: [SelfTestResult.forgot.rawValue, Self.examRetestLatest(now)]) ?? 0
         }
     }
 

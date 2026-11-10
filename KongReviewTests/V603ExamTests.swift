@@ -70,7 +70,8 @@ final class V603ExamTests: XCTestCase {
 
         XCTAssertTrue(try db.examRetestHighlightIDs(now: d(1)).isEmpty, "第二天还不补考")
         XCTAssertEqual(try db.examRetestHighlightIDs(now: d(2)), [h.id!], "两天后起补考忘了的")
-        XCTAssertTrue(try db.examRetestHighlightIDs(now: d(40)).isEmpty, "30 天外不再补")
+        XCTAssertEqual(try db.examRetestHighlightIDs(now: d(40)), [h.id!], "6.3.4：过了 30 天仍然排着，补考过才不再排")
+        XCTAssertEqual(try db.examRetestBacklog(now: d(40)), 1)
         try db.recordExamResult(kind: .gist, recordId: h.id!, result: .remembered, now: d(2))
         XCTAssertTrue(try db.examRetestHighlightIDs(now: d(4)).isEmpty, "补考记得了就不再补")
         let wins = try db.progressEvents(start: d(-1), end: d(5)).filter { $0.kind == .selfTestRecovered }

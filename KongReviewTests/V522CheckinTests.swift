@@ -166,8 +166,8 @@ final class V522CheckinTests: XCTestCase {
             var changed = 0
             store.onCheckinChanged = { changed += 1 }
             XCTAssertFalse(store.checkin.todayChecked)
-            // 今天没有任何应做：做了 1 条回顾也算做完一组
-            _ = try db.dailyCheck(current: [.review: DailyCheckCount(done: 1, left: 0)])
+            // 今天没有任何应做：做了 1 条回顾也算（6.3.4：应用里按日课做完算）
+            _ = try db.dailyCheck(current: [.review: DailyCheckCount(done: 1, left: 0)], groups: DailyCheckGroup.exam, rule: .lesson(handedIn: false))
             store.saveSelfScore(.four, note: "")
             XCTAssertTrue(store.checkin.todayChecked)
             XCTAssertEqual(store.checkin.current, 1)
