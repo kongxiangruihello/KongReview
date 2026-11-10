@@ -14,6 +14,7 @@ struct GradebookView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 header
+                MakeupCard()   // 6.3.5
                 CheckinStatusStrip()
                 StreakBreakPrompt()
                 GradebookReportSection()

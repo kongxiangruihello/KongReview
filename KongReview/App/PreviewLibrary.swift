@@ -218,11 +218,13 @@ import KongReviewCore
                 let key = AppDatabase.revisitDay(day(offset))
                 let due = 18 + (offset + 20) % 7, done = offset % 5 == 0 ? due / 2 : due
                 let score = 3 + (offset + 20) % 3
+                // 6.3.5：前天做完了却没写日评，示例里能看到补签卡片
+                let checked = done == due && offset != -2
                 try db.writer.write { d in
                     try d.execute(sql: """
                         INSERT INTO daily_checkin(day, status, selfScore, note, doneCount, dueCount, createdAt, updatedAt)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, arguments: [key, done == due ? "checked" : nil, done == due ? score : nil,
+                        """, arguments: [key, checked ? "checked" : nil, checked ? score : nil,
                                          notes[(offset + 20) % notes.count], done, due, day(offset, hour: 21), day(offset, hour: 21)])
                 }
                 for (i, h) in highlights.prefix(8).enumerated() where (offset + i) % 3 == 0 {

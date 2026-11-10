@@ -94,6 +94,11 @@ final class ReminderScheduler {
         let hour = d.object(forKey: CheckinReminderPlan.hourKey) as? Int ?? CheckinReminderPlan.defaultHour
         let minute = d.object(forKey: CheckinReminderPlan.minuteKey) as? Int ?? 0
         let checked = QuickCaptureController.shared.store?.checkin.todayChecked ?? false
+        // 6.3.5：今天这条提醒里顺带说可以补签的日子
+        let makeupNote: String = {
+            guard let c = QuickCaptureController.shared.store?.checkin, let day = MakeupCard.defaultDay(c) else { return "" }
+            return "另有 \(StreakBreakPrompt.label(day)) 可以补签（补后连续 \(c.makeupStreak[day] ?? 0) 天），在日课首页补。"
+        }()
         let fires = enabled ? CheckinReminderPlan.fires(now: Date(), hour: hour, minute: minute, checkedToday: checked) : []
         let center = self.center
         Task {
@@ -107,6 +112,7 @@ final class ReminderScheduler {
                 let content = UNMutableNotificationContent()
                 content.title = "今天还没打卡"
                 content.body = "把今日日课做完（或答过题后点“收工”），再写下日评（给今天打个分），就算打卡。"
+                    + (Calendar.current.isDateInToday(fire) ? makeupNote : "")
                 content.sound = .default
                 let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
                 let request = UNNotificationRequest(identifier: CheckinReminderPlan.identifier(for: fire), content: content,

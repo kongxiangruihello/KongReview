@@ -27,6 +27,9 @@ struct HomeView: View {
                              onCheck: { store.openExam() },
                              onFocus: {})
 
+                // 6.3.5：有可以补签的日子，最显眼处补签
+                MakeupCard()
+
                 // 5.2.2：连续打卡中断时记一句原因
                 StreakBreakPrompt()
 
