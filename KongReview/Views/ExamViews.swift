@@ -13,6 +13,8 @@ struct ExamView: View {
     /// 6.0.7：这一道是卷尾再考
     @State private var relearnItem: ExamRelearnItem?
     @State private var turn = 0
+    /// 6.3.4：还在等的补考与新录
+    @State private var backlog: (retests: Int, fresh: Int) = (0, 0)
     @State private var loaded = false
     @State private var reload = 0
     @State private var revealed = false
@@ -63,6 +65,7 @@ struct ExamView: View {
         }
         .task(id: "\(store.dailyCheckRevision)|\(store.revisitRevision)") {
             tally = (try? store.db.examTally()) ?? MasteryTally()
+            backlog = store.examBacklog()
             organize = (try? store.db.blocksToOrganize()) ?? []
         }
     }
@@ -136,6 +139,13 @@ struct ExamView: View {
                     HStack(spacing: 14) { headerRows(s) }
                     HStack(spacing: 14) { headerActions; Spacer() }
                 }
+            }
+            // 6.3.4：补考与新录还排着多少，免得积压了看不见
+            if backlog.retests + backlog.fresh > 0 {
+                Label(([backlog.retests > 0 ? "待补考 \(backlog.retests) 条" : nil, backlog.fresh > 0 ? "新录待考 \(backlog.fresh) 条" : nil] as [String?])
+                    .compactMap { $0 }.joined(separator: " · "), systemImage: "tray.full")
+                    .font(.system(size: 12).monospacedDigit()).foregroundStyle(ReviewPalette.sub)
+                    .help("含今天日课上还没答的。忘了的摘录两天后起补考，先忘的在前，每天至多 \(AppDatabase.examRetestPerDay) 条，补考过才不再排；新录的摘录 30 天内考两次，先录的在前，每天的条数在设置里改。两类与卡片屡错的摘录合计至多占每天摘录题的一半。")
             }
             Text("一律先想、再展开对照、再判分：先提取后对照，比重读记得牢。题目按各自的到期日出，日课上交错排列；中途离开，回来接着答。")
                 .font(.system(size: 12)).foregroundStyle(ReviewPalette.sub)
@@ -292,8 +302,8 @@ struct ExamView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     switch mode {
                     case .source:
-                        Text(text).font(.system(size: 18, design: .serif)).foregroundStyle(ReviewPalette.ink)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        // 6.3.4：题面的原文与回顾、展开后的原文同一套排版（宋体 22px、行高 1.75、段间留白）
+                        RichWebText(text: h.text, style: .highlight, slot: "exam-highlight-question")
                         Text("这段话出自哪本书？作者是谁？大致在什么位置？").font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.ink)
                     case .gist:
                         Text(cite(h)).font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)

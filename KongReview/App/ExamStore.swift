@@ -87,16 +87,21 @@ extension LibraryStore {
         let (highlights, weights) = try db.reviewCandidates(tag: nil)
         let bias = (try? db.reviewBias(focus: learningFocus)) ?? ReviewBias()
         let byID = Dictionary(highlights.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
-        let retests = try db.examRetestHighlightIDs(now: now, limit: min(Self.examRetestCap(dailyCount), AppDatabase.examRetestPerDay))
-            .filter { byID[$0] != nil }
+        // 6.3.4：补考、新录、卡片屡错的摘录三类排在最前的，合计至多占每日条数的一半，其余留给平常的加权抽样
+        let priorityRoom = Self.examPriorityCap(dailyCount)
+        // 多取几条再筛：排在前面的若不在今天的候选里（如出处的回顾权重为 0），不让它白占名额
+        let retests = try Array(db.examRetestHighlightIDs(now: now, limit: min(priorityRoom, AppDatabase.examRetestPerDay) + 20)
+            .filter { byID[$0] != nil }.prefix(min(priorityRoom, AppDatabase.examRetestPerDay)))
         // 6.0.8：新录的摘录排在补考之后（录进来的第二天起第 1 次，隔两天第 2 次）
-        let freshRoom = min(ExamFresh.perDay(), max(0, dailyCount - retests.count))
-        let fresh = ((try? db.examFreshCandidates(now: now, limit: freshRoom + retests.count)) ?? [])
+        let freshRoom = min(ExamFresh.perDay(), max(0, priorityRoom - retests.count))
+        let fresh = ((try? db.examFreshCandidates(now: now, limit: freshRoom + retests.count + 20)) ?? [])
             .filter { byID[$0.id] != nil && !retests.contains($0.id) }.prefix(freshRoom)
-        ExamFresh.Session(day: today, rounds: Dictionary(fresh.map { ($0.id, $0.round) }, uniquingKeysWith: { a, _ in a })).save()
         let early = Set(retests + fresh.map(\.id))
         let refresh = bias.refresh.compactMap { byID[$0.id] }.filter { !early.contains($0.id ?? -1) }
+            .prefix(max(0, priorityRoom - early.count))
         let first = retests + fresh.map(\.id) + refresh.compactMap(\.id)
+        ExamFresh.Session(day: today, rounds: Dictionary(fresh.map { ($0.id, $0.round) }, uniquingKeysWith: { a, _ in a }),
+                          priority: first.count).save()
         let taken = Set(first)
         let pool = highlights.filter { !taken.contains($0.id ?? -1) }
         var rng = SeededGenerator.forDay(now)
@@ -116,6 +121,14 @@ extension LibraryStore {
     /// 补考至多占每日条数的一半
     nonisolated static func examRetestCap(_ dailyCount: Int) -> Int { max(0, dailyCount / 2) }
 
+    /// 6.3.4：排在最前的三类（补考、新录、卡片屡错的摘录）合计至多占每日条数的一半
+    nonisolated static func examPriorityCap(_ dailyCount: Int) -> Int { max(0, dailyCount / 2) }
+
+    /// 6.3.4：还在等的补考与新录（含今天日课上还没答的），显示在日课页头
+    func examBacklog(now: Date = Date()) -> (retests: Int, fresh: Int) {
+        ((try? db.examRetestBacklog(now: now)) ?? 0, ExamFresh.perDay() > 0 ? ((try? db.examFreshBacklog(now: now)) ?? 0) : 0)
+    }
+
     /// 此刻卷子上还没答的题
     func examPaper(now: Date = Date()) -> ExamPaperState {
         var paper = ExamPaperState()
@@ -124,7 +137,8 @@ extension LibraryStore {
             let rest = Array(ids.dropFirst(min(ids.count, max(0, record.position))))
             let found = (try? db.highlights(ids: rest)) ?? []
             let byID = Dictionary(found.compactMap { h in h.id.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
-            paper.highlights = rest.compactMap { byID[$0] }.filter { $0.deletedAt == nil }
+            // 6.3.4：今天在别处弃置了的不再出题（与课末再练一致）
+            paper.highlights = rest.compactMap { byID[$0] }.filter { $0.deletedAt == nil && !$0.isDiscarded }
         }
         paper.revisit = (try? db.revisitQueue(now: now)) ?? .empty
         paper.nextCard = examNextCard(now: now)
@@ -142,20 +156,25 @@ extension LibraryStore {
             let asked = paper.revisit.questionsDone + paper.revisit.answersDone
             paper.revisit.questions = trim(paper.revisit.questions, .question, done: asked)
             paper.revisit.answers = trim(paper.revisit.answers, .question, done: asked + paper.revisit.questions.count)
-            if paper.nextCard != nil, let cap = budget.cap(.card), ((try? db.cardsRatedToday(now: now)) ?? 0) >= cap {
-                paper.nextCard = nil
-                paper.deferred += todayCardPending.total
+            if let card = paper.nextCard, let cap = budget.cap(.card), ((try? db.cardsRatedToday(now: now)) ?? 0) >= cap {
+                // 6.3.4：题数满了不再出新的卡；答了“重来”、还在学习中的卡照旧回来，不留到明天
+                let pending = todayCardPending
+                paper.nextCard = Self.isLearning(card) ? card : examNextCard(now: now, learningOnly: true)
+                paper.deferred += max(0, pending.total - pending.learning)
             }
         }
         return paper
     }
 
     /// 全部牌组里下一张到期的卡（各牌组与全库的每日上限照旧）
-    func examNextCard(now: Date = Date()) -> Card? {
+    func examNextCard(now: Date = Date(), learningOnly: Bool = false) -> Card? {
         guard let ledger = try? db.dailyLimitLedger(now: now, limits: CardSettings.limits(now: now)) else { return nil }
         let cards = (try? db.cards()) ?? []
-        return StudyQueue.next(from: cards, now: now, left: ledger.left)
+        return StudyQueue.next(from: learningOnly ? cards.filter(Self.isLearning) : cards, now: now, left: ledger.left)
     }
+
+    /// 学习中（答过、还没毕业）的卡
+    nonisolated static func isLearning(_ card: Card) -> Bool { card.state == .learning || card.state == .relearning }
 
     // MARK: 作答
 
@@ -230,6 +249,7 @@ extension LibraryStore {
     /// 札记：先记“记得 / 大致 / 忘了”（计入掌握度），再按“还这么看吗”排下次
     func examAnswerNote(_ note: RevisitNoteItem, result: SelfTestResult, outcome: RevisitOutcome, now: Date = Date()) {
         guard !fullBackupBusy else { return }
+        checkDayChange()   // 6.3.4：过了零点接着答，先换到新的一天（与记忆卡、摘录、解答题一致）
         do {
             try db.recordExamResult(kind: .argument, recordId: note.id, result: result, now: now)
         } catch { report(error); return }
@@ -240,6 +260,8 @@ extension LibraryStore {
 
     /// 复述题：需重读的，今天卷尾再考
     func examAnswerBlock(_ block: RevisitBlockItem, _ outcome: RevisitOutcome) {
+        guard !fullBackupBusy else { return }
+        checkDayChange()
         if outcome == .reread { examRelearnAdd(.block, block.id) }
         revisitBlock(block.id, outcome)
     }
@@ -247,7 +269,11 @@ extension LibraryStore {
     /// 交卷：今天的成绩单显示在卷面下方（还有没答的题也可以先交；之后仍可接着答）
     var examHandedIn: Bool {
         get { UserDefaults.standard.string(forKey: Self.examHandedInKey) == today }
-        set { UserDefaults.standard.set(newValue ? today : "", forKey: Self.examHandedInKey); dailyCheckRevision += 1 }
+        set {
+            UserDefaults.standard.set(newValue ? today : "", forKey: Self.examHandedInKey)
+            // 6.3.4：收工算不算打卡的条件，要重算今天的检查
+            refreshDailyCheck()
+        }
     }
 }
 

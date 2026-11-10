@@ -39,6 +39,7 @@ extension LibraryStore {
     /// 问题重温的三个选择；“写解答”随即打开问题
     func revisitQuestion(_ id: Int64, _ outcome: RevisitOutcome, highlightIDs: [Int64] = [], remark: String = "") {
         guard !fullBackupBusy else { return }
+        checkDayChange()   // 6.3.4：过了零点接着答，先换到新的一天
         do {
             try db.recordQuestionRevisit(questionId: id, outcome: outcome, highlightIDs: highlightIDs, remark: remark)
             refreshQuestions()

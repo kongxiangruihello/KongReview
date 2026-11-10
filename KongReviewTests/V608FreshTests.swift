@@ -43,7 +43,7 @@ final class V608FreshTests: XCTestCase {
         discarded = try db.save(discarded)
 
         var c = try db.examFreshCandidates(now: d(0), limit: 10)
-        XCTAssertEqual(c.map(\.id), [yesterday.id!, older.id!], "最近录的在前；今天录的、30 天前的、文章、弃置的不算")
+        XCTAssertEqual(c.map(\.id), [older.id!, yesterday.id!], "6.3.4：先录的在前；今天录的、30 天前的、文章、弃置的不算")
         XCTAssertEqual(c.map(\.round), [1, 1])
         _ = (today, tooOld, article)
 
@@ -53,7 +53,7 @@ final class V608FreshTests: XCTestCase {
         XCTAssertEqual(c.map(\.id), [yesterday.id!])
         // 隔两天：到了第 2 次，排在最前
         c = try db.examFreshCandidates(now: d(1), limit: 10)
-        XCTAssertEqual(c.map(\.id), [older.id!, today.id!, yesterday.id!])
+        XCTAssertEqual(c.map(\.id), [older.id!, yesterday.id!, today.id!])
         XCTAssertEqual(c.first?.round, 2)
         // 考满两次就回到平常的抽样
         try db.recordExamResult(kind: .source, recordId: older.id!, result: .remembered, now: d(1))
@@ -75,19 +75,20 @@ final class V608FreshTests: XCTestCase {
 
     func testSessionPutsFreshAfterRetests() throws {
         try MainActor.assumeIsolated {
-            UserDefaults.standard.set(5, forKey: SettingsKeys.dailyCount)
+            UserDefaults.standard.set(10, forKey: SettingsKeys.dailyCount)
             UserDefaults.standard.set(2, forKey: ExamFresh.perDayKey)
             let db = try AppDatabase(DatabaseQueue())
             let src = try db.save(Source(title: "论语译注", author: "杨伯峻"))
             for i in 0..<8 { _ = try db.save(Highlight(sourceId: src.id, text: "旧摘录 \(i)", location: "第\(i)页", createdAt: Date().addingTimeInterval(-60 * 86_400))) }
             let forgotten = try db.save(Highlight(sourceId: src.id, text: "忘了的", location: "第9页", createdAt: Date().addingTimeInterval(-60 * 86_400)))
             try db.recordExamResult(kind: .gist, recordId: forgotten.id!, result: .forgot, now: Date().addingTimeInterval(-3 * 86_400))
-            let a = try db.save(Highlight(sourceId: src.id, text: "昨天新录甲", location: "第1页", createdAt: Date().addingTimeInterval(-86_400)))
+            // 6.3.4：先录的在前——甲最早，乙其次，丙最晚（排不上）
+            let a = try db.save(Highlight(sourceId: src.id, text: "昨天新录甲", location: "第1页", createdAt: Date().addingTimeInterval(-86_400 - 120)))
             let b = try db.save(Highlight(sourceId: src.id, text: "昨天新录乙", location: "第2页", createdAt: Date().addingTimeInterval(-86_400 - 60)))
-            _ = try db.save(Highlight(sourceId: src.id, text: "昨天新录丙", location: "第3页", createdAt: Date().addingTimeInterval(-86_400 - 120)))
+            _ = try db.save(Highlight(sourceId: src.id, text: "昨天新录丙", location: "第3页", createdAt: Date().addingTimeInterval(-86_400)))
             let store = LibraryStore(db: db)
             let record = try store.todayReviewSession()
-            XCTAssertEqual(record.regularIds.count, 5)
+            XCTAssertEqual(record.regularIds.count, 10)
             XCTAssertEqual(Array(record.regularIds.prefix(3)), [forgotten.id!, a.id!, b.id!], "补考在前，新录其次，至多 2 道")
             XCTAssertEqual(store.examFreshRound(a.id), 1)
             XCTAssertNil(store.examFreshRound(forgotten.id))

@@ -54,8 +54,11 @@ extension AppDatabase {
             let position = min(ids.count, max(0, session.position))
             let existing = Set(try Highlight.filter(keys: Array(Set(ids)))
                 .filter(Column("deletedAt") == nil).select(Column("id")).asRequest(of: Int64.self).fetchAll(db))
+            // 6.3.4：今天在别处弃置了的不再算待做（日课上也不再出），已答的照旧算
+            let alive = Set(try Highlight.filter(keys: Array(Set(ids)))
+                .filter(Column("deletedAt") == nil && Column("isDiscarded") == false).select(Column("id")).asRequest(of: Int64.self).fetchAll(db))
             let completed = Set(ids.prefix(position)).intersection(existing)
-            let pending = Set(ids.dropFirst(position)).intersection(existing).subtracting(completed)
+            let pending = Set(ids.dropFirst(position)).intersection(alive).subtracting(completed)
             summary.reviewCompletedCount = completed.count
             summary.reviewPendingCount = pending.count
             summary.reviewTotalCount = completed.count + pending.count
