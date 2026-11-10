@@ -34,6 +34,7 @@ struct ExamView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header(state)
+                MakeupCard()   // 6.3.5
                 CheckinStatusStrip()
                 StreakBreakPrompt()
                 if !loaded {

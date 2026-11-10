@@ -70,6 +70,8 @@ struct CheckinSummary: Equatable, Sendable {
     /// 可以补签的日子（新的在前）与本月还剩几次
     var makeupDays: [String] = []
     var makeupLeft = 0
+    /// 6.3.5：补签这一天后，连续打卡会是几天（按可以补签的日子各算一次）
+    var makeupStreak: [String: Int] = [:]
     var restWeekday: Int?
     var days: [String: CheckinDay] = [:]
     static let empty = CheckinSummary()
@@ -166,16 +168,14 @@ extension AppDatabase {
             guard let first = s.days.keys.min() else {
                 s.makeupDays = try Self.makeupCandidates(db, s: s, now: now)
                 s.makeupLeft = try Self.makeupLeft(db, now: now)
+                for d in s.makeupDays {
+                    s.makeupStreak[d] = Self.currentStreak(checked: [d], todayChecked: false, now: now, rest: rest)
+                }
                 return s
             }
             // 连续：今天打了从今天数，没打从昨天数；休息日没打跳过
-            var offset = s.todayChecked ? 0 : -1
-            while true {
-                let d = key(offset)
-                if d < first { break }
-                if s.days[d] != nil { s.current += 1 } else if !rest(d) { break }
-                offset -= 1
-            }
+            let checked = Set(s.days.keys)
+            s.current = Self.currentStreak(checked: checked, todayChecked: s.todayChecked, now: now, rest: rest)
             // 最长连续：从第一次打卡到今天（今天没打不算断）
             var run = 0, d = first
             var i = 0
@@ -195,8 +195,26 @@ extension AppDatabase {
             }
             s.makeupDays = try Self.makeupCandidates(db, s: s, now: now)
             s.makeupLeft = try Self.makeupLeft(db, now: now)
+            // 6.3.5：补签哪一天能把连续接到几天
+            for d in s.makeupDays {
+                s.makeupStreak[d] = Self.currentStreak(checked: checked.union([d]), todayChecked: s.todayChecked, now: now, rest: rest)
+            }
             return s
         }
+    }
+
+    /// 连续打卡天数：今天打了从今天数，没打从昨天数；休息日没打跳过，打了照样算
+    static func currentStreak(checked: Set<String>, todayChecked: Bool, now: Date, rest: (String) -> Bool) -> Int {
+        guard let first = checked.min() else { return 0 }
+        var n = 0
+        var offset = todayChecked ? 0 : -1
+        while true {
+            let d = revisitDay(now, plus: offset)
+            if d < first { break }
+            if checked.contains(d) { n += 1 } else if !rest(d) { break }
+            offset -= 1
+        }
+        return n
     }
 
     // MARK: 补签
