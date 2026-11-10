@@ -162,7 +162,7 @@ private struct ReviewSettings: View {
                     set: { let c = Calendar.current.dateComponents([.hour, .minute], from: $0); checkinHour = c.hour ?? 21; checkinMinute = c.minute ?? 0 }
                 ), displayedComponents: .hourAndMinute)
                 .disabled(!checkinReminder)
-                Text("日课上答完一类并写下日评即打卡；到点还没打卡就提醒一次，打了就不提醒。休息日与补签在今日日课的今日小结里设置。")
+                Text("日课做完（或答过题后收工）并写下日评即打卡；到点还没打卡就提醒一次，打了就不提醒。休息日与补签在今日日课的今日小结里设置。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
