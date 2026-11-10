@@ -292,8 +292,8 @@ struct ExamView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     switch mode {
                     case .source:
-                        Text(text).font(.system(size: 18, design: .serif)).foregroundStyle(ReviewPalette.ink)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        // 6.3.4：题面的原文与回顾、展开后的原文同一套排版（宋体 22px、行高 1.75、段间留白）
+                        RichWebText(text: h.text, style: .highlight, slot: "exam-highlight-question")
                         Text("这段话出自哪本书？作者是谁？大致在什么位置？").font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.ink)
                     case .gist:
                         Text(cite(h)).font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
