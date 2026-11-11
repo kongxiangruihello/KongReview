@@ -21,3 +21,6 @@ KongReview/KongReview.entitlements
 .DS_Store
 build.log
 __pycache__/
+
+# 开发时用的 Python 包不进仓库
+*.whl

@@ -292,6 +292,21 @@ struct ExamView: View {
         return [s?.author ?? "", s.map { "《\($0.title)》" } ?? "", h.location ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
+    /// 6.3.6：译文与按语，排版同回顾（译文 16px 次要色；按语 14px、左侧色条），保留原格式
+    @ViewBuilder private func highlightExtras(_ h: Highlight) -> some View {
+        if let t = h.translation, !plain(t).isEmpty {
+            RichWebText(text: t, style: .translation, slot: "exam-highlight-translation")
+                .padding(.top, 16)
+        }
+        if let n = h.note, !plain(n).isEmpty {
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor.opacity(0.7)).frame(width: 3)
+                RichWebText(text: n, style: .note, slot: "exam-highlight-note")
+            }
+            .padding(.top, 18)
+        }
+    }
+
     private func highlightQuestion(_ h: Highlight, _ mode: ExamHighlightMode) -> some View {
         let text = plain(h.text)
         let note = plain(h.note ?? "")
@@ -308,7 +323,7 @@ struct ExamView: View {
                         Text("这段话出自哪本书？作者是谁？大致在什么位置？").font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.ink)
                     case .gist:
                         Text(cite(h)).font(.system(size: 18, weight: .semibold, design: .serif)).foregroundStyle(ReviewPalette.ink)
-                        if !note.isEmpty {
+                        if !note.isEmpty, !revealed {
                             Text("按语：" + note).font(.system(size: 13.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
                         }
                         Text("这一处原文说了什么？").font(.system(size: 14, weight: .medium)).foregroundStyle(ReviewPalette.ink)
@@ -316,7 +331,7 @@ struct ExamView: View {
                         let opening = text.replacingOccurrences(of: "\n", with: " ")
                         Text("开头：" + (opening.count > 10 ? String(opening.prefix(10)) + "……" : opening))
                             .font(.system(size: 18, design: .serif)).foregroundStyle(ReviewPalette.ink)
-                        if !note.isEmpty {
+                        if !note.isEmpty, !revealed {
                             Text("按语：" + note).font(.system(size: 13.5)).foregroundStyle(ReviewPalette.sub).fixedSize(horizontal: false, vertical: true)
                         }
                         if !h.tags.isEmpty {
@@ -335,6 +350,8 @@ struct ExamView: View {
                         RichWebText(text: h.text, style: .highlight, slot: "exam-highlight")
                         if !cite(h).isEmpty { Text("——" + cite(h)).font(.system(size: 12.5)).foregroundStyle(ReviewPalette.sub).padding(.top, 6) }
                     }
+                    // 6.3.6：展开后译文、按语也照回顾里的样子显示（此前日课上不显示译文，出处题不显示按语）
+                    highlightExtras(h)
                     if !myAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("我的回答：" + myAnswer).font(.system(size: 13)).foregroundStyle(ReviewPalette.sub)
                             .fixedSize(horizontal: false, vertical: true).padding(.top, 8)

@@ -2,7 +2,7 @@
 
 6.0.2 起不再需要 GitHub Releases（仿 KongSeek）。应用在本机的源码文件夹 `~/Developer/KongReview` 里取 GitHub 上 **main 分支** 的最新代码，自己测试、编译、安装。所以：
 
-1. `project.yml` 的 `MARKETING_VERSION` 改为新版本号，README 顶部加一节 `## <版本> 标题`（应用的更新面板显示这些节）。
+1. `project.yml` 的 `MARKETING_VERSION` 改为新版本号，README 的版本各节最前面加一节 `## <版本> 标题`（应用的更新面板显示这些节），同一节也加到 `CHANGELOG.md` 最前面。README 只留最近六七版，更早的只在 `CHANGELOG.md` 里（6.3.6 起）。
 2. 在 GitHub 上把 PR 合并到 `main`。
 3. 应用里菜单“KongReview → 检查更新…”（或等自动检查，首页会提示），点“立即更新”。
 
