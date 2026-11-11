@@ -118,9 +118,6 @@ extension LibraryStore {
         return s.rounds[id]
     }
 
-    /// 补考至多占每日条数的一半
-    nonisolated static func examRetestCap(_ dailyCount: Int) -> Int { max(0, dailyCount / 2) }
-
     /// 6.3.4：排在最前的三类（补考、新录、卡片屡错的摘录）合计至多占每日条数的一半
     nonisolated static func examPriorityCap(_ dailyCount: Int) -> Int { max(0, dailyCount / 2) }
 

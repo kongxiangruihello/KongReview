@@ -407,16 +407,6 @@ extension AppDatabase {
         }
     }
 
-    /// 模板编辑器的示例卡：这个笔记类型下第一张有字段的卡（不读出全部卡片）
-    func sampleCard(noteType: String) throws -> Card? {
-        try writer.read { db in
-            try Card.fetchOne(db, sql: """
-                SELECT * FROM card WHERE noteType = ? AND deletedAt IS NULL AND fields IS NOT NULL AND fields NOT IN ('', '[]')
-                ORDER BY id LIMIT 1
-                """, arguments: [noteType])
-        }
-    }
-
     func cardCount(noteType: String) throws -> Int {
         try writer.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM card WHERE noteType = ? AND deletedAt IS NULL", arguments: [noteType]) ?? 0 }
     }

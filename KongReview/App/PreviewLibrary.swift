@@ -180,7 +180,11 @@ import KongReviewCore
             for (i, text) in ["新录示例：君子不器。", "新录示例：吾日三省吾身。"].enumerated() {
                 _ = try db.save(Highlight(sourceId: sources[0].id, text: text, location: "第 \(i + 20) 页", createdAt: day(-1, hour: 21)))
             }
-            let second = try db.save(Highlight(sourceId: sources[1].id, text: "新录示例：士不可以不弘毅，任重而道远。", location: "第 31 页", createdAt: day(-4, hour: 21)))
+            // 6.3.6：这一条带译文与按语（含粗体、列表），今天排在摘录题最前，预览里能看到日课展开后的排版
+            let second = try db.save(Highlight(sourceId: sources[1].id, text: "新录示例：士不可以不弘毅，任重而道远。",
+                                               translation: "读书人不可以不志向宏大而意志坚强，因为担子重、路程远。",
+                                               note: "**弘**言其量，**毅**言其守。\n\n- 朱注：非弘不能胜其重，非毅无以致其远\n- 可与“士志于道”章对读",
+                                               location: "第 31 页", createdAt: day(-4, hour: 21)))
             try db.recordExamResult(kind: .gist, recordId: second.id!, result: .partly, now: day(-3, hour: 20))
             let fresh = try db.examFreshCandidates(now: now, limit: ExamFresh.defaultPerDay)
             ExamFresh.Session(day: ReviewSessionRecord.dayString(now), rounds: Dictionary(fresh.map { ($0.id, $0.round) }, uniquingKeysWith: { a, _ in a })).save()

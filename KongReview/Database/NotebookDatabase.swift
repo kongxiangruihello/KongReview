@@ -154,12 +154,6 @@ extension AppDatabase {
         }
     }
 
-    func setBlockPosition(_ id: Int64, position: Double) throws {
-        try writer.write { db in
-            try db.execute(sql: "UPDATE notebook_block SET position = ? WHERE id = ?", arguments: [position, id])
-        }
-    }
-
     func deleteBlocks(_ ids: [Int64], now: Date = Date()) throws {
         try writer.write { db in
             for b in try NotebookBlock.fetchAll(db, keys: ids) {
