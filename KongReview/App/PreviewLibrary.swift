@@ -178,13 +178,13 @@ import KongReviewCore
             for id in ids.prefix(4) { db.log(ReviewEvent(kind: .keep, highlightId: id, at: now.addingTimeInterval(-600))) }
             // 6.0.8：两条昨天新录的、一条四天前录且三天前考过一次的，排在已答的 4 条之后（与正式组卷的次序相同）
             for (i, text) in ["新录示例：君子不器。", "新录示例：吾日三省吾身。"].enumerated() {
-                // 6.3.6：第一条带译文与按语（含粗体、列表），预览里能看到日课展开后的排版
-                _ = try db.save(Highlight(sourceId: sources[0].id, text: text,
-                                          translation: i == 0 ? "君子不像器皿那样，只有一种用途。" : nil,
-                                          note: i == 0 ? "**器**者各适其用而不能相通。\n\n- 朱注：成德之士，体无不具\n- 可与“君子不器”之通才论对读" : nil,
-                                          location: "第 \(i + 20) 页", createdAt: day(-1, hour: 21)))
+                _ = try db.save(Highlight(sourceId: sources[0].id, text: text, location: "第 \(i + 20) 页", createdAt: day(-1, hour: 21)))
             }
-            let second = try db.save(Highlight(sourceId: sources[1].id, text: "新录示例：士不可以不弘毅，任重而道远。", location: "第 31 页", createdAt: day(-4, hour: 21)))
+            // 6.3.6：这一条带译文与按语（含粗体、列表），今天排在摘录题最前，预览里能看到日课展开后的排版
+            let second = try db.save(Highlight(sourceId: sources[1].id, text: "新录示例：士不可以不弘毅，任重而道远。",
+                                               translation: "读书人不可以不志向宏大而意志坚强，因为担子重、路程远。",
+                                               note: "**弘**言其量，**毅**言其守。\n\n- 朱注：非弘不能胜其重，非毅无以致其远\n- 可与“士志于道”章对读",
+                                               location: "第 31 页", createdAt: day(-4, hour: 21)))
             try db.recordExamResult(kind: .gist, recordId: second.id!, result: .partly, now: day(-3, hour: 20))
             let fresh = try db.examFreshCandidates(now: now, limit: ExamFresh.defaultPerDay)
             ExamFresh.Session(day: ReviewSessionRecord.dayString(now), rounds: Dictionary(fresh.map { ($0.id, $0.round) }, uniquingKeysWith: { a, _ in a })).save()
