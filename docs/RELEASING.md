@@ -18,3 +18,11 @@
 签名：钥匙串里有“KongReview Local Signing”（或 KongSeek / KongFetch 的同名证书）时 `Tools/build-app.sh` 用它签名，更新后 macOS 仍当作同一个应用；没有则本机签名（ad hoc）。
 
 DMG 仍可用 `./Tools/build-dmg.sh` 生成（内部调用 `Tools/build-app.sh`），用于拷到别的 Mac。
+
+## 让更新快：测过、编过的不再重来（6.3.0、6.3.1；6.4.2 改了认法）
+
+`Tools/build-app.sh` 给“会进程序和测试的源码”（`KongReview`、`KongReviewTests`、`Packages`、`Package.swift`、`Package.resolved`、`Tools`、`Web`）算一个指纹。这份源码在本机测过（记在 `~/Library/Caches/KongReview-updates/tested-trees.txt`）就不再测，编过（`builds/` 里）就不再编。所以合并前在作者的 Mac 上跑一遍“测试KongReview.command”（它会测试并打安装包），合并后的更新只要几秒到十几秒。
+
+- 测完之后可以再补说明文档、验证记录、README；**不要再改上面那几个路径里的东西**，改了就要重新跑一遍测试脚本，否则更新时会从头测、从头编（约两分钟）。
+- “测试KongReview.command”里算指纹的那一行必须与 `Tools/build-app.sh` 一致。
+
