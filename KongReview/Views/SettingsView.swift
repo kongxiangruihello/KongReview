@@ -131,18 +131,16 @@ private struct ReviewSettings: View {
                 Text("新录的摘录（含今日标注划出的、从 KongFolio 导入的）录进来的第二天起练第 1 次，隔两天练第 2 次，之后回到平常的抽样；排在补练之后，占摘录题的名额；先出到了第 2 次的，再出先录的（6.3.4 起），一次进来很多时其余往后顺延。30 天内录的才算；整篇存进来的文章归“今日标注”。改动从明天开始生效。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Stepper("论证题（札记）：\(revisitNotes) 道", value: $revisitNotes, in: 0...10)
-                Stepper("进展题（未解决的问题）：\(revisitQuestions) 道", value: $revisitQuestions, in: 0...10)
-                Stepper("解答题（已解决的问题）：\(revisitAnswers) 道", value: $revisitAnswers, in: 0...10)
-                Stepper("复述题（笔记）：\(revisitBlocks) 道", value: $revisitBlocks, in: 0...10)
-                Text("札记与笔记按 7、21、60、180、365 天的间隔回来，改过的札记、需重读的笔记从头算；笔记指专题笔记本里自己写的、至少 20 字的文字段落。问题簿里未解决的问题（待研究、有线索）出进展题：「常念」的约每周一次，其余按 7、21、60…… 天回来；已解决、写了解答（或指向一条札记）的出解答题：给问题、想答案，按 7、21、60、180、365 天回来，忘了的两天后再来；搁置的不出。设为 0 即不出这一类。")
+                // 6.4.0：问题簿、专题笔记本已并入札记，只留这一项
+                Stepper("论证题（札记）：\(revisitNotes) 道", value: $revisitNotes, in: 0...20)
+                Text("札记按 7、21、60、180、365 天的间隔回来，改过的从头算。6.4.0 起问题簿里的问题、专题笔记本里的各节都已并入札记，原先的进展题、解答题、复述题不再单出；并入时这里的题数已改为原来四项之和。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("每天做多久") {
                 Stepper(examMinutes == 0 ? "不限时长（各类按上面的题数出）" : "每天约 \(examMinutes) 分钟", value: $examMinutes, in: 0...240, step: 5)
-                Text("设了时长，当天第一次排日课时按这个次序分配：补练的摘录 → 到期的记忆卡 → 札记 → 笔记 → 问题 → 其余摘录（每道约 20 秒到 2 分钟估算）；超出的题顺延到明天，日课做完时可以“再做 10 分钟”。标注文章另算。日课上忘了的题会在课末再练一次（不另占时长）。")
+                Text("设了时长，当天第一次排日课时按这个次序分配：补练的摘录 → 到期的记忆卡 → 札记 → 其余摘录（每道约 20 秒到 2 分钟估算）；超出的题顺延到明天，日课做完时可以“再做 10 分钟”。标注文章另算。日课上忘了的题会在课末再练一次（不另占时长）。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

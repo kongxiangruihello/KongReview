@@ -389,7 +389,7 @@ extension FullBackupService {
         "reminder.hour": 0...23, "reminder.minute": 0...59,
         // 6.1.1：今日试卷的题数与时长也随完整备份走（换电脑、预览载入备份时卷面一样）
         "exam.minutesPerDay": 0...240, "exam.freshPerDay": 0...10, "annotate.perDay": 0...20,
-        "revisit.notesPerDay": 0...10, "revisit.questionsPerDay": 0...10, "revisit.blocksPerDay": 0...10, "revisit.answersPerDay": 0...10
+        "revisit.notesPerDay": 0...20, "revisit.questionsPerDay": 0...10, "revisit.blocksPerDay": 0...10, "revisit.answersPerDay": 0...10
     ]
     static let stringPreferenceKeys: Set<String> = [
         "editor.pasteStyle", "cards.fsrsInfo", "cards.syncFromHighlight", "citation.style", "sidebar.sourceSort", "hotkey.preset", "hotkey.lookup", "hotkey.note"

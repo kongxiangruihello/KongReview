@@ -215,7 +215,7 @@ struct PageRangeSheet: View {
                         ReadingNotesExport.export(store: store, sourceId: draft.sourceId, format: .docx, pages: r)
                     }
                 }
-                action("在列表中选中", "checklist", "选中后用工具栏的“批量操作”：加标签、移到出处、加入笔记本、弃置……") {
+                action("在列表中选中", "checklist", "选中后用工具栏的“批量操作”：加标签、移到出处、加入札记、弃置……") {
                     if let r = range { store.selectPageRange(draft.sourceId, r) }
                 }
             }

@@ -69,6 +69,8 @@ final class AppDatabase {
             try migrator.migrate(writer)
             // 4.1.1：旧版本或旧备份里遗留的专题问题，打开时补转入问题簿
             _ = try convertLegacyTopicQuestions()
+            // 6.4.0：补转入的问题随即并入札记
+            _ = try mergeIntoIdeaNotes()
         }
     }
 
@@ -97,6 +99,7 @@ final class AppDatabase {
     func migrateIfNeeded() throws {
         try migrator.migrate(writer)
         _ = try convertLegacyTopicQuestions()
+        _ = try mergeIntoIdeaNotes()
     }
 
     static func makeShared() throws -> AppDatabase {
@@ -483,6 +486,10 @@ final class AppDatabase {
         // 6.2：对照要点——自评准不准
         m.registerMigration("v29-exam-calibration") { db in
             try AppDatabase.installExamCalibration(in: db)
+        }
+        // 6.4.0：问题簿、专题笔记本并入札记（原来的行归档在 merged_* 各表，来历记在 idea_note_origin）
+        m.registerMigration("v30-notes-merge") { db in
+            try AppDatabase.installNotesMerge(in: db)
         }
         return m
     }

@@ -548,14 +548,13 @@ struct AddToNotebookMenu: View {
     let ids: [Int64]
 
     var body: some View {
-        Menu("加入专题笔记本") {
-            ForEach(store.notebooks) { n in
-                if let nid = n.id {
-                    Button(n.title) { store.addHighlights(ids, toNotebook: nid) }
-                }
+        // 6.4.0：专题笔记本已并入札记——改为加入最近的札记
+        let recent = (try? store.db.recentIdeaNotes(limit: 15)) ?? []
+        Menu("加入札记") {
+            if recent.isEmpty { Text("还没有札记") }
+            ForEach(recent) { note in
+                Button(note.title) { store.addHighlights(ids, toIdeaNote: note.id) }
             }
-            if !store.notebooks.isEmpty { Divider() }
-            Button("新建笔记本…") { store.newNotebookRequest = NewNotebookRequest(highlightIDs: ids) }
         }
     }
 }

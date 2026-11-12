@@ -273,6 +273,8 @@ import KongReviewCore
             UserDefaults.standard.removeObject(forKey: ExamFresh.perDayKey)
             // 每次打开都从“不限时长”开始（设置里改过的不带进下一次预览）
             UserDefaults.standard.removeObject(forKey: ExamSettings.minutesKey)
+            // 6.4.0：示例里的问题簿、专题笔记本照正式库那样并入札记
+            _ = try db.mergeIntoIdeaNotes()
             let store = LibraryStore(db: db, draftPersistence: nil, positionDefaults: nil)
             store.journeyNavigation.period = .week
             return store

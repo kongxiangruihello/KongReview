@@ -33,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         QuickCaptureController.shared.store?.runStartupMaintenance()
         // 6.0.1：第一次打开时导出舍弃功能里的内容，并留一份数据库快照
         QuickCaptureController.shared.store?.runSlimUpgradeIfNeeded()
+        // 6.4.0：问题簿、专题笔记本并入札记后说明一次，并把札记每天的题数改为原来四项之和
+        QuickCaptureController.shared.store?.runNotesMergeNoticeIfNeeded()
 
         // 提醒与“今天是否已回顾”挂钩：首次回顾后、跨日时重排通知
         QuickCaptureController.shared.store?.onReviewedToday = {

@@ -25,7 +25,7 @@ enum DailyCheckGroup: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .review: "摘录"
         case .cards: "记忆卡"
-        case .revisit: "札记 · 笔记 · 问题"
+        case .revisit: "札记"
         case .selfTest: "自测"
         case .annotate: "标注文章"
         }

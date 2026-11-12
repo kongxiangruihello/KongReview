@@ -531,9 +531,6 @@ struct DailyReviewView: View {
             CardIconButton(icon: "lightbulb", help: "记札记（Z）：新写一条引用这条摘录的札记，或加入已有札记") {
                 store.composeIdeaNote(highlight: h)
             }
-            CardIconButton(icon: "questionmark.bubble", help: "挂到问题（Q）：把这条摘录挂到问题簿里的某个问题下，或当场新建问题") {
-                store.attachToQuestion(kind: .highlight, recordId: h.id, preview: h.text)
-            }
             CardIconButton(icon: "square.and.pencil", help: "就地编辑（E）；按住 ⌥ 点击打开编辑面板") {
                 if NSEvent.modifierFlags.contains(.option) { store.edit(h) } else { startInlineEdit(h) }
             }
@@ -575,15 +572,15 @@ struct DailyReviewView: View {
                     .foregroundStyle(ReviewPalette.sub)
                     .frame(width: 28, height: 26)
                     .contentShape(Rectangle())
-                    .help("复制、分享或加入专题笔记本")
+                    .help("复制、分享或加入札记")
             }
             .menuStyle(.borderlessButton)
             .handCursor()
             .menuIndicator(.hidden)
             .fixedSize()
             .frame(width: 28, height: 26)
-            .help("复制、分享或加入专题笔记本")
-            .accessibilityLabel("复制、分享或加入专题笔记本")
+            .help("复制、分享或加入札记")
+            .accessibilityLabel("复制、分享或加入札记")
         }
     }
 
@@ -675,7 +672,6 @@ struct DailyReviewView: View {
                 Button("") { store.startCloze(for: card.highlight) }.keyboardShortcut(key("c"))
                 Button("") { state.showRelated.toggle() }.keyboardShortcut(key("r"))
                 Button("") { store.composeIdeaNote(highlight: card.highlight) }.keyboardShortcut(key("z"))
-                Button("") { store.attachToQuestion(kind: .highlight, recordId: card.highlight.id, preview: card.highlight.text) }.keyboardShortcut(key("q"))
             }
             .opacity(0)
             .allowsHitTesting(false)

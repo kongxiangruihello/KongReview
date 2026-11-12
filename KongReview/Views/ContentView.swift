@@ -36,7 +36,7 @@ struct ContentView: View {
                 Button { store.showGlobalSearch() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
                     .disabled(!store.canShowGlobalSearch)
                     .handCursor()
-                    .help("查找摘录、记忆卡、出处、札记和问题（⌘⇧F）")
+                    .help("查找摘录、记忆卡、出处和札记（⌘⇧F）")
             }
         }
         // 5.2.1：在线更新
@@ -329,40 +329,7 @@ struct SidebarView: View {
                 .sidebarMenuRow()
                 .tag(SidebarItem.ideaNotes)
                 .contextMenu { Button("新写札记…") { store.composeIdeaNote() } }
-                // 4.1.1：问题簿——行尾为未解决的问题数
-                HStack {
-                    Label("问题簿", systemImage: "questionmark.bubble")
-                    Spacer()
-                    if store.openQuestionCount > 0 { SidebarCount(store.openQuestionCount) }
-                }
-                .sidebarMenuRow()
-                .tag(SidebarItem.questionBook)
-                .contextMenu { Button("记一个问题…") { store.newQuestion() } }
-                // 专题笔记本
-                ForEach(store.notebooks) { n in
-                    if let id = n.id {
-                        HStack {
-                            Label(n.title, systemImage: "text.book.closed").lineLimit(1)
-                            Spacer()
-                            SidebarCount(store.notebookQuoteCounts[id] ?? 0)
-                        }
-                        .sidebarMenuRow()
-                        .tag(SidebarItem.notebook(id))
-                        .contextMenu {
-                            Button("删除笔记本…", role: .destructive) { store.notebookPendingDeletion = n }
-                        }
-                    }
-                }
-                if store.notebooks.isEmpty {
-                    Button {
-                        store.newNotebookRequest = NewNotebookRequest()
-                    } label: {
-                        Label("新建专题笔记本…", systemImage: "plus")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .sidebarMenuRow()
-                }
+                // 6.4.0：问题簿、专题笔记本已并入札记，侧栏不再单列
             } header: {
                 HStack {
                     Text("题库")
@@ -372,7 +339,7 @@ struct SidebarView: View {
                         .menuIndicator(.hidden)
                         .fixedSize()
                         .handCursor()
-                        .help("新建摘录、添加网页、记忆卡、札记、问题、专题笔记本、出处，或导入")
+                        .help("新建摘录、添加网页、记忆卡、札记、出处，或导入")
                 }
             }
 
@@ -453,7 +420,7 @@ struct SidebarView: View {
             ToolbarItem {
                 Menu { AddEverythingMenu() } label: { Label("新建", systemImage: "plus") }
                     .menuIndicator(.hidden)
-                    .help("新建摘录（⌘N）、添加网页（⌘L）、记忆卡、札记、问题、专题笔记本、出处，或导入")
+                    .help("新建摘录（⌘N）、添加网页（⌘L）、记忆卡、札记、出处，或导入")
             }
         }
     }
@@ -555,8 +522,6 @@ struct AddEverythingMenu: View {
                 Button { store.showsCardBulkEntry = true } label: { Label("批量粘贴问答（记忆卡）…", systemImage: "list.bullet.rectangle") }
                 Button { store.composeIdeaNote() } label: { Label("新写札记…", systemImage: "lightbulb") }
                 Button { QuickNoteController.shared.show() } label: { Label("随手札记浮窗（⌥⌘J）", systemImage: "square.and.pencil") }
-                Button { store.newQuestion() } label: { Label("记一个问题…", systemImage: "questionmark.circle") }
-                Button { store.newNotebookRequest = NewNotebookRequest() } label: { Label("新建专题笔记本…", systemImage: "text.book.closed") }
                 Button { store.editingSource = Source(title: "") } label: { Label("新建出处…", systemImage: "books.vertical") }
             }
             Section("导入") {

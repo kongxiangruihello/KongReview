@@ -65,7 +65,6 @@ struct KongReviewApp: App {
                 // 6.2：随手札记浮窗，写完不离开当前页面（如今日试卷）
                 Button("随手札记浮窗") { QuickNoteController.shared.show() }
                     .keyboardShortcut("j", modifiers: [.command, .option])
-                Button("新建专题笔记本…") { store.newNotebookRequest = NewNotebookRequest() }
                 Button("新建出处") {
                     store.editingSource = Source(title: "")
                 }
