@@ -8,6 +8,9 @@ final class V640NotesMergeTests: XCTestCase {
     private let t0 = Calendar.current.date(byAdding: .hour, value: 9, to: Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_790_000_000)))!
     private func d(_ n: Int) -> Date { Calendar.current.date(byAdding: .day, value: n, to: t0)! }
 
+    override func setUp() { super.setUp(); NotesMergeSwitch.onOpen = true }
+    override func tearDown() { NotesMergeSwitch.onOpen = false; super.tearDown() }
+
     private func notes(_ db: AppDatabase) throws -> [IdeaNote] {
         try db.writer.read { try IdeaNote.fetchAll($0, sql: "SELECT * FROM idea_note ORDER BY id") }
     }

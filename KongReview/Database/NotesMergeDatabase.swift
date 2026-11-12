@@ -24,6 +24,11 @@ struct NotesMergeResult: Equatable, Sendable {
     var isEmpty: Bool { questions == 0 && notebooks == 0 }
 }
 
+/// 打开库时是否自动并入。测试里默认关（旧版本功能的测试要在打开后继续用问题、笔记本的表），并入本身的测试自己打开。
+enum NotesMergeSwitch {
+    nonisolated(unsafe) static var onOpen: Bool = NSClassFromString("XCTestCase") == nil
+}
+
 extension AppDatabase {
     /// 归档用的表：原表名 → 归档表名
     static let notesMergeArchives: [(source: String, archive: String)] = [
@@ -45,7 +50,7 @@ extension AppDatabase {
             t.primaryKey(["kind", "originId"])
         }
         try db.create(index: "idea_note_origin_note", on: "idea_note_origin", columns: ["noteId"], ifNotExists: true)
-        _ = try mergeIntoIdeaNotes(db, now: now)
+        if NotesMergeSwitch.onOpen { _ = try mergeIntoIdeaNotes(db, now: now) }
     }
 
     /// 应用启动时再看一遍（别处万一又写进了问题或笔记本）

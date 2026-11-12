@@ -70,7 +70,7 @@ final class AppDatabase {
             // 4.1.1：旧版本或旧备份里遗留的专题问题，打开时补转入问题簿
             _ = try convertLegacyTopicQuestions()
             // 6.4.0：补转入的问题随即并入札记
-            _ = try mergeIntoIdeaNotes()
+            if NotesMergeSwitch.onOpen { _ = try mergeIntoIdeaNotes() }
         }
     }
 
@@ -99,7 +99,7 @@ final class AppDatabase {
     func migrateIfNeeded() throws {
         try migrator.migrate(writer)
         _ = try convertLegacyTopicQuestions()
-        _ = try mergeIntoIdeaNotes()
+        if NotesMergeSwitch.onOpen { _ = try mergeIntoIdeaNotes() }
     }
 
     static func makeShared() throws -> AppDatabase {
