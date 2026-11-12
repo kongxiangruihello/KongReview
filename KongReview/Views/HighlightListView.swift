@@ -221,15 +221,31 @@ struct HighlightListView: View {
                     }
                     .help("彻底删除最近删除中的全部摘录，包括其他页和搜索未显示的内容（无法恢复）")
                     .disabled(store.trashCount == 0)
+                } else if state.selection.count == 1, let id = state.selection.first {
+                    // 6.4.0：选中一条时，铅笔按钮编辑这一条（此前总是新建，打开的是空白面板）
+                    Button {
+                        editSelected(id)
+                    } label: {
+                        Label("编辑选中的摘录", systemImage: "square.and.pencil")
+                    }
+                    .help("编辑选中的这条摘录（双击、右键“编辑…”也可以）；新建按 ⌘N")
                 } else {
                     Button {
                         store.newHighlight(in: filter.sourceId)
                     } label: {
-                        Label("新建摘录", systemImage: "square.and.pencil")
+                        Label("新建摘录", systemImage: "plus.square")
                     }
+                    .help("新建摘录（⌘N）；先选中一条，这里变成编辑")
                 }
             }
         }
+    }
+
+    /// 6.4.0：按编号打开编辑面板（列表里找不到这一行时从库里取）
+    private func editSelected(_ id: Int64) {
+        guard let h = state.items.first(where: { $0.id == id }) ?? (try? store.db.highlight(id: id)) else { return }
+        state.rememberEditing(id)
+        store.edit(h)
     }
 
     @ViewBuilder
@@ -237,6 +253,11 @@ struct HighlightListView: View {
         if !batchOnly, ids.count == 1, let h = state.items.first(where: { $0.id == ids[0] }) {
             HighlightMenu(highlight: h)
         } else if !ids.isEmpty {
+            // 6.4.0：只选了一条时，批量菜单最上面也有“编辑…”
+            if ids.count == 1, !filter.deletedOnly {
+                Button("编辑…") { editSelected(ids[0]) }
+                Divider()
+            }
             BatchMenu(ids: ids, inTrash: filter.deletedOnly)
         }
     }

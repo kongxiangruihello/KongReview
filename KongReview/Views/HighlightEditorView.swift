@@ -119,22 +119,6 @@ struct HighlightEditorView: View {
                                 .disabled((draftBinding.wrappedValue.highlight.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                 .help("以按语为底稿写一条独立的札记，并引用这条摘录；按语本身不变")
                         }
-                        // 4.1.1：挂着这条摘录的问题
-                        let questions = store.questionsHolding(.highlight, [hid])[hid] ?? []
-                        HStack(spacing: 8) {
-                            if !questions.isEmpty {
-                                Text("挂在问题下：" + questions.prefix(3).map { "“\($0.title)”（\($0.status.title)）" }.joined(separator: "")
-                                     + (questions.count > 3 ? " 等 \(questions.count) 个" : ""))
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                            Spacer()
-                            Button("挂到问题…") {
-                                questionAttach = QuestionAttachRequest(kind: .highlight, recordId: hid,
-                                                                       preview: String(Markdown.plainText(fromHTML: draftBinding.wrappedValue.highlight.text).prefix(60)))
-                            }
-                                .controlSize(.small)
-                                .help("把这条摘录挂到问题簿里的某个问题下，或新建问题")
-                        }
                     }
                 }
 

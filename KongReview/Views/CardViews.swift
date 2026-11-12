@@ -461,13 +461,6 @@ struct StudyView: View {
                 }
                 CardIconButton(icon: "text.quote", help: "原摘录（出处、按语、标签）") { store.openHighlight(of: card) }
             }
-            // 4.1.1：显示答案后可把这张卡挂到问题下
-            if study.showingAnswer {
-                CardIconButton(icon: "questionmark.bubble", help: "挂到问题（Q）：把这张卡挂到问题簿里的某个问题下") {
-                    store.attachToQuestion(kind: .card, recordId: card.id, preview: card.front)
-                }
-                .keyboardShortcut(selfAnswerEditing ? nil : KeyboardShortcut("q",modifiers:[]))
-            }
             CardIconButton(icon: "square.and.pencil", help: "编辑这张卡（E）") { store.editCard(card) }
                 .keyboardShortcut(selfAnswerEditing ? nil : KeyboardShortcut("e",modifiers:[]))
             CardIconButton(icon: "pause.circle", help: "暂停这张卡：不再出现在学习中，可在“浏览”里恢复") {

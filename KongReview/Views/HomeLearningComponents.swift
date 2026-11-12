@@ -77,7 +77,7 @@ struct TodayWorkBar: View {
             step(1, "摘录", reviewLeft, unit: "题", done: summary.reviewCompletedCount)
             step(2, "记忆卡", cardsLeft, unit: "题", done: summary.cardsStudiedCount)
             if revisitLeft > 0 || revisit.done > 0 {
-                step(3, "札记·笔记·问题", revisitLeft, unit: "题", done: revisit.done)
+                step(3, "札记", revisitLeft, unit: "题", done: revisit.done)
             }
             if annotate.total > 0 {
                 step(revisitLeft > 0 || revisit.done > 0 ? 4 : 3, "标注文章", annotate.left, unit: "篇", done: annotate.done)
@@ -111,6 +111,6 @@ struct TodayWorkBar: View {
             .background(allDone ? ReviewPalette.soft : ReviewPalette.accent, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain).handCursor().fixedSize()
-        .help("五类题交错出在一张日课上：记忆卡、摘录、札记、笔记、问题")
+        .help("三类题交错出在一张日课上：记忆卡、摘录、札记")
     }
 }

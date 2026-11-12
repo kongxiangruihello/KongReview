@@ -165,8 +165,6 @@ struct IdeaNoteView: View {
                     .buttonStyle(.borderedProminent).controlSize(.small).handCursor()
                     .disabled(editing && WikiLinks.normalize(draftTitle).isEmpty)
                 Menu {
-                    Button("挂到问题…") { store.attachToQuestion(kind: .note, recordId: noteId, preview: d.note.title) }
-                    Divider()
                     Button("删除（可在“已删除”中恢复）", role: .destructive) { store.setIdeaNoteDeleted(noteId, true) }
                 } label: { Image(systemName: "ellipsis.circle") }
                     .menuStyle(.borderlessButton).fixedSize()

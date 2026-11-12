@@ -67,7 +67,7 @@ struct CardLearningCompletionView: View {
             }
             HStack(spacing: 8) {
                 if revisitLeft > 0 && summary.availability.kind != .ready {
-                    PillButton(icon: "list.clipboard", title: "回到今日日课 · 还有 \(revisitLeft) 道札记、笔记与问题", style: .primary, action: onRevisit)
+                    PillButton(icon: "list.clipboard", title: "回到今日日课 · 还有 \(revisitLeft) 道札记", style: .primary, action: onRevisit)
                 }
                 PillButton(icon: "chevron.left", title: "返回牌组", style: revisitLeft > 0 && summary.availability.kind != .ready ? .normal : .primary, action: onReturn)
                 PillButton(icon: "arrow.clockwise", title: summary.availability.kind == .ready ? "继续学习" : "再查一次", action: onResume)

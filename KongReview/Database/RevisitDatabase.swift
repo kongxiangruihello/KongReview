@@ -38,7 +38,7 @@ struct RevisitLimits: Equatable, Sendable {
 
     /// 6.0.9：进展题默认每天 2 道（未解决的问题都出，不只常念的），解答题默认 2 道
     static func saved(_ defaults: UserDefaults = .standard) -> RevisitLimits {
-        RevisitLimits(notes: max(0, min(10, defaults.object(forKey: notesKey) as? Int ?? 2)),
+        RevisitLimits(notes: max(0, min(20, defaults.object(forKey: notesKey) as? Int ?? 2)),
                       questions: max(0, min(10, defaults.object(forKey: questionsKey) as? Int ?? 2)),
                       books: SlimSwitch.featuresOff ? 0 : max(0, min(3, defaults.object(forKey: booksKey) as? Int ?? 1)),
                       blocks: max(0, min(10, defaults.object(forKey: blocksKey) as? Int ?? 2)),
