@@ -51,6 +51,11 @@ struct ContentView: View {
         .sheet(item: $store.editorDraft) { _ in
             HighlightEditorView().modifier(EditorDraftCloseConfirmation(kind: .highlight))
         }
+        // 6.4.1：标注面板挂在最外层——今日日课、摘录列表与回顾的右键菜单都能打开
+        .sheet(item: $store.annotating) { AnnotateSheet(request: $0).environment(store) }
+        .onChange(of: store.editorDraft == nil) { _, closed in
+            if closed { store.resumeAnnotationAfterEdit() }
+        }
         .sheet(item: $store.editingSource) { _ in
             SourceEditorView()
         }

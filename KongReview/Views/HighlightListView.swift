@@ -497,6 +497,8 @@ struct HighlightMenu: View {
     @ViewBuilder
     private var normalItems: some View {
         Button("编辑…") { store.edit(highlight) }
+        // 6.4.1：打开标注面板，在这条摘录的正文里划出要点（各存为同一出处下的新摘录）
+        Button("标注…") { store.openAnnotation(of: highlight) }
         Button("复制（含出处）") { copy(withCitation: true) }
         Button("复制为 Markdown") { copyMarkdown() }
         Divider()
