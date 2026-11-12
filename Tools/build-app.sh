@@ -40,10 +40,16 @@ fi
 xcrun swift --version 2>&1 | head -1
 
 # 6.3：同一份源码（git 树）在本机用同一版 Swift 测过、全部通过，就不再测一遍（“测试KongReview.command”与这里都记）。
-# 树相同即每个文件都相同；GitHub 上合并 PR 产生的提交，树与测过的分支末端相同。
+# 源码部分相同即程序与测试的每个文件都相同；GitHub 上合并 PR 产生的提交，这部分与测过的分支末端相同。
 tested_file="$HOME/Library/Caches/KongReview-updates/tested-trees.txt"
 mkdir -p "$(dirname "$tested_file")"
-tree="$(git -C "$root" rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
+# 6.4.2：只看会进程序和测试的那部分源码（下面这几个路径），说明文档、验证记录、README 改了不算换了源码。
+# 此前按整棵树算，测完再补一份验证记录，合并后的“立即更新”就认不出测过、编过，又从头测、从头编（约两分钟）。
+# 这一行与“测试KongReview.command”里的写法必须一致。
+source_paths=(KongReview KongReviewTests Packages Package.swift Package.resolved Tools Web)
+listing="$(git -C "$root" ls-tree HEAD -- "${source_paths[@]}" 2>/dev/null || true)"
+tree=""
+[[ -n "$listing" ]] && tree="$(printf '%s\n' "$listing" | shasum | cut -c1-40)"
 swift_id="$(xcrun swift --version 2>&1 | head -1 | shasum | cut -c1-12)"
 stamp="$tree $swift_id"
 clean=0
