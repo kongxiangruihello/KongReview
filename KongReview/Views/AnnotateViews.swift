@@ -87,12 +87,18 @@ struct AnnotateSheet: View {
                     ReaderBridge.shared.sendSelection()
                 } label: { Label("划为摘录", systemImage: "highlighter") }
                 .help("把选中的文字存为一条摘录（也可直接按 H）")
+                // 6.4.1：编辑这篇的原文、出处、按语（原来的摘录编辑窗口），保存后回到这里
+                Button {
+                    store.editFromAnnotation(request)
+                } label: { Label("编辑", systemImage: "square.and.pencil") }
+                .keyboardShortcut("e", modifiers: .command)
+                .help("编辑这篇（⌘E）：打开摘录的编辑窗口，改完保存或取消后回到标注")
                 Button {
                     store.finishAnnotation(request.articleId)
-                    store.openNextAnnotation(after: request.articleId)
+                    if request.fromMenu { store.annotating = nil } else { store.openNextAnnotation(after: request.articleId) }
                 } label: { Label("这篇标完了", systemImage: "checkmark") }
                 .keyboardShortcut(.return, modifiers: .command)
-                .help("看完了，划了几条都行（⌘↩）；接着打开下一篇")
+                .help(request.fromMenu ? "看完了，划了几条都行（⌘↩）" : "看完了，划了几条都行（⌘↩）；接着打开下一篇")
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 20).padding(.vertical, 12)

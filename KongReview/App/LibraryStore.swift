@@ -117,6 +117,8 @@ final class LibraryStore {
     /// 6.0.4：今天要标注的文章，与正在标注的一篇
     var annotate = AnnotateToday.empty
     var annotating: AnnotateRequest?
+    /// 6.4.1：从标注面板去编辑这篇，编辑面板关掉后回到标注面板
+    var annotateAfterEdit: AnnotateRequest?
     /// 5.2.2：打卡天数；打卡状态变化后由提醒模块重排晚间打卡提醒
     var checkin = CheckinSummary.empty
     @ObservationIgnored var onCheckinChanged: (() -> Void)?

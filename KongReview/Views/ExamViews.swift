@@ -58,7 +58,6 @@ struct ExamView: View {
         }
         .background(ReviewPalette.page)
         .navigationTitle("今日日课")
-        .sheet(item: Bindable(store).annotating) { AnnotateSheet(request: $0) }
         .task(id: "\(store.today)|\(reload)") { load() }
         // 6.3.2：在原来的编辑窗口里改了记忆卡、摘录，保存后卷面换成改过的内容
         .onChange(of: store.revision) {
